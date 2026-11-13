@@ -16,12 +16,10 @@ if [ "${1:-}" = --install ]; then
   exit 0
 fi
 out=""
-# by published port AND image name (inspect's Config.Image keeps the name of digest-pinned images, docker ps shows a bare id),
-# so an unrelated container on :8080 is left alone
+# by published port AND image name, so an unrelated container on :8080 is left alone
+. "$HERE/lib-docker.sh"
 for e in halogen:8731 gufo:8080; do
-  ids=$(for i in $(docker ps -q --filter "publish=${e#*:}" 2>/dev/null); do
-    docker inspect -f '{{.Config.Image}}' "$i" 2>/dev/null | grep -qi "${e%%:*}" && echo "$i"
-  done)
+  ids=$(container_ids "${e#*:}" "${e%%:*}")
   [ -n "$ids" ] && docker stop -t 30 $ids >/dev/null 2>&1 && out+="${e%%:*} stopped. "
 done
 # Strata runs as a plain process (serve/server.py), not a container

@@ -12,6 +12,7 @@ IMG=ghcr.io/$R
 PORT=8080
 URL=http://127.0.0.1:$PORT
 . "$REPO/scripts/lib-pins.sh"
+. "$REPO/scripts/lib-docker.sh"
 DEF_VER=$(grep -oE '^DEFAULT_VERSION=[0-9.]+' "$START" | cut -d= -f2)
 DEF_DIGEST=$(grep -oE '^DEFAULT_DIGEST=sha256:[0-9a-f]+' "$START" | cut -d= -f2)
 CUR=$(pin_value GUFO_VERSION "$DEF_VER")  # the pin in force: a stored upgrade on top of the launcher default, else the default
@@ -24,7 +25,7 @@ if [ -z "$TAG" ]; then
 fi
 [ "$TAG" = "$CUR" ] && { echo "already on $CUR - nothing to do"; exit 0; }
 # one big engine at a time: gufo and halogen share the GPU heap (device-lost if both run)
-[ -n "$(docker ps -q --filter publish=8731)" ] && { echo "FAIL: halogen is running - stop it first (gufo and halogen share the GPU memory)"; exit 1; }
+[ -n "$(container_ids 8731 halogen)" ] && { echo "FAIL: halogen is running - stop it first (gufo and halogen share the GPU memory)"; exit 1; }
 
 echo "[1/4] pulling $IMG:$TAG (pinned: $CUR)"
 docker pull "$IMG:$TAG" >/dev/null 2>&1 || { echo "FAIL: pull $IMG:$TAG"; exit 1; }
@@ -32,11 +33,11 @@ DIGEST=$(docker image inspect -f '{{index .RepoDigests 0}}' "$IMG:$TAG" 2>/dev/n
 case "$DIGEST" in sha256:*) ;; *) echo "FAIL: no registry digest for $IMG:$TAG"; exit 1 ;; esac
 echo "      upgrading $CUR -> $TAG"
 
-OLD_ID=$(docker ps -q --filter publish=$PORT)
+OLD_ID=$(container_ids $PORT gufo)
 WAS_UP=$([ -n "$OLD_ID" ] && echo 1 || echo 0)
 rollback(){
   echo "FAIL: $1 - rolling back to $CUR"
-  local id; id=$(docker ps -q --filter publish=$PORT)
+  local id; id=$(container_ids $PORT gufo)
   [ -n "$id" ] && docker stop -t 30 "$id" >/dev/null
   if [ "$WAS_UP" = 1 ]; then
     setsid nohup bash "$START" > "$LOG.rollback" 2>&1 < /dev/null &

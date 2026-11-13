@@ -46,6 +46,21 @@ assert up == ["strata"], up
 # gufo shares :8080: selectable by name once something answers there
 h.PROFILES["engines"]["gufo"]["port"] = srv.server_port
 assert h.pick_target(h.detect(), True, "gufo")[0] == "gufo"
+# `use gufo` while gufo is down plans the start (stop the holder, download, start) instead of printing "stop halogen first"
+gport = h.PROFILES["engines"]["gufo"]["port"]
+h.PROFILES["engines"]["gufo"]["port"] = 1  # nothing answers there
+real_plan = h.plan_start
+h.plan_start = lambda e, r, ask_start=True: {"stop": "halogen", "download": False, "weights": None, "for": e}
+assert h.pick_engine({"engines": []}, True, "gufo") == ("gufo", {"stop": "halogen", "download": False, "weights": None, "for": "gufo"})
+h.plan_start = lambda e, r, ask_start=True: None  # the user declined
+try:
+    h.pick_engine({"engines": []}, True, "gufo")
+    raise AssertionError("declined start must exit")
+except SystemExit as e:
+    assert "gufo is not answering" in str(e)
+h.plan_start = real_plan
+assert h.pick_engine({"engines": []}, True, "vllm") == ("vllm", None)  # no launcher: bring_up prints how to start it
+h.PROFILES["engines"]["gufo"]["port"] = gport
 # a real gufo (owned_by=gufo) is detected as gufo, not strata, and its context_length is read
 GUFO = True
 assert [e["engine"] for e in h.detect()["engines"] if e["port"] == srv.server_port] == ["gufo"]
@@ -376,6 +391,20 @@ assert h.saved_engine() == "halogen"
 open(f"{h.AGENT}/harness-pins", "w").write("BASE_GUFO_VERSION=0.32.0\nGUFO_VERSION=0.34.0\n")
 assert h.pin_value("GUFO_VERSION", "0.32.0") == "0.34.0" and h.pin_value("GUFO_VERSION", "0.40.0") == "0.40.0"
 h.AGENT = real_agent
+# declining "Continue?" (or Esc before it) puts every saved answer back; a file the questions created is removed again
+real_agent, h.AGENT = h.AGENT, tempfile.mkdtemp()
+open(f"{h.AGENT}/harness-sidecar", "w").write("1\n")
+snap = h.snapshot_answers()
+open(f"{h.AGENT}/harness-sidecar", "w").write("0\n"); open(f"{h.AGENT}/harness-weights", "w").write("abliterated\n")
+h.restore_answers(snap)
+assert open(f"{h.AGENT}/harness-sidecar").read() == "1\n" and not os.path.exists(f"{h.AGENT}/harness-weights")
+h.AGENT = real_agent
+# halogen and gufo containers are matched by image name, not port alone (docker is stubbed)
+real_run = h.subprocess.run
+img = {"a1": "ghcr.io/peonist-ai/halogen-flash-server:0.19.1@sha256:x", "b2": "nginx:latest"}
+h.subprocess.run = lambda c, **k: types.SimpleNamespace(returncode=0, stdout="a1\nb2\n" if c[1] == "ps" else img[c[-1]] + "\n")
+assert h.engine_containers("halogen") == ["a1"] and h.engine_containers("gufo") == [] and h.engine_containers("llamacpp") == ["a1", "b2"]
+h.subprocess.run = real_run
 # an engine that will not report its context: the guess is announced, not silent
 import io, contextlib
 buf = io.StringIO()

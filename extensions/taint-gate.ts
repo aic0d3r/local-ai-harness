@@ -9,8 +9,10 @@
  *     -> the session is "tainted" until the user's next message
  *   while tainted, a small set of risky calls needs a yes from the user:
  *     sending data out (curl -d/-F/-T/POST, nc, scp, rsync, ssh, git push), piping into a shell,
- *     reading or writing credentials (.env, ~/.ssh, ~/.aws, .netrc, auth.json), recursive rm
- *     outside the project. (File edits outside the project are allowed.)
+ *     downloading then running it, piping into an interpreter, adding a git remote,
+ *     reading or writing credentials (.env, ~/.ssh, ~/.aws, .netrc, auth.json), writing shell startup
+ *     files / git hooks / cron, recursive rm outside the project. (Other file edits outside the project
+ *     are allowed; `npm install` and plain GET requests are not gated, to keep prompts rare.)
  *   no UI to ask (print mode, subagents) -> the call is blocked with the reason.
  *
  * No NPU, no model, no phrasing to dodge. Everything else runs untouched, so ordinary work after
@@ -30,6 +32,11 @@ const SEND: [RegExp, string][] = [
 	[/\bcurl\b(?![^|;&\n]*(localhost|127\.0\.0\.1|\[::1\]))[^|;&\n]*(\s-d\b|\s-F\b|\s-T\b|--data|--form|--upload-file|-X\s*(POST|PUT|PATCH|DELETE))/i, "uploads data with curl"],
 	[/\bwget\b[^|;&\n]*(--post-data|--post-file|--method)/i, "uploads data with wget"],
 	[/\|\s*(sudo\s+)?(ba|z|da|k)?sh\b|\b(ba|z)?sh\s+<\(\s*(curl|wget)|\beval\s+"?\$\(\s*(curl|wget)/i, "pipes into a shell"],
+	// an interpreter with no script argument reads the program from the pipe; `| python3 -c ...` and `| node file.js` do not match
+	[/\|\s*(sudo\s+)?(python3?|node|perl|ruby|php)(\s+-)?\s*($|[;&|)])/i, "pipes into an interpreter"],
+	// download, then run or make executable what was downloaded (a localhost fetch is the test-my-own-server case)
+	[/\b(curl|wget)\b(?![^|;&\n]*(localhost|127\.0\.0\.1|\[::1\]))[^\n]*(&&|;)\s*(sudo\s+)?((ba|z|da|k)?sh|python3?|node|perl|ruby|chmod\s+\+x|\.\/\S)/i, "downloads something and runs it"],
+	[/\bgit\s+remote\s+(add|set-url)\b/, "points git at another remote"],
 	[/\b(nc|ncat|netcat|telnet|scp|sftp|rsync|ssh)\b|\/dev\/(tcp|udp)\//, "opens a connection / copies to another machine"],
 	[/\bgit\s+push\b[^|;&\n]*(\s-f\b|--force|--delete|\s-d\b|\s\+\S|--mirror)/, "force-pushes or deletes remote refs"],
 ];
@@ -37,6 +44,8 @@ const SEND: [RegExp, string][] = [
 const DOTENV = /(^|[\s/"'=~])\.env(?![\w-]*\.?(example|sample|template)\b)(\b|$)/;
 const WRITEISH = /[^<]>|\btee\b|\bsed\s+-i|\b(mv|cp|rm|truncate|shred)\b/; // reading .env is fine, changing it is not
 const SECRET = /\.ssh\/|\bid_(rsa|ed25519|ecdsa)\b|\.aws\/|\.netrc\b|\.npmrc\b|\.pypirc\b|\.gnupg\b|\.pi\/agent\/auth|auth\.json\b|\.config\/gh\/hosts/;
+// files that run later with the user's rights: shell startup files, git hooks, cron, autostart
+const STARTUP = /(^|[\s/"'=~])\.(bashrc|zshrc|bash_profile|zprofile|zshenv|profile)\b|\.git\/hooks\/|\bcrontab\b|\.config\/autostart|\/etc\/(profile|cron|systemd)/;
 const ENV_DUMP = /(^|[;&|]\s*)(printenv|env)\s*($|[|;&>])/;
 const RM_RECURSIVE = /\brm\s+(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)\b[^;&|\n]*/;
 const WIPE = /\b(mkfs(\.\w+)?|dd\s+[^|;&\n]*of=\/dev\/)\b/;
@@ -50,6 +59,7 @@ export function riskyAfterOutside(toolName: string, input: any, cwd: string): st
 		const cmd = String(input?.command ?? "");
 		for (const [re, why] of SEND) if (re.test(cmd)) return why;
 		if (SECRET.test(cmd) || (DOTENV.test(cmd) && WRITEISH.test(cmd)) || ENV_DUMP.test(cmd)) return "touches credentials or dumps the environment";
+		if (STARTUP.test(cmd) && (WRITEISH.test(cmd) || /\bchmod\b|\bcrontab\b(?!\s+-l\b)/.test(cmd))) return "changes a shell startup file, git hook or cron job";
 		if (WIPE.test(cmd)) return "formats or overwrites a disk";
 		const rm = RM_RECURSIVE.exec(cmd);
 		if (rm) {
@@ -64,6 +74,7 @@ export function riskyAfterOutside(toolName: string, input: any, cwd: string): st
 		const p = typeof input?.path === "string" ? input.path : "";
 		if (!p) return null;
 		if (SECRET.test(p) || (toolName !== "read" && DOTENV.test(p))) return "touches credentials";
+		if (toolName !== "read" && STARTUP.test(p)) return "changes a shell startup file, git hook or cron job";
 	}
 	return null;
 }

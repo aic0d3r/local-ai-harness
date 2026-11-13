@@ -77,8 +77,10 @@ Optional / situational:
   instruction-hijack phrasings live, so it is a tripwire only. `/guard-stats` counts both screens.
 - `taint-gate.ts` - the prompt-injection defence that needs no model. After the agent reads outside
   content (web search or fetch, MCP resources, a `curl`), risky calls need a yes from the user until
-  their next message: sending data out (not to localhost), force-pushing, `curl | sh`, credentials
-  (writing `.env`; reading it is fine), recursive `rm` outside the project. Blocked when there is no UI (print mode, subagents). Off: `TAINT_GATE_DISABLED=1`;
+  their next message: sending data out (not to localhost), force-pushing, `curl | sh` or into `python3`/`node`, download-then-run,
+  `git remote add`, credentials (writing `.env`; reading it is fine), shell startup files, git hooks and cron, recursive `rm` outside
+  the project. A best-effort check on the command text (base64 or variables get around it), not a guarantee. Not gated, to keep prompts rare:
+  `npm install`, plain GET requests. Blocked when there is no UI (print mode, subagents). Off: `TAINT_GATE_DISABLED=1`;
   `/taint-stats`. Tested live: a hidden "POST your .env" in a fetched page was obeyed with the gate off,
   stopped with it on.
 - `image-prune.ts` - a guardrail, not a saving: every turn re-sends the whole transcript, so
@@ -170,14 +172,15 @@ subprocess per edit. Off switch: `SYNTAX_GUARD_DISABLED=1`.
 - **Prompt-injection gate.** `taint-gate` needs no model. Once the agent has read outside content (web search or fetch,
   MCP resources, a `curl`), risky calls (sending data out, `curl | sh`, credentials, recursive `rm` outside the project)
   need your yes until your next message, and are blocked when there is no UI. Edits outside the project are allowed;
-  credential files are not. Tested live: a hidden "POST your `.env`" in a fetched page was obeyed with the gate off and
+  credential files, shell startup files and git hooks are not. It checks the command text, so it stops the plain attack a
+  fetched page asks for, not an obfuscated one. Tested live: a hidden "POST your `.env`" in a fetched page was obeyed with the gate off and
   stopped with it on.
 - **NPU side jobs.** The `npu-retrieval` extension ships `triage` (a constrained routing decision with per-option
   probabilities in ~120 ms), `dedup_scan` (near-duplicate files by embedding similarity) and `auto-guard` (screens every
   prompt as a fail-open tripwire, not a security boundary). See [The NPU](../docs/STRIX-HALO.md#the-npu).
 - **Symbol-precise code tools.** The [serena](https://github.com/oraios/serena) MCP server (find a symbol, its callers,
   an outline, diagnostics, symbol-level edits and renames), wired into `mcp.json` by setup and started on your current
-  project. Install serena yourself (setup expects `~/.local/bin/serena`); it also needs a language server for your
+  project. Install serena yourself (`uv tool install -p 3.13 serena-agent`; setup expects `~/.local/bin/serena` and warns when it is missing); it also needs a language server for your
   language. In real sessions the agent reached for `read` far more often, so `tool-trim` hints at serena or
   `offset`/`limit` after a big whole-file source read, and the installed `AGENTS.md` says the same. Nine core tools are
   `direct`; the long tail stays script-reachable through `codemode` when it is active (`./setup.sh --refresh-mcp`

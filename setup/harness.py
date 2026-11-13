@@ -626,9 +626,19 @@ def stop_process(port):
     return False
 
 
+def engine_containers(engine):
+    """Ids of the containers serving engine. halogen and gufo run in containers whose image name says so, so an unrelated
+    container on the same port is left alone; any other engine is matched by port alone."""
+    port = PROFILES["engines"][engine]["port"]
+    ids = subprocess.run(["docker", "ps", "-q", "--filter", f"publish={port}"], capture_output=True, text=True).stdout.split()
+    if engine not in ("halogen", "gufo"):
+        return ids
+    return [i for i in ids if engine in subprocess.run(["docker", "inspect", "-f", "{{.Config.Image}}", i], capture_output=True, text=True).stdout.lower()]
+
+
 def stop_engine(engine, running):
     port = PROFILES["engines"][engine]["port"]
-    cid = subprocess.run(["docker", "ps", "-q", "--filter", f"publish={port}"], capture_output=True, text=True).stdout.split()
+    cid = engine_containers(engine)
     if cid:
         subprocess.run(["docker", "stop", "-t", "30", *cid], stdout=subprocess.DEVNULL)
     elif not stop_process(port):  # Strata runs as a plain process, not a container
@@ -871,6 +881,10 @@ def pick_engine(d, yes, want=None, on_pick=None):
         eng = want.partition("/")[0]
         if eng not in PROFILES["engines"]:
             sys.exit(f"unknown engine {eng}; known: {', '.join(PROFILES['engines'])}")
+        c = PROFILES["engines"][eng]
+        if c.get("script") and not any(x["port"] == c["port"] for x in d["engines"]):
+            # named but down: ask what the wizard asks (stop the memory holder, download) and start it, instead of telling the user to do it by hand
+            return eng, plan_start(eng, running) or sys.exit(not_answering(eng))
         return eng, None
     if yes or not sys.stdin.isatty():  # unattended: only what is already up, halogen first
         if not running:
@@ -1322,7 +1336,35 @@ def finish(eng, mod, no_tune, launch=False):
         launch_offer(eng, prov, mid)
 
 
+# every saved answer the wizard's questions can write, so declining "Continue?" (or Esc / Ctrl-C before it) really changes nothing
+ANSWER_FILES = ("harness-agent", "harness-sidecar", "harness-extras.json", "harness-update-check", "harness-weights",
+                "harness-model", "harness-quant", "harness-pick.json")
+UNDO = None  # the answers as they were before the questions; cleared once the user says Continue
+
+
+def snapshot_answers():
+    snap = {}
+    for f in ANSWER_FILES:
+        try:
+            snap[f] = open(os.path.join(AGENT, f)).read()
+        except OSError:
+            snap[f] = None
+    return snap
+
+
+def restore_answers(snap):
+    for f, txt in snap.items():
+        p = os.path.join(AGENT, f)
+        if txt is None:
+            if os.path.exists(p):
+                os.remove(p)
+        else:
+            open(p, "w").write(txt)
+
+
 def cmd_setup(a):
+    global UNDO
+    UNDO = snapshot_answers() if not a.yes and sys.stdin.isatty() else None
     d = detect()
     h = d["hardware"]
     verbose = a.verbose or active() is None  # first run shows everything; later runs only what needs you
@@ -1356,7 +1398,8 @@ def cmd_setup(a):
             [] if a.no_tune else ["probe speed (<2 min; skipped if already measured for this model, unless upgraded)"])
         print("\nabout to:\n" + "".join(f"  - {s}\n" for s in steps))
         if not ask_yn("Continue?", True):
-            sys.exit("nothing changed")
+            sys.exit("nothing changed")  # main() puts the answers back
+    UNDO = None
     # 2. ... then run without stopping: install, free memory/download, upgrade, and start the engine last
     if not install_extensions(eng, ["--voice"] if voice else [], verbose, launch=False):
         print(f"! setup.sh reported problems (see above{'' if verbose else ' and ' + SETUP_LOG})")
@@ -1515,6 +1558,9 @@ def main():
         a.fn(a)
     except (KeyboardInterrupt, EOFError):
         cancel()
+    finally:
+        if UNDO is not None:  # left the wizard before "Continue?": put the saved answers back as they were
+            restore_answers(UNDO)
 
 
 if __name__ == "__main__":

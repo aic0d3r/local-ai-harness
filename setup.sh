@@ -151,6 +151,7 @@ if [ "$DOCTOR" = 1 ]; then
   python3 -c "import json,os;p=json.load(open('$MODELS_JSON'))['providers'];p['llamacpp-tiny'];os.path.exists('$EXT_DIR/npu-retrieval.ts') and p['halogen']" 2>/dev/null \
                                     && ok "providers configured"   || fail "providers missing - run ./setup.sh"
   [ -f "$PI_HOME/agent/mcp.json" ]  && ok "mcp.json present (serena+ddg+jina+semble)" || warn "no mcp.json - serena/ddg/jina/semble unavailable (run ./setup.sh)"
+  [ -f "$PI_HOME/agent/mcp.json" ] && { [ -x "$HOME/.local/bin/serena" ] || warn "serena not found at ~/.local/bin/serena - symbol tools off (uv tool install -p 3.13 serena-agent)"; }
   if [ -f "$PI_HOME/agent/mcp.json" ]; then
     MCP_DRIFT=$(python3 "$REPO/setup/mcp.py" check "$PI_HOME/agent/mcp.json" 2>/dev/null)
     [ -n "$MCP_DRIFT" ] && warn "$MCP_DRIFT"
@@ -389,6 +390,8 @@ elif command -v pi >/dev/null; then
 else
   warn "pi not found - skipped mcp.json"
 fi
+# mcp.json points at ~/.local/bin/serena; nothing here installs it (the Windows installer does offer it)
+[ -x "$HOME/.local/bin/serena" ] || warn "serena not found at ~/.local/bin/serena: the symbol tools stay off. Install: uv tool install -p 3.13 serena-agent"
 
 echo "== 2c. global AGENTS.md =="
 # user-owned: write only when absent, never append to or overwrite an existing one

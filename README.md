@@ -35,8 +35,9 @@ On Windows, see [Windows (beta)](#windows-beta).
 
 ## Install
 
-You need pi (setup installs it with npm if missing) and `uvx` from [uv](https://docs.astral.sh/uv) for semantic and web
-search.
+You need pi installed first (`curl -fsSL https://pi.dev/install.sh | sh`; setup stops at "pi not found" and installs nothing
+for it) and `uvx` from [uv](https://docs.astral.sh/uv) for semantic and web search. The symbol tools are optional:
+`uv tool install -p 3.13 serena-agent` (setup warns when it is missing but does not install it on Linux).
 
 ```sh
 git clone https://github.com/aic0d3r/local-ai-harness && cd local-ai-harness

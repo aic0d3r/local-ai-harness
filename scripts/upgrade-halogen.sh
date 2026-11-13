@@ -12,6 +12,7 @@ TAG="${1:-latest}"
 HEALTH=http://127.0.0.1:8731/health
 
 . "$REPO/scripts/lib-pins.sh"
+. "$REPO/scripts/lib-docker.sh"
 # the launcher's tracked default, and the pin in force (a stored upgrade on top of that default, else the default itself)
 DEF_TAG=$(grep -oE '^DEFAULT_TAG=[0-9.a-z]+' "$START" | cut -d= -f2)
 DEF_DIGEST=$(grep -oE '^DEFAULT_DIGEST=sha256:[0-9a-f]+' "$START" | cut -d= -f2)
@@ -32,7 +33,7 @@ REFRESHED=0
 # any failed check: stop the new server, restore the NPU files it was given, restart on the old pin
 rollback(){
   echo "FAIL: $1 - rolling back to $CUR"
-  local id; id=$(docker ps -q --filter publish=8731)
+  local id; id=$(container_ids 8731 halogen)
   [ -n "$id" ] && docker stop -t 30 "$id" >/dev/null
   if [ "$REFRESHED" = 1 ] && [ -d "$NPU-$CUR-backup" ]; then
     rm -rf "$NPU-$TAG-failed"; mv "$NPU" "$NPU-$TAG-failed" && mv "$NPU-$CUR-backup" "$NPU" \
@@ -62,7 +63,7 @@ else
 fi
 
 echo "[2/6] restarting on $TAG"
-OLD_ID=$(docker ps -q --filter publish=8731)
+OLD_ID=$(container_ids 8731 halogen)
 [ -n "$OLD_ID" ] && docker stop -t 30 "$OLD_ID" >/dev/null
 rm -f "$LOG"
 # empty digest: run the freshly pulled tag, not the old pinned digest

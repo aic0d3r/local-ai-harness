@@ -1,6 +1,6 @@
 // work-guard: mechanical enforcement of three AGENTS.md rules that were skipped in session 01a13cd3:
 //  1. source edits go through edit/write/serena, not bash (python open().write, sed -i, heredoc redirects)
-//  2. ui-ux-work skill must be read before the first UI-file edit
+//  2. ui-ux-work skill must be read before the first UI-file edit (only when that skill is installed)
 //  3. committing UI changes with no screenshot viewed since the last UI edit shows the user a reminder (no block)
 // Off switch: WORK_GUARD_DISABLED=1.
 import * as fs from "node:fs";
@@ -23,9 +23,17 @@ export const UI_PATH = /\.(css|scss|sass|less|html|vue|svelte|astro|tsx|jsx)$|(^
 export const SKILL = /ui-ux-work[\\/]SKILL\.md$/;
 const IMAGE = /\.(png|jpe?g|webp|gif)$/i;
 
+// rule 2 points at a skill file; the installer ships none, so without it the guard stays silent instead of blocking every UI edit
+export const skillInstalled = (dir: string = getAgentDir()) => fs.existsSync(path.join(dir, "skills", "ui-ux-work", "SKILL.md"));
+
 const TMPDIR = process.env.TMPDIR || os.tmpdir();
 // heredoc bodies are data, not commands the agent is about to run
 const stripHeredocs = (cmd: string) => cmd.replace(/<<-?['"]?(\w+)['"]?[\s\S]*?\n\1\b/g, "<<heredoc");
+
+// quoted text is data (a grep pattern, a commit message, an echo), so `grep "sed -i" f` is not a sed edit; the sed and perl rules
+// look at the command with quotes emptied. When the command runs a string (sh -c, eval, xargs) the quotes are the program, keep them.
+const runsString = /\b(ba|z|da)?sh\s+-\w*c\b|\beval\b|\bxargs\b/;
+const emptyQuotes = (s: string) => s.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, '""');
 
 // exported for tests: does this bash command edit project source (as opposed to build/test/run)?
 export const blocksBashEdit = (cmd: string, cwd = ""): boolean => {
@@ -33,7 +41,8 @@ export const blocksBashEdit = (cmd: string, cwd = ""): boolean => {
 	const runsPython = /^\s*python3?\b/.test(cmd) || /(^|\||&&|;)\s*python3?\s/.test(cmd);
 	// text quoted in a sed pattern or a heredoc body is data, not an edit: only python actually being run may match that rule
 	const probe = runsPython ? cmd : stripHeredocs(cmd);
-	return BASH_EDIT.some((r, i) => (i === 2 ? runsPython : true) && r.test(probe));
+	const bare = runsString.test(probe) ? probe : emptyQuotes(probe);
+	return BASH_EDIT.some((r, i) => (i === 2 ? runsPython : true) && r.test(i < 2 ? bare : probe));
 };
 
 export default function workGuard(pi: ExtensionAPI) {
@@ -67,7 +76,7 @@ export default function workGuard(pi: ExtensionAPI) {
 			return;
 		}
 		if ((toolName === "edit" || toolName === "write") && UI_PATH.test(p)) {
-			if (!skillRead) {
+			if (!skillRead && skillInstalled()) {
 				ev({ c: "work-guard", k: "skill-first" });
 				return { block: true, reason: "UI change: read ~/.pi/agent/skills/ui-ux-work/SKILL.md first (AGENTS.md MUST), then retry this edit." };
 			}

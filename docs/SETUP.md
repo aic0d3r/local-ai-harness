@@ -73,7 +73,7 @@ also works after setup: startup defaults point at the engine you chose, and exis
 | `./harness setup` | the wizard above |
 | `./harness detect` | list hardware and running engines, change nothing |
 | `./harness recommend` | pick an engine and model for the detected hardware |
-| `./harness use <engine>[/<model>]` | switch pi to another engine or model |
+| `./harness use <engine>[/<model>]` | switch pi to another engine or model; in a terminal, if that engine is down (halogen, gufo, Strata) it asks to stop the engine holding the GPU memory, download what is missing, and starts it. Without a terminal it only switches to what is already up |
 | `./harness status` | engine up/down, model, NPU, saved tuning, sidecar state |
 | `./harness config` | menu of saved answers (engine, sidecar, voice, update check, sudo hints); change one, applied right away |
 | `./harness tune` | re-run the speed probe and re-size the limits |
