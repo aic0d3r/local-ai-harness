@@ -6,6 +6,8 @@
   ./harness tune                        re-run the 1-2 min probe for the active profile
   ./harness status                      what is active, is it answering, last tuning
   ./harness up                          start.sh's first step: saved engine up, install refreshed, update notice
+  ./harness verify [engine] [model]     ask the engine for a live reply over HTTP; exit 0 only if it answered
+  ./harness refresh                     re-run the installer quietly for the saved engine (what /harness-update runs)
   ./harness update-check [engine]       one line if the active engine has a newer release (when the check is on)
   ./harness config                      change one saved answer (sidecar, voice, update check, engine, sudo hints)
   ./harness detect                      print what was found (json)
@@ -449,7 +451,7 @@ def install_extensions(engine, extra=(), verbose=True, show_ok=True, launch=True
     launch=False (wizard): setup.sh must not start halogen; the wizard starts the engine last itself."""
     args = (["--halogen", "auto"] if launch else []) if engine == "halogen" else ["--no-halogen"]
     cmd = ["bash", os.path.join(REPO, "setup.sh"), *args, *extra]
-    env = dict(os.environ, HARNESS_STARTS_ENGINE="" if launch else "1")
+    env = dict(os.environ, HARNESS_STARTS_ENGINE="" if launch else "1", HARNESS_ENGINE=engine)  # HARNESS_ENGINE: setup.sh must not re-pick from the saved profile
     if verbose:
         return subprocess.run(cmd, stdin=subprocess.DEVNULL, env=env).returncode == 0
     os.makedirs(AGENT, exist_ok=True)
@@ -1034,7 +1036,7 @@ def git(*a, timeout=15):
 
 def harness_update_offer():
     """If this checkout is behind its upstream, offer a fast-forward pull, then restart the wizard on the new code."""
-    if not sys.stdin.isatty():
+    if not sys.stdin.isatty() or os.environ.get("HARNESS_NO_UPDATE_CHECK") == "1":
         return
     try:
         if git("fetch", "--quiet", timeout=10)[0] or git("status", "--porcelain")[1]:
@@ -1071,6 +1073,15 @@ def _ver(s):
     return None if not m else ("b", (int(m.group(1)),)) if m.group(1) else ("v", tuple(map(int, m.group(2).split("."))))
 
 
+def pin_value(name, default):
+    """scripts/lib-pins.sh in Python: the stored upgrade pin if it was made on top of this launcher default, else the default."""
+    try:
+        kv = dict(l.split("=", 1) for l in open(os.path.join(AGENT, "harness-pins")).read().splitlines() if "=" in l)
+    except OSError:
+        return default
+    return kv[name] if kv.get(name) and kv.get(f"BASE_{name}") == default else default
+
+
 def engine_update(engine):
     """-> one line if a newer release of engine exists; '' when current, unknown or offline. Never installs."""
     u = PROFILES["engines"][engine].get("update")
@@ -1079,8 +1090,8 @@ def engine_update(engine):
     try:
         kind, *rest = u["have"].split()
         if kind == "pin":  # version pinned in our launcher: known even while the engine is down
-            # GUFO_VERSION=0.12.0 / IMAGE_TAG="${HALOGEN_IMAGE_TAG:-0.18.14}"
-            have = re.search(rf"{rest[1]}(?:=|:-)([0-9.]+)", open(os.path.join(REPO, rest[0])).read()).group(1)
+            # "pin FILE DEFAULT_VAR PIN_NAME": the launcher's tracked DEFAULT_VAR=0.19.1, unless an upgrade stored a newer pin on top of it
+            have = pin_value(rest[2], re.search(rf"^{rest[1]}=([0-9.]+)", open(os.path.join(REPO, rest[0])).read(), re.M).group(1))
         elif kind == "dir":  # a git checkout our launcher starts (Strata): its tag, known while the engine is down
             src = subprocess.run(["bash", os.path.join(REPO, rest[0]), "--print-dir"], capture_output=True, text=True).stdout.strip()
             have = subprocess.run(["git", "-C", src, "describe", "--tags"], capture_output=True, text=True).stdout.strip()
@@ -1150,10 +1161,28 @@ def cmd_monitor(a):
     os.execvp(argv[0], argv)
 
 
+def saved_engine():
+    """The engine ./setup.sh chose, or None on a box that was never set up. A pre-wizard halogen install has no profile but has the NPU extension."""
+    p = active()
+    if p:
+        return p["engine"]
+    return "halogen" if os.path.exists(os.path.join(AGENT, "extensions", "npu-retrieval.ts")) else None
+
+
+def cmd_refresh(_):
+    """Re-run the installer quietly for the engine already chosen (what /harness-update does after a pull). Never picks an engine."""
+    eng = saved_engine()
+    if not eng:
+        sys.exit("not set up yet: run ./setup.sh first")
+    sys.exit(0 if install_extensions(eng, verbose=False, show_ok=False, launch=False) else 1)
+
+
 def cmd_up(_):
     """start.sh: bring the saved engine up (start it if we ship a launcher; ask before stopping another engine
     that holds the GPU memory), refresh the install quietly, then the update notice + upgrade offer."""
-    eng = (active() or {}).get("engine", "halogen")
+    eng = saved_engine()
+    if not eng:
+        sys.exit("not set up yet: run ./setup.sh first (nothing was started or installed)")
     running = {x["engine"]: x for x in detect()["engines"]}
     if eng not in running:
         plan = plan_start(eng, running, ask_start=False)
@@ -1176,7 +1205,7 @@ def cmd_up(_):
 def cmd_update_check(a):
     """start.sh: one line if the active (or named) engine has a newer release; silent when off/offline."""
     if update_pref() == "1":
-        msg = engine_update(a.engine or (active() or {}).get("engine", "halogen"))
+        msg = engine_update(a.engine or saved_engine() or "halogen")
         if msg:
             notice(msg)
 
@@ -1455,7 +1484,7 @@ def main():
     import argparse
     ap = argparse.ArgumentParser(prog="harness")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for n, f in (("detect", cmd_detect), ("setup", cmd_setup), ("use", cmd_use), ("tune", cmd_tune), ("status", cmd_status), ("config", cmd_config), ("update-check", cmd_update_check), ("up", cmd_up), ("recommend", cmd_recommend), ("quant-info", cmd_quant_info), ("ctx-info", cmd_ctx_info), ("model-info", cmd_model_info), ("monitor", cmd_monitor), ("verify", cmd_verify)):
+    for n, f in (("detect", cmd_detect), ("setup", cmd_setup), ("use", cmd_use), ("tune", cmd_tune), ("status", cmd_status), ("config", cmd_config), ("update-check", cmd_update_check), ("up", cmd_up), ("recommend", cmd_recommend), ("quant-info", cmd_quant_info), ("ctx-info", cmd_ctx_info), ("model-info", cmd_model_info), ("monitor", cmd_monitor), ("verify", cmd_verify), ("refresh", cmd_refresh)):
         p = sub.add_parser(n)
         p.set_defaults(fn=f)
         if n in ("setup", "use"):

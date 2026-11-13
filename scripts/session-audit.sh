@@ -72,7 +72,7 @@ PY
 hr
 
 # --- halogen version vs pin ---
-PIN=$(grep -oE 'HALOGEN_IMAGE_TAG:-[0-9.]+' "$(cd "$(dirname "$0")/.." && pwd)/server/start-halogen.sh" 2>/dev/null | head -1 | cut -d- -f2)
+PIN=$(bash "$(cd "$(dirname "$0")/.." && pwd)/server/start-halogen.sh" --print-image 2>/dev/null | sed -E 's/^[^:]*:([^@]+).*/\1/')
 V=$(curl -sf --max-time 5 http://127.0.0.1:8731/health | python3 -c "
 import json,sys
 try:

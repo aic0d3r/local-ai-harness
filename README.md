@@ -101,8 +101,10 @@ Measured speeds for halogen, gufo and Strata: [BENCHMARKS.md](docs/BENCHMARKS.md
 ./harness monitor         # live prefill/decode dashboard for the active engine
 ```
 
-Private by default: no API key, halogen makes no outbound calls, and only the DuckDuckGo search tool reaches the
-internet. Cloud models are a supported [hybrid](docs/ENGINES.md#cloud-models-are-a-supported-hybrid); screening, search
+Private by default: no API key, and the weights and your code stay on this machine. halogen is launched with no download
+setting, but it is a closed image, so that is configuration, not a network sandbox. What reaches the internet: the
+DuckDuckGo search tool (and Jina if you add a key), a once-a-day `git fetch` of this repo to tell you about updates
+(`HARNESS_NO_UPDATE_CHECK=1` turns it off), the engine release check if you enable it, and the downloads you confirm. Cloud models are a supported [hybrid](docs/ENGINES.md#cloud-models-are-a-supported-hybrid); screening, search
 and compaction stay on-device either way. All commands, daily use and uninstall: [docs/SETUP.md](docs/SETUP.md).
 
 ## Efficiency

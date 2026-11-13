@@ -23,11 +23,12 @@ const repoPath = () => {
 // commits on the upstream branch we don't have yet
 const behind = (repo: string) => git(repo, "rev-list", "--count", "HEAD..@{u}").then(Number);
 
-// Windows installs with setup.ps1 (adopts the running engine); bash there would run the halogen path of setup.sh
+// Windows installs with setup.ps1 (adopts the running engine). Linux runs `harness refresh`, which re-installs for the
+// engine the wizard saved; a bare setup.sh with no terminal would assume halogen and wire its NPU extensions onto any box.
 export const installer = (repo: string, platform: string = process.platform): [string, string[]] =>
 	platform === "win32"
 		? ["powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path.join(repo, "setup.ps1")]]
-		: ["bash", [path.join(repo, "setup.sh")]];
+		: ["bash", [path.join(repo, "harness"), "refresh"]];
 
 // ff-only pull + installer; throws on a dirty tree. n = commits behind.
 const apply = async (repo: string, n: number) => {
@@ -35,14 +36,14 @@ const apply = async (repo: string, n: number) => {
 	await run("git", ["-C", repo, "pull", "--ff-only", "--quiet"], { timeout: 60000 });
 	const [cmd, args] = installer(repo);
 	await run(cmd, args, { timeout: 300000 });
-	return `pulled ${n} commit${n > 1 ? "s" : ""} and re-ran ${path.basename(args[args.length - 1])}. Restart pi to load changed extensions.`;
+	return `pulled ${n} commit${n > 1 ? "s" : ""} and refreshed the install. Restart pi to load changed extensions.`;
 };
 const fail = (e: any) => `harness-update failed: ${String(e?.stderr || e?.message || e).slice(0, 300)}`;
 
 export default function (pi: ExtensionAPI) {
 	pi.on("session_start", async (_e, ctx) => {
 		const repo = repoPath();
-		if (!repo) return;
+		if (!repo || process.env.HARNESS_NO_UPDATE_CHECK === "1") return; // opt-out: no daily git fetch
 		try {
 			if (Date.now() - fs.statSync(STAMP).mtimeMs < DAY) return;
 		} catch { /* no stamp yet */ }
@@ -58,7 +59,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("harness-update", {
-		description: "Fast-forward the harness repo from origin and re-run setup.sh",
+		description: "Fast-forward the harness repo from origin and refresh the install for your saved engine",
 		handler: async (_args, ctx) => {
 			const repo = repoPath();
 			if (!repo) return ctx.ui.notify("no harness-repo marker: run ./setup.sh once from the repo", "error");

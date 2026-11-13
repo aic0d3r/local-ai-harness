@@ -46,7 +46,8 @@ The full walkthrough of `./setup.sh`, the `./harness` commands and `./start.sh`.
    (restart serena to load them).
 
 Servers you started yourself are never restarted. Run non-interactively (scripts, CI) and `./setup.sh` does the plain
-install instead.
+install instead: on a box the wizard already set up for another engine it refreshes for that engine (`./harness refresh`),
+and it never downloads the sidecar model without a saved answer or a terminal.
 
 ### Flags
 
@@ -61,7 +62,8 @@ install instead.
 - Also: `--voice`, `--halogen-upgrade [tag]`, `--uninstall`, `--help`.
 
 Prerequisites for halogen: docker (setup will not sudo-install it) and, for the NPU driver, an IOMMU-enabled gfx1151 box.
-The launch is pinned to local files (no `HALOGEN_DOWNLOAD`), so the engine makes no outbound connections. Plain `pi`
+The launch is pinned to local files (no `HALOGEN_DOWNLOAD`), so the engine has nothing to fetch. The image is closed and
+is not network-sandboxed, so this is configuration, not a guarantee. Plain `pi`
 also works after setup: startup defaults point at the engine you chose, and existing overrides are never touched.
 
 ### Commands

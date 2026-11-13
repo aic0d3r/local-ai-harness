@@ -33,6 +33,13 @@
 set -u
 # bare invocation in a terminal = the guided wizard (flags below stay for scripts/CI)
 if [ $# -eq 0 ] && [ -t 0 ] && [ -t 1 ]; then exec python3 -u "$(dirname "$(readlink -f "$0")")/setup/harness.py" setup; fi
+# bare run with no terminal on a box the wizard already set up for another engine: refresh for THAT engine; the plain
+# install below is the halogen one and would wire halogen's providers and NPU extensions onto it
+if [ $# -eq 0 ] && [ -z "${HARNESS_ENGINE:-}" ]; then  # the wizard sets HARNESS_ENGINE: it already chose
+  SAVED_ENG=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("engine",""))' \
+    "${PI_CODING_AGENT_DIR:-${PI_HOME:-$HOME/.pi}/agent}/harness-profile.json" 2>/dev/null)
+  [ -n "$SAVED_ENG" ] && [ "$SAVED_ENG" != halogen ] && exec python3 -u "$(dirname "$(readlink -f "$0")")/setup/harness.py" refresh
+fi
 HALOGEN_CKPT=""; SIDECAR_SET=""; AGENT_SET=""; DOCTOR=0; REFUSALS=0; REFRESH_MCP=0; VOICE=0; NO_HALOGEN=0; STRATA=0; GUFO=0; ENG=strata; ENG_URL=http://127.0.0.1:8080
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -407,7 +414,11 @@ else
   if [ -z "${GGUF:-}" ] && [ -z "${LLS:-}" ]; then
     GGUF=skip; warn "no llama-server binary found (PATH, ~/.local/bin) - not downloading the sidecar model; install one and re-run ./setup.sh"
   fi
-  # a terminal gets asked; no terminal (scripts, the wizard - which already asked) downloads
+  # no terminal and no saved answer (the wizard or --sidecar saves one): never download 4.5 GB unasked
+  if [ -z "${GGUF:-}" ] && [ ! -t 0 ] && [ ! -s "$SC_PREF" ]; then
+    GGUF=skip; warn "no saved sidecar answer and no terminal - not downloading the sidecar model; run ./setup.sh in a terminal, or ./setup.sh --sidecar"
+  fi
+  # a terminal gets asked; no terminal with a saved answer (the wizard already asked) downloads
   if [ -z "${GGUF:-}" ] && [ -t 0 ]; then
     read -r -p "  download Ling-3.0-tiny (~4.5 GB) for the sidecar? (n = skip; ./setup.sh --no-sidecar turns it off) [Y/n] " A
     case "$A" in [nN]*) GGUF=skip ;; esac

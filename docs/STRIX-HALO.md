@@ -99,8 +99,10 @@ HALOGEN_NPU_MODELS=decider-0.8b,qwen3guard-gen-0.6b ./start-halogen.sh
 
 ## Upgrading halogen
 
-The image tag is **pinned** in `server/start-halogen.sh` (`HALOGEN_IMAGE_TAG`, default the version this harness was last
-validated on). One command does it safely:
+The image tag is **pinned**: `server/start-halogen.sh` carries the version this harness was last validated on
+(`DEFAULT_TAG` and `DEFAULT_DIGEST`). An upgrade you run is stored per user in `~/.pi/agent/harness-pins`, not in that
+file, so the checkout stays clean and `/harness-update` keeps working; a harness update that ships a newer default
+replaces your stored pin. One command does it safely:
 
 ```sh
 ./setup.sh --halogen-upgrade          # default: latest

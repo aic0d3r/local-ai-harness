@@ -3,7 +3,7 @@
 # if it is down; asks before stopping another engine that holds the GPU memory), refresh the install
 # quietly, show an update notice, then drop into the pi TUI on that engine.
 #   ./start.sh [project-dir]
-# no ./setup.sh run yet: halogen, as before.
+# no ./setup.sh run yet: it says so and exits (a pre-wizard halogen install, which has the NPU extension, still works).
 set -u
 D="${1:-$PWD}"
 [ -d "$D" ] || { echo "not a directory: $D" >&2; exit 1; }

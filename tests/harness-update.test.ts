@@ -20,7 +20,7 @@ const commit = (msg: string) => {
 };
 sh(tmp, "init", "-q", "--bare", "-b", "main", origin);
 sh(tmp, "clone", "-q", origin, work);
-fs.writeFileSync(path.join(work, "setup.sh"), "#!/bin/sh\ntouch \"$(dirname \"$0\")/setup-ran\"\n");
+fs.writeFileSync(path.join(work, "harness"), "#!/bin/sh\ntouch \"$(dirname \"$0\")/setup-ran\"\n"); // stands in for `harness refresh`
 commit("one");
 sh(tmp, "clone", "-q", origin, clone);
 fs.writeFileSync(path.join(agent, "harness-repo"), clone + "\n");
@@ -62,7 +62,7 @@ test("dirty tree refuses", async () => {
 	fs.rmSync(path.join(clone, "dirty"));
 });
 
-test("command pulls ff-only and runs setup.sh", async () => {
+test("command pulls ff-only and runs `harness refresh`", async () => {
 	await cmds["harness-update"]("", ctx);
 	expect(notes.at(-1)).toContain("pulled 1 commit");
 	expect(fs.readFileSync(path.join(clone, "f"), "utf8")).toBe("two");
@@ -82,9 +82,19 @@ test("HARNESS_AUTOUPDATE=1 applies at startup", async () => {
 	expect(fs.readFileSync(path.join(clone, "f"), "utf8")).toBe("three");
 });
 
-test("Windows re-installs with setup.ps1, everything else with setup.sh", async () => {
+test("HARNESS_NO_UPDATE_CHECK=1: no daily fetch, no stamp", async () => {
+	fs.rmSync(stamp, { force: true });
+	notes.length = 0;
+	process.env.HARNESS_NO_UPDATE_CHECK = "1";
+	await handlers.session_start({}, ctx);
+	delete process.env.HARNESS_NO_UPDATE_CHECK;
+	expect(notes).toEqual([]);
+	expect(fs.existsSync(stamp)).toBe(false);
+});
+
+test("Windows re-installs with setup.ps1, everything else with `harness refresh` (never a bare setup.sh)", async () => {
 	const { installer } = await import("../extensions/harness-update.ts");
-	expect(installer("/r", "linux")).toEqual(["bash", [path.join("/r", "setup.sh")]]);
+	expect(installer("/r", "linux")).toEqual(["bash", [path.join("/r", "harness"), "refresh"]]);
 	const [cmd, args] = installer("/r", "win32");
 	expect(cmd).toBe("powershell");
 	expect(args.slice(-2)).toEqual(["-File", path.join("/r", "setup.ps1")]);

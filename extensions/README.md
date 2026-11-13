@@ -211,7 +211,7 @@ subprocess per edit. Off switch: `SYNTAX_GUARD_DISABLED=1`.
 
 - `harness-profile/` - shared helper, not a feature: loads the active engine profile from `<agent dir>/harness-profile.json` (legacy halogen defaults if absent) and registers nothing; imported by the ling-tiny-*, harness-tune, auto-guard and npu-retrieval extensions.
 - `harness-status/` - `/usage` runs `scripts/usage-stats.py` inside pi; a footer status shows halogen load from `:8731/metrics` (hidden when unreachable).
-- `harness-update.ts` - once-a-day notice when the harness repo is behind origin; `/harness-update` applies it (fast-forward only, refuses on a dirty tree, re-runs setup.sh).
+- `harness-update.ts` - once-a-day notice when the harness repo is behind origin; `/harness-update` applies it (fast-forward only, refuses on a dirty tree, then `./harness refresh` re-installs for the engine you saved; `HARNESS_NO_UPDATE_CHECK=1` turns the daily `git fetch` off).
 - `tool-trim/` - keeps big tool output out of context: cleans and caps long bash output (full text saved to a file) and turns identical re-reads of unchanged files into a pointer. Off switch: `TOOL_TRIM_DISABLED=1`.
 - `turn-timer.ts` - per-turn elapsed wall time in the footer.
 - `work-guard.ts` - enforces AGENTS.md rules: blocks source edits via bash, blocks UI edits until the ui-ux-work skill is read, warns on committing UI changes with no render viewed. Off switch: `WORK_GUARD_DISABLED=1`.

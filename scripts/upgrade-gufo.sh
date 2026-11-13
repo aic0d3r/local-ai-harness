@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # upgrade-gufo.sh - pull a gufo image, restart on it, run a short acceptance battery, and only move the
-# pin (GUFO_VERSION + digest in server/start-gufo-flashnext.sh) if everything passes.
+# pin if everything passes. The pin is stored per user (harness-pins, scripts/lib-pins.sh); the tracked launcher is not edited.
 #   scripts/upgrade-gufo.sh [tag]      (default: highest x.y.z tag on ghcr)
 # Rollback is automatic: any failed check stops the new server and restarts the old pin (if gufo was up).
 set -uo pipefail
@@ -11,7 +11,10 @@ R=gufo-org/toolboxes/gufo-runtime
 IMG=ghcr.io/$R
 PORT=8080
 URL=http://127.0.0.1:$PORT
-CUR=$(grep -oE '^GUFO_VERSION=[0-9.]+' "$START" | cut -d= -f2)
+. "$REPO/scripts/lib-pins.sh"
+DEF_VER=$(grep -oE '^DEFAULT_VERSION=[0-9.]+' "$START" | cut -d= -f2)
+DEF_DIGEST=$(grep -oE '^DEFAULT_DIGEST=sha256:[0-9a-f]+' "$START" | cut -d= -f2)
+CUR=$(pin_value GUFO_VERSION "$DEF_VER")  # the pin in force: a stored upgrade on top of the launcher default, else the default
 TAG="${1:-}"
 if [ -z "$TAG" ]; then
   T=$(curl -sf -m 5 "https://ghcr.io/token?scope=repository:$R:pull" | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
@@ -56,7 +59,6 @@ echo "[3/4] answer + decode check"
 python3 "$REPO/scripts/engine-acceptance.py" "$URL" 15 || rollback "acceptance"
 
 echo "[4/4] updating pin $CUR -> $TAG"
-sed -i -e "s/^GUFO_VERSION=$CUR/GUFO_VERSION=$TAG/" \
-  -e "s|gufo-runtime@sha256:[0-9a-f]*|gufo-runtime@$DIGEST|" "$START"
-grep -E '^GUFO_(VERSION|IMAGE)=' "$START"
-echo "OK: validated and pinned to $TAG (running now). commit the start-gufo-flashnext.sh change to keep the repo in sync."
+pin_set GUFO_VERSION "$DEF_VER" "$TAG" && pin_set GUFO_DIGEST "$DEF_DIGEST" "$DIGEST" \
+  || { echo "FAIL: could not write $PINS - pin unchanged"; exit 1; }
+echo "OK: validated and pinned to $TAG in $PINS (running now). A harness update that ships a newer reviewed pin replaces it."

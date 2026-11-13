@@ -362,6 +362,20 @@ assert "docker is not installed" in h.halogen_preflight()[0]
 assert h.plan_start("halogen", {}) is None
 h.shutil.which, h.ask_yn = real_which, real_ask
 assert h.engine_log("gufo").startswith(h.LOGDIR) and not h.engine_log("gufo").startswith("/tmp")
+# a box that was never set up is not assumed to be halogen; a pre-wizard halogen install (NPU extension, no profile) still is
+real_agent, h.AGENT = h.AGENT, tempfile.mkdtemp()
+assert h.saved_engine() is None
+try:
+    h.cmd_up(None)
+    raise AssertionError("cmd_up must refuse an unconfigured box")
+except SystemExit as e:
+    assert "not set up yet" in str(e)
+os.makedirs(f"{h.AGENT}/extensions"); open(f"{h.AGENT}/extensions/npu-retrieval.ts", "w").close()
+assert h.saved_engine() == "halogen"
+# upgrade pins (scripts/lib-pins.sh): used only while the launcher default is the one they were made on
+open(f"{h.AGENT}/harness-pins", "w").write("BASE_GUFO_VERSION=0.32.0\nGUFO_VERSION=0.34.0\n")
+assert h.pin_value("GUFO_VERSION", "0.32.0") == "0.34.0" and h.pin_value("GUFO_VERSION", "0.40.0") == "0.40.0"
+h.AGENT = real_agent
 # an engine that will not report its context: the guess is announced, not silent
 import io, contextlib
 buf = io.StringIO()

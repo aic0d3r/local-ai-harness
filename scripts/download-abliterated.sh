@@ -17,7 +17,8 @@ case "$ENG" in
   gufo)
     WANT=$(GUFO_WEIGHTS=abliterated bash "$REPO/server/start-gufo-flashnext.sh" --print-model)
     DIR=$(dirname "$WANT"); GB=117  # 112 weights + the MTP head and vision projector if missing
-    ARGS=(brainnxdomain/Qwen3.8-Flash-Next-Uncensored-Gufo-GGUF --include '*.gguf')
+    # pinned to the commit current on 2026-09-30 (a third-party repo: a later push must not change what runs); GUFO_ABLITERATED_REV overrides
+    ARGS=(brainnxdomain/Qwen3.8-Flash-Next-Uncensored-Gufo-GGUF --include '*.gguf' --revision "${GUFO_ABLITERATED_REV:-c706902043613af036f996682ce25b7c12270d16}")
     ROOT=$(dirname "$DIR"); MTP=mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf ;;
   *) echo "usage: $0 halogen|gufo [--yes]" >&2; exit 1 ;;
 esac

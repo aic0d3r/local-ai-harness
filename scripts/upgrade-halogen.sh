@@ -11,7 +11,11 @@ mkdir -p "$HOME/.cache"; LOG="$HOME/.cache/halogen-upgrade.log"  # per-user dir:
 TAG="${1:-latest}"
 HEALTH=http://127.0.0.1:8731/health
 
-CUR=$(grep -oE 'HALOGEN_IMAGE_TAG:-[0-9.a-z]+' "$START" | head -1 | cut -d- -f2)
+. "$REPO/scripts/lib-pins.sh"
+# the launcher's tracked default, and the pin in force (a stored upgrade on top of that default, else the default itself)
+DEF_TAG=$(grep -oE '^DEFAULT_TAG=[0-9.a-z]+' "$START" | cut -d= -f2)
+DEF_DIGEST=$(grep -oE '^DEFAULT_DIGEST=sha256:[0-9a-f]+' "$START" | cut -d= -f2)
+CUR=$(pin_value HALOGEN_IMAGE_TAG "$DEF_TAG")
 IMG=ghcr.io/peonist-ai/halogen-flash-server
 
 echo "[1/6] pulling $IMG:$TAG (pinned: $CUR)"
@@ -128,7 +132,8 @@ echo "      pi answered, clean exit"
 echo "[6/6] updating pin $CUR -> $TAG"
 DIGEST=$(docker image inspect -f '{{index .RepoDigests 0}}' "$IMG:$TAG" 2>/dev/null | cut -d@ -f2)
 case "$DIGEST" in sha256:*) ;; *) echo "FAIL: no registry digest for $IMG:$TAG - pin unchanged"; exit 1 ;; esac
-sed -i -e "s/HALOGEN_IMAGE_TAG:-$CUR/HALOGEN_IMAGE_TAG:-$TAG/" \
-  -e "s/HALOGEN_IMAGE_DIGEST-sha256:[0-9a-f]*/HALOGEN_IMAGE_DIGEST-$DIGEST/" "$START"
-grep -oE 'HALOGEN_IMAGE_(TAG:-|DIGEST-)[0-9.a-z:]+' "$START"
-echo "OK: validated and pinned to $TAG. commit the start-halogen.sh change to keep the repo in sync."
+# stored per user (harness-pins), not in the tracked launcher: the checkout stays clean so harness updates keep working
+pin_set HALOGEN_IMAGE_TAG "$DEF_TAG" "$TAG" && pin_set HALOGEN_IMAGE_DIGEST "$DEF_DIGEST" "$DIGEST" \
+  || { echo "FAIL: could not write $PINS - pin unchanged"; exit 1; }
+echo "      $(bash "$START" --print-image)"
+echo "OK: validated and pinned to $TAG in $PINS (a harness update that ships a newer reviewed pin replaces it)."

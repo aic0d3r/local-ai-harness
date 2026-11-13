@@ -179,9 +179,11 @@ def skills():
     ok(f"installed/updated {n} skills" if n else f"skills current ({len(os.listdir(skill_dir))} dirs)")
 
 
-PACKAGES = (("ponytail", "git:github.com/DietrichGebert/ponytail", "ponytail"),
-            ("ask-user-question", "npm:@juicesharp/rpiv-ask-user-question", "ask-user-question"),  # the structured question tool is a package, not an extension
-            ("pi-rtk-optimizer", "npm:@estebanforge/pi-rtk-optimizer", "pi-rtk-optimizer"))  # rewrites bash commands through the rtk binary
+# pinned: these run inside every session (the rtk one rewrites every bash command), so a new release must not arrive unreviewed.
+# Bump on purpose; a pinned package is skipped by `pi update`.
+PACKAGES = (("ponytail", "git:github.com/DietrichGebert/ponytail@v5.3.3", "ponytail"),
+            ("ask-user-question", "npm:@juicesharp/rpiv-ask-user-question@2.15.0", "ask-user-question"),  # the structured question tool is a package, not an extension
+            ("pi-rtk-optimizer", "npm:@estebanforge/pi-rtk-optimizer@1.0.6", "pi-rtk-optimizer"))  # rewrites bash commands through the rtk binary
 RTK_VERSION = (1, 0, 1)
 RTK_ASSETS = {  # pinned sha256: the binary lands on PATH, so a swapped release asset must not install
     ("linux", "x86_64"): ("x86_64-unknown-linux-musl.tar.gz", "5b919c3bccb799b67a61866d0e617410a4fcdf173e2614440e59de2fa2003436"),

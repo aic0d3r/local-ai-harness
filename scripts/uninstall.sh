@@ -34,7 +34,7 @@ TAR_ARGS=(-C "$PI_HOME" "$AGREL/extensions" "$AGREL/prompts" "$AGREL/skills" "$A
 # every state file the harness writes into the agent dir (wizard answers, tuning, markers, logs); one list for backup and removal
 STATE=(harness-profile.json harness-tuned.json harness-extras.json harness-sidecar harness-agent harness-update-check harness-update-stamp
        harness-hints-shown harness-repo harness-ubatch harness-events.jsonl setup.log
-       harness-weights harness-model harness-quant harness-pick.json hud.log progress-stamps.json)
+       harness-weights harness-model harness-quant harness-pick.json harness-pins hud.log progress-stamps.json)
 for f in "${STATE[@]}"; do [ -f "$AG/$f" ] && TAR_ARGS+=(-C "$PI_HOME" "$AGREL/$f"); done
 [ -f "$AG/rag-index.py" ] && TAR_ARGS+=(-C "$PI_HOME" "$AGREL/rag-index.py") # own -C: tar applies earlier -C to later members
 tar czf "$BACKUP" "${TAR_ARGS[@]}" 2>/dev/null
