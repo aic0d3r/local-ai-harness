@@ -8,7 +8,7 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 # decide BEFORE defaulting PI_HOME: an explicit PI_HOME means a sandbox install
 SANDBOX=${PI_HOME:+1}
 PI_HOME="${PI_HOME:-$HOME/.pi}"
-AG="$PI_HOME/agent"
+AG="${PI_CODING_AGENT_DIR:-$PI_HOME/agent}"; export AG  # same rule as setup.sh and the wizard
 TS=$(date +%Y%m%d-%H%M%S)
 BACKUP="$HOME/pi-harness-uninstall-backup-$TS.tar.gz"
 ASSUME_YES=0
@@ -16,8 +16,8 @@ ASSUME_YES=0
 
 echo "this removes everything the harness installer provisioned:"
 echo "  - extensions, templates, skills, theme under $AG"
-echo "  - halogen + llamacpp-tiny providers in models.json"
-echo "  - pi defaults (halogen) if they still match what setup set"
+echo "  - the providers setup wrote in models.json (halogen, llamacpp-tiny, and the engine you picked: strata, gufo, ...)"
+echo "  - pi defaults if they still match what setup set, and the pi packages it installed"
 echo "  - ling-tiny systemd unit"
 echo "  - NOT touched: mcp.json, the sidecar GGUF, the halogen container,"
 echo "    your checkpoint files, the vm-compact.timer (sudo; command printed)"
@@ -28,15 +28,17 @@ fi
 
 echo "[1/8] backup -> $BACKUP"
 # one tar call: a second `czf` would truncate the first archive (backup lost)
-TAR_ARGS=(-C "$PI_HOME" agent/extensions agent/prompts agent/skills agent/themes agent/settings.json agent/models.json agent/mcp.json)
+AGREL=$(realpath --relative-to="$PI_HOME" "$AG" 2>/dev/null || echo agent)  # tar members are relative to PI_HOME
+TAR_ARGS=(-C "$PI_HOME" "$AGREL/extensions" "$AGREL/prompts" "$AGREL/skills" "$AGREL/themes" "$AGREL/settings.json" "$AGREL/models.json" "$AGREL/mcp.json")
 [ -f "$HOME/.config/systemd/user/ling-tiny.service" ] && TAR_ARGS+=(-C "$HOME/.config/systemd/user" ling-tiny.service)
 # every state file the harness writes into the agent dir (wizard answers, tuning, markers, logs); one list for backup and removal
 STATE=(harness-profile.json harness-tuned.json harness-extras.json harness-sidecar harness-agent harness-update-check harness-update-stamp
        harness-hints-shown harness-repo harness-ubatch harness-events.jsonl setup.log
-       harness-weights hud.log progress-stamps.json)
-for f in "${STATE[@]}"; do [ -f "$AG/$f" ] && TAR_ARGS+=(-C "$PI_HOME" "agent/$f"); done
-[ -f "$AG/rag-index.py" ] && TAR_ARGS+=(-C "$PI_HOME" agent/rag-index.py) # own -C: tar applies earlier -C to later members
+       harness-weights harness-model harness-quant harness-pick.json hud.log progress-stamps.json)
+for f in "${STATE[@]}"; do [ -f "$AG/$f" ] && TAR_ARGS+=(-C "$PI_HOME" "$AGREL/$f"); done
+[ -f "$AG/rag-index.py" ] && TAR_ARGS+=(-C "$PI_HOME" "$AGREL/rag-index.py") # own -C: tar applies earlier -C to later members
 tar czf "$BACKUP" "${TAR_ARGS[@]}" 2>/dev/null
+PROFILE_JSON=$(cat "$AG/harness-profile.json" 2>/dev/null); export PROFILE_JSON
 echo "      $(du -h "$BACKUP" | cut -f1)"
 
 echo "[2/8] systemd units"
@@ -84,24 +86,31 @@ fi
 echo "[5/8] pi defaults + providers"
 python3 - <<'PY'
 import json, os
-home = os.environ.get("PI_HOME", os.path.expanduser("~"))
-home = os.path.join(home, "agent") if os.environ.get("PI_HOME") else os.path.join(home, ".pi/agent")
+home = os.environ["AG"]
+# what the wizard chose, saved before step 3 deletes the state files
+try:
+    prof = json.loads(os.environ.get("PROFILE_JSON") or "{}")
+except ValueError:
+    prof = {}
+ours_prov = {"halogen", "llamacpp-tiny"} | ({prof["provider"]} if prof.get("provider") else set())
 sp = os.path.join(home, "settings.json")
 if os.path.exists(sp):
     s = json.load(open(sp))
     # defaults: remove only if they still match what setup set
-    for k, ours in (("defaultProvider","halogen"), ("defaultModel","halogen-qwen3.8-flash-next"), ("defaultThinkingLevel","medium")):
+    for k, ours in (("defaultProvider", prof.get("provider") or "halogen"), ("defaultModel", prof.get("model") or "halogen-qwen3.8-flash-next"), ("defaultThinkingLevel", "medium")):
         if s.get(k) == ours: s.pop(k, None)
-    pkgs = s.get("packages", [])
-    s["packages"] = [p for p in pkgs if "ponytail" not in p]
+    ours_pkgs = ("ponytail", "rpiv-ask-user-question", "pi-rtk-optimizer")  # adopt.py PACKAGES
+    s["packages"] = [p for p in s.get("packages", []) if not any(o in str(p) for o in ours_pkgs)]
     json.dump(s, open(sp, "w"), indent=2); open(sp, "a").write("\n")
 mp = os.path.join(home, "models.json")
 if os.path.exists(mp):
     m = json.load(open(mp))
-    for prov in ("halogen", "llamacpp-tiny"):
-        m.get("providers", {}).pop(prov, None)
+    for prov in ours_prov:  # a provider pointing somewhere else than this box is the user's own
+        p = m.get("providers", {}).get(prov) or {}
+        if prov in ("halogen", "llamacpp-tiny") or "127.0.0.1" in p.get("baseUrl", ""):
+            m["providers"].pop(prov, None)
     json.dump(m, open(mp, "w"), indent=2); open(mp, "a").write("\n")
-print("      defaults removed where they matched ours; providers halogen/llamacpp-tiny removed")
+print("      defaults removed where they matched ours; providers removed: " + ", ".join(sorted(ours_prov)))
 PY
 
 echo "[6/8] mcp.json"
@@ -123,4 +132,4 @@ echo "[8/8] notes"
 echo "      halogen container/checkpoint: untouched (docker stop <id> + rm the model dir if desired)"
 echo "      vm-compact.timer (sudo): sudo rm /etc/systemd/system/vm-compact.{service,timer} && sudo systemctl daemon-reload"
 echo "      backup: $BACKUP (restore by untarring into ~)"
-echo "DONE - pi is back to stock (restart any running pi session)."
+echo "DONE - the harness is removed (restart any running pi session). pi itself, mcp.json and your own models.json entries are left as they were."

@@ -6,7 +6,7 @@
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 START="$REPO/server/start-gufo-flashnext.sh"
-LOG=/tmp/gufo-upgrade.log
+mkdir -p "$HOME/.cache"; LOG="$HOME/.cache/gufo-upgrade.log"  # per-user dir: a fixed /tmp name can be a planted symlink
 R=gufo-org/toolboxes/gufo-runtime
 IMG=ghcr.io/$R
 PORT=8080

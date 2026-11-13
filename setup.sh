@@ -37,7 +37,7 @@ HALOGEN_CKPT=""; SIDECAR_SET=""; AGENT_SET=""; DOCTOR=0; REFUSALS=0; REFRESH_MCP
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-halogen)  NO_HALOGEN=1; shift ;;
-    --halogen) HALOGEN_CKPT="${2:-auto}"; shift 2 2>/dev/null || shift ;;
+    --halogen) case "${2:-}" in ""|-*) HALOGEN_CKPT=auto; shift ;; *) HALOGEN_CKPT="$2"; shift 2 ;; esac ;;  # a following flag is not a checkpoint path
     --strata|--gufo) [ "$1" = --gufo ] && { GUFO=1; ENG=gufo; } || STRATA=1; NO_HALOGEN=1
                case "${2:-}" in http*) ENG_URL="${2%/}"; shift 2 ;; *) shift ;; esac ;;
     --doctor)  DOCTOR=1; shift ;;
@@ -403,6 +403,10 @@ elif [ -f "$HOME/.config/systemd/user/ling-tiny.service" ]; then
 else
   fail "sidecar not running"
   GGUF="$(ls "$HOME"/.models/ling3.0-tiny/*.gguf "$REPO"/models/ling3.0-tiny/*.gguf 2>/dev/null | head -1)"
+  # no llama-server to run it: do not fetch 4.5 GB first
+  if [ -z "${GGUF:-}" ] && [ -z "${LLS:-}" ]; then
+    GGUF=skip; warn "no llama-server binary found (PATH, ~/.local/bin) - not downloading the sidecar model; install one and re-run ./setup.sh"
+  fi
   # a terminal gets asked; no terminal (scripts, the wizard - which already asked) downloads
   if [ -z "${GGUF:-}" ] && [ -t 0 ]; then
     read -r -p "  download Ling-3.0-tiny (~4.5 GB) for the sidecar? (n = skip; ./setup.sh --no-sidecar turns it off) [Y/n] " A

@@ -10,6 +10,12 @@
 
 ### Changed
 - `./setup.sh --doctor` exits 1 when any check fails (it always exited 0), so scripts can rely on it. Its ready check now uses `./harness verify`, so `--no-pi` installs no longer report "no reply" from a healthy engine.
+- halogen's host requirements (docker usable, `/dev/accel/accel0`, `/dev/kfd`, the three XRT libraries) are checked before the ~124 GB download is offered, and `server/start-halogen.sh` stops with the fix instead of letting docker create root-owned mount directories when an XRT library is missing.
+- `./setup.sh` no longer downloads the 4.5 GB sidecar model when there is no `llama-server` to run it. `./setup.sh --halogen --voice` no longer takes `--voice` as the checkpoint path.
+- When an engine does not report its context window the wizard says it is assuming 32768 instead of doing it silently.
+- Engine and upgrade logs moved from fixed `/tmp` names to `~/.cache` (`local-ai-harness/<engine>.log`, `gufo-upgrade.log`, `strata-upgrade.log`, `local-ai-harness/start-servers.log`).
+- `scripts/stop-all.sh` stops a container on :8731/:8080 only if its image is halogen or gufo, so an unrelated container on :8080 survives.
+- `scripts/uninstall.sh` knows the multi-engine setup: it removes the provider the wizard wrote (only if it points at this box), the defaults it set, all three pi packages setup installs and the `harness-model/quant/pick` files; it honours `PI_CODING_AGENT_DIR` and no longer says "pi is back to stock".
 - The wizard ends by running the doctor and prints "== NOT ready ==" (exit 1, no "start pi?" offer) instead of "== ready ==" when it fails.
 
 ## 2.1.0 - 2026-11-11

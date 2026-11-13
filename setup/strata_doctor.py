@@ -6,7 +6,7 @@ import json, os, re, sys, urllib.error, urllib.request
 
 FEED = "https://github.com/Niko1221/Strata/releases/latest/download/install.sh"
 AGENT = os.environ.get("PI_CODING_AGENT_DIR") or os.path.join(os.environ.get("PI_HOME", os.path.expanduser("~/.pi")), "agent")
-LOGS = ("/tmp/harness-strata.log", os.path.join(os.environ.get("LOCALAPPDATA", ""), "Strata", "components", ".updates", "state.json"))
+LOGS = (os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "local-ai-harness", "strata.log"), os.path.join(os.environ.get("LOCALAPPDATA", ""), "Strata", "components", ".updates", "state.json"))
 
 RULES = [
     (r"3221225785|0xC0000139|STATUS_ENTRYPOINT_NOT_FOUND",

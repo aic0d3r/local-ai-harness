@@ -354,4 +354,22 @@ assert h.verified("gufo") is False
 h.run_doctor = lambda: (True, [])
 assert h.verified("gufo") is True
 h.run_doctor = real_doc
+# halogen preflight: missing docker blocks the plan before any download question; logs live in the cache dir, not /tmp
+real_which, real_ask = h.shutil.which, h.ask_yn
+h.shutil.which = lambda n, *a, **k: None if n == "docker" else real_which(n, *a, **k)
+h.ask_yn = lambda *a, **k: (_ for _ in ()).throw(AssertionError("asked about a download with docker missing"))
+assert "docker is not installed" in h.halogen_preflight()[0]
+assert h.plan_start("halogen", {}) is None
+h.shutil.which, h.ask_yn = real_which, real_ask
+assert h.engine_log("gufo").startswith(h.LOGDIR) and not h.engine_log("gufo").startswith("/tmp")
+# an engine that will not report its context: the guess is announced, not silent
+import io, contextlib
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    assert h.build_entry("ollama", "m", 0, {})["models"][0]["contextWindow"] == 32768
+assert "did not report its context window" in buf.getvalue()
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    h.build_entry("ollama", "m", 8192, {})
+assert buf.getvalue() == ""
 print("ok")

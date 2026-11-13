@@ -137,6 +137,10 @@ try:
 except Exception: pass
 PY
 
+# docker would create a missing mount source as a root-owned directory; fail with the fix instead
+for f in libxrt_coreutil.so.2 libxrt_core.so.2 libxrt_driver_xdna.so.2; do
+  [ -e "/usr/lib/$f" ] || { echo "/usr/lib/$f is missing - install the XRT runtime (xrt / xrt-plugin-amdxdna) first" >&2; exit 1; }
+done
 RENDER_GID=$(getent group render | cut -d: -f3); VIDEO_GID=$(getent group video | cut -d: -f3)
 # reranker dropped from the default NPU set (v1.2): nothing calls /v1/rerank since search moved
 # to semble (0 calls in harness-events.jsonl) and it is never loaded on demand either - 821 MB

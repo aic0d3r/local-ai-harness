@@ -21,6 +21,7 @@ import strata_doctor
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 AGENT = os.environ.get("PI_CODING_AGENT_DIR") or os.path.join(os.environ.get("PI_HOME", os.path.expanduser("~/.pi")), "agent")
 PROFILES = json.load(open(os.path.join(REPO, "config", "profiles.json")))
+LOGDIR = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "local-ai-harness")  # not /tmp: a planted symlink there would be followed
 MODEL_DIRS = ["~/models", "~/.cache/huggingface/hub", "/models", "~/llm"]
 TUNE_BUDGET_S = 120
 
@@ -364,7 +365,9 @@ def server_input(port):
 def build_entry(engine, model_id, ctx, tuned):
     e = PROFILES["engines"][engine]
     mp = model_profile(model_id)
-    ctx = ctx or 32768
+    if not ctx:
+        print(f"  ! {engine} did not report its context window; assuming 32768. If it runs a different size, set contextWindow for {model_id} in models.json")
+        ctx = 32768
     max_tokens = tuned.get("maxTokens") or min(mp["maxTokens"], max(1024, ctx // 8))
     entry = {"id": model_id, "name": f"{model_id} ({engine})", "reasoning": mp["reasoning"], "input": server_input(e["port"]),
              "contextWindow": ctx, "maxTokens": max_tokens, "samplingParams": mp["samplingParams"]}
@@ -713,6 +716,22 @@ def strata_installed():
     return bool(subprocess.run(["bash", os.path.join(REPO, "server", "start-strata.sh"), "--print-run"], capture_output=True, text=True).stdout.strip())
 
 
+def halogen_preflight():
+    """What halogen's launcher needs on the host, checked before the 124 GB download -> list of problems (empty = fine)."""
+    if not shutil.which("docker"):
+        return ["docker is not installed (setup will not sudo-install it)"]
+    out = []
+    try:
+        if subprocess.run(["docker", "info"], capture_output=True, timeout=20).returncode:
+            out.append("docker is installed but this user cannot use it (start the service, or add yourself to the docker group)")
+    except (OSError, subprocess.TimeoutExpired):
+        out.append("docker did not answer")
+    out += [f"{d} is missing (the NPU/GPU driver is not loaded)" for d in ("/dev/accel/accel0", "/dev/kfd") if not os.path.exists(d)]
+    out += [f"/usr/lib/{f} is missing (install the XRT runtime; the launcher mounts it)" for f in ("libxrt_coreutil.so.2", "libxrt_core.so.2", "libxrt_driver_xdna.so.2")
+            if not os.path.exists(f"/usr/lib/{f}")]
+    return out
+
+
 def plan_start(engine, running, ask_start=True):
     """Ask everything starting engine needs (stop the memory holder, download, start); nothing runs yet.
     ask_start=False (start.sh): starting the saved engine needs no question, only stopping another one does.
@@ -722,6 +741,11 @@ def plan_start(engine, running, ask_start=True):
         print(f"{engine}: {c.get('start', 'start it yourself')}")
         return None
     plan = {"stop": None, "download": False, "weights": None}
+    if engine == "halogen":
+        problems = halogen_preflight()
+        if problems:
+            print(f"halogen cannot start on this box yet (nothing was downloaded):" + "".join(f"\n  \u2717 {p}" for p in problems))
+            return None
     holder = heap_holder(running)
     if holder and holder != engine and engine in BIG:
         if not ask_yn(f"{holder} holds the GPU memory {engine} needs. Stop {holder} and the ling-tiny sidecar?"):
@@ -770,7 +794,7 @@ def plan_start(engine, running, ask_start=True):
         if not ask_yn(f"The {weights_pref()} {engine} weights (or their MTP head) are not on this box. Download them (~{gb} GB, {free} GB free, resumable)?"):
             return None
         plan["weights"], plan["weights_gb"] = engine, gb
-    if ask_start and not ask_yn(f"Start {engine}? (runs {c['script']} in the background, log /tmp/harness-{engine}.log)", True):
+    if ask_start and not ask_yn(f"Start {engine}? (runs {c['script']} in the background, log {engine_log(engine)})", True):
         return None
     return plan
 
@@ -794,13 +818,18 @@ def prepare_start(plan, running):
     return not (inst and subprocess.run(["bash", os.path.join(REPO, "scripts", f"install-{inst}.sh"), "--yes"]).returncode)
 
 
+def engine_log(engine):
+    os.makedirs(LOGDIR, exist_ok=True)
+    return os.path.join(LOGDIR, f"{engine}.log")
+
+
 def start_engine(engine, running, plan=None, wait_s=900):
     """Start an engine we ship a launcher for (halogen, gufo); asks first unless given a plan. -> True once it answers."""
     plan = plan or plan_start(engine, running)
     if plan is None or not prepare_start(plan, running):
         return False
     c = PROFILES["engines"][engine]
-    log = open(f"/tmp/harness-{engine}.log", "w")
+    log = open(engine_log(engine), "w")
     env = dict(os.environ)
     pick = jget(PICK, {}) or {}
     if engine == "gufo" and pick.get("engine") == "gufo" and pick.get("ctx"):
@@ -813,7 +842,7 @@ def start_engine(engine, running, plan=None, wait_s=900):
                 print(f"\n  {engine} is up")
                 return True
             if proc.poll() is not None:  # launchers exec the server: an exited launcher means the start failed
-                whole = open(f"/tmp/harness-{engine}.log").read()
+                whole = open(engine_log(engine)).read()
                 tail = whole.strip().splitlines()[-3:]
                 print(f"\n  {engine} failed to start:" + "".join(f"\n    {l}" for l in tail))
                 if engine == "strata":
@@ -823,7 +852,7 @@ def start_engine(engine, running, plan=None, wait_s=900):
             time.sleep(3)
     except KeyboardInterrupt:
         pass
-    print(f"\n  {engine} did not answer in time; see /tmp/harness-{engine}.log")
+    print(f"\n  {engine} did not answer in time; see {engine_log(engine)}")
     return False
 
 

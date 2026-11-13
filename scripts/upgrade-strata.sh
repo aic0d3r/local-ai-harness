@@ -6,7 +6,7 @@ set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PORT=8080
 URL=http://127.0.0.1:$PORT
-LOG=/tmp/strata-upgrade.log
+mkdir -p "$HOME/.cache"; LOG="$HOME/.cache/strata-upgrade.log"  # per-user dir: a fixed /tmp name can be a planted symlink
 
 PID=$(ss -ltnpH "sport = :$PORT" 2>/dev/null | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2)
 if [ -z "$PID" ]; then

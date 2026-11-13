@@ -56,7 +56,7 @@ def one(engine, w, min_tps):
     if engine in ENV:
         os.environ.pop(ENV[engine], None)
     if not ok:
-        return {"note": f"did not start (see /tmp/harness-{engine}.log)"}
+        return {"note": f"did not start (see {h.engine_log(engine)})"}
     res = {"load_s": int(time.time() - t0)}
     port = h.PROFILES["engines"][engine]["port"]
     url, model = f"http://127.0.0.1:{port}", h.served_models(port, engine)[0]
