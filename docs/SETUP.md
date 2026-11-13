@@ -76,7 +76,8 @@ also works after setup: startup defaults point at the engine you chose, and exis
 | `./harness config` | menu of saved answers (engine, sidecar, voice, update check, sudo hints); change one, applied right away |
 | `./harness tune` | re-run the speed probe and re-size the limits |
 | `./harness monitor` | the live dashboard for the active engine (see [Operations](OPS.md#watching-speed-prefill--decode)) |
-| `./setup.sh --doctor` | read-only health check of the whole install (`--refusals` also checks the running model for over-refusal on 19 one-line tasks) |
+| `./harness verify` | ask the active engine for a live reply over HTTP; exit 0 only if it answered (the doctor's ready check) |
+| `./setup.sh --doctor` | read-only health check of the whole install; exits 1 if any check fails (`--refusals` also checks the running model for over-refusal on 19 one-line tasks) |
 | `./setup.sh --refresh-mcp` | reset the serena/semble MCP exposure and ensure the default DDG server (backs up `mcp.json` first) |
 
 ## Daily use

@@ -336,4 +336,22 @@ os.makedirs(f"{md}/.venv/bin"); os.symlink(sys.executable, f"{md}/.venv/bin/pyth
 sp = h.PROFILES["engines"]["strata"]["port"]  # the mock above moved it
 assert h.monitor_cmd("strata", once=True)[1:] == [f"{md}/strata.py", "monitor", "--url", f"http://127.0.0.1:{sp}", "--once"]
 assert h.monitor_cmd("strata", "http://nas:8080", True)[4] == "http://nas:8080"
+# live reply: the engine answers over HTTP without pi; a dead port and an HTTP error are failures with a reason
+assert h.live_reply("llamacpp", "m", timeout=5)[0] is True
+dead = h.PROFILES["engines"]["vllm"]["port"]
+h.PROFILES["engines"]["vllm"]["port"] = 1  # nothing listens on port 1
+ok_, why = h.live_reply("vllm", "m", timeout=2)
+assert ok_ is False and "no reply from vllm" in why
+h.PROFILES["engines"]["vllm"]["port"] = dead
+# `./harness verify` exits by that verdict
+rc = subprocess.run([sys.executable, os.path.join(os.path.dirname(__file__), "..", "setup", "harness.py"), "verify", "vllm", "m"],
+                    capture_output=True, text=True, env=dict(os.environ, PI_CODING_AGENT_DIR=tempfile.mkdtemp()))
+assert rc.returncode == 1 and rc.stdout.startswith("no reply from vllm"), rc
+# the wizard's last step trusts the doctor's verdict, and lists what it flagged
+real_doc = h.run_doctor
+h.run_doctor = lambda: (False, ["\u2717 sidecar not installed"])
+assert h.verified("gufo") is False
+h.run_doctor = lambda: (True, [])
+assert h.verified("gufo") is True
+h.run_doctor = real_doc
 print("ok")

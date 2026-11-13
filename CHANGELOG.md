@@ -3,6 +3,15 @@
 <!-- One block per section per release, in the order Added, Changed, Fixed. Add new entries to the
      existing block instead of opening a second one, so a release never has two "### Fixed" lists. -->
 
+## Unreleased
+
+### Added
+- `./harness verify [engine] [model]`: asks the engine itself for a few tokens over HTTP (no agent needed) and exits 0 only if it answered.
+
+### Changed
+- `./setup.sh --doctor` exits 1 when any check fails (it always exited 0), so scripts can rely on it. Its ready check now uses `./harness verify`, so `--no-pi` installs no longer report "no reply" from a healthy engine.
+- The wizard ends by running the doctor and prints "== NOT ready ==" (exit 1, no "start pi?" offer) instead of "== ready ==" when it fails.
+
 ## 2.1.0 - 2026-11-11
 
 Engine-only installs: the engines and the sidecar now set up and run without pi, for opencode or any other OpenAI-compatible agent, on Linux and Windows. The README starts at a copy-paste install block and moved the reference material into docs/.

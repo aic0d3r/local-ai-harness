@@ -1179,6 +1179,55 @@ def launch_offer(eng, prov, mid):
         os.execvp("pi", ["pi", "--provider", prov, "--model", mid])
 
 
+def live_reply(eng, model_id, timeout=120):
+    """Ask the engine itself for a few tokens over HTTP (no agent needed) -> (ok, detail)."""
+    port = PROFILES["engines"][eng]["port"]
+    body = {"model": model_id, "stream": True, "max_tokens": 64, "temperature": 0,
+            "messages": [{"role": "user", "content": "Reply with exactly: OK"}]}
+    t0 = time.time()
+    try:
+        with http(f"http://127.0.0.1:{port}/v1/chat/completions", body, timeout=timeout) as r:
+            for line in r:
+                line = line.decode().strip()
+                if not line.startswith("data:") or line.endswith("[DONE]"):
+                    continue
+                for c in json.loads(line[5:]).get("choices") or []:
+                    d = c.get("delta") or {}
+                    if d.get("content") or d.get("reasoning_content") or d.get("reasoning"):  # a thinking model may answer in reasoning first
+                        return True, f"{eng} answered in {time.time() - t0:.1f}s"
+    except urllib.error.HTTPError as e:
+        return False, f"{eng} on :{port} returned HTTP {e.code} for model {model_id}"
+    except (OSError, ValueError) as e:
+        return False, f"no reply from {eng} on :{port} ({e})"
+    return False, f"{eng} on :{port} sent no text"
+
+
+def cmd_verify(a):
+    """./harness verify [engine] [model]: a live reply from the engine; exit 0 only if it answered."""
+    p = active() or {}
+    eng, mod = a.engine or p.get("engine"), a.model or p.get("model")
+    if not eng or eng not in PROFILES["engines"] or not mod:
+        sys.exit("fail: nothing configured to check (run ./harness setup)")
+    ok, msg = live_reply(eng, mod)
+    print(msg)
+    sys.exit(0 if ok else 1)
+
+
+def run_doctor():
+    """./setup.sh --doctor, quietly -> (passed, its failing lines). The doctor's exit code is the verdict; it includes the live reply."""
+    r = subprocess.run(["bash", os.path.join(REPO, "setup.sh"), "--doctor"], capture_output=True, text=True)
+    return r.returncode == 0, [l.strip() for l in r.stdout.splitlines() if "\u2717" in l]
+
+
+def verified(eng):
+    """Last step of setup: the doctor (health + live reply). Prints what failed; True only if it passed."""
+    print(f"\n== checking: ./setup.sh --doctor (includes a live reply from {eng}) ==")
+    passed, bad = run_doctor()
+    for l in bad or ([] if passed else ["\u2717 the doctor failed - run ./setup.sh --doctor for details"]):
+        print("  ", l)
+    return passed
+
+
 def finish(eng, mod, no_tune, launch=False):
     tuned = jget(os.path.join(AGENT, "harness-tuned.json"), {}).get(hw_key(eng, mod), {}) if no_tune else {}
     if not no_tune:
@@ -1190,21 +1239,27 @@ def finish(eng, mod, no_tune, launch=False):
             tuned = {}
     if no_pi():
         e = PROFILES["engines"][eng]
-        print(f"\n== ready (pi not wired) ==\n  engine   {eng}: http://127.0.0.1:{e['port']}/v1  (OpenAI-compatible, key: any)\n  sidecar  http://127.0.0.1:8090/v1")
+        passed = verified(eng)
+        print(f"\n== {'ready' if passed else 'NOT ready'} (pi not wired) ==\n  engine   {eng}: http://127.0.0.1:{e['port']}/v1  (OpenAI-compatible, key: any)\n  sidecar  http://127.0.0.1:8090/v1")
         print("  re-enable pi: ./setup.sh --pi   (then ./setup.sh)")
         jput(os.path.join(AGENT, "harness-profile.json"), {"engine": eng, "provider": e["provider"], "model": mod,
                                                            "npu": bool(e["npu"]), "npuUrl": "http://127.0.0.1:8731", "sidecarUrl": "http://127.0.0.1:8090"})  # so start.sh knows the engine
+        if not passed:
+            sys.exit(1)
         return
     prov, mid, ctx = apply(eng, mod, tuned)
     speed = f"{tuned['prefill_tps']} t/s prefill, {tuned['decode_tps']} t/s decode" if tuned.get("decode_tps") else "not probed (./harness tune)"
     if no_tune and tuned.get("decode_tps"):
         speed += f" (saved {tuned.get('when', '')}; re-measure: ./harness tune)"
-    print(f"\n== ready ==\n  engine   {eng} -> {prov}/{mid}\n  context  {ctx}\n  speed    {speed}")
+    passed = verified(eng)
+    print(f"\n== {'ready' if passed else 'NOT ready'} ==\n  engine   {eng} -> {prov}/{mid}\n  context  {ctx}\n  speed    {speed}")
     print("  start    ./start.sh ~/your-project")
     if eng in ("halogen", "strata"):
         print("  monitor  ./harness monitor   (live speed, memory and requests; Ctrl-C to quit)")
     print(f"  choices  {choices_line()}   (change: ./harness config)")
     print("  check    ./setup.sh --doctor   (status: ./harness status)")
+    if not passed:
+        sys.exit(1)
     if launch:
         launch_offer(eng, prov, mid)
 
@@ -1371,7 +1426,7 @@ def main():
     import argparse
     ap = argparse.ArgumentParser(prog="harness")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for n, f in (("detect", cmd_detect), ("setup", cmd_setup), ("use", cmd_use), ("tune", cmd_tune), ("status", cmd_status), ("config", cmd_config), ("update-check", cmd_update_check), ("up", cmd_up), ("recommend", cmd_recommend), ("quant-info", cmd_quant_info), ("ctx-info", cmd_ctx_info), ("model-info", cmd_model_info), ("monitor", cmd_monitor)):
+    for n, f in (("detect", cmd_detect), ("setup", cmd_setup), ("use", cmd_use), ("tune", cmd_tune), ("status", cmd_status), ("config", cmd_config), ("update-check", cmd_update_check), ("up", cmd_up), ("recommend", cmd_recommend), ("quant-info", cmd_quant_info), ("ctx-info", cmd_ctx_info), ("model-info", cmd_model_info), ("monitor", cmd_monitor), ("verify", cmd_verify)):
         p = sub.add_parser(n)
         p.set_defaults(fn=f)
         if n in ("setup", "use"):
@@ -1387,6 +1442,9 @@ def main():
             p.add_argument("engine", nargs="?", help="default: the active engine (halogen or strata)")
             p.add_argument("--url", help="server root, e.g. a remote Strata (default: this box)")
             p.add_argument("--once", action="store_true", help="Strata only: print one snapshot and exit")
+        if n == "verify":
+            p.add_argument("engine", nargs="?", help="default: the active engine")
+            p.add_argument("model", nargs="?", help="default: the active model")
         if n == "model-info":
             p.add_argument("id")
             p.add_argument("field")

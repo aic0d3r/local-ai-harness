@@ -70,7 +70,8 @@ SIDECAR_ON=1; [ "$(cat "$SC_PREF" 2>/dev/null)" = 0 ] && SIDECAR_ON=0
 UB_TINY=$(tr -dc '0-9' 2>/dev/null < "${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/harness-ubatch"); UB_TINY=${UB_TINY:-4096}
 ok(){ printf '  \033[32m✓\033[0m %s\n' "$1"; }
 warn(){ printf '  \033[33m!\033[0m %s\n' "$1"; }
-fail(){ printf '  \033[31m✗\033[0m %s\n' "$1"; }
+FAILS=0  # every fail() counts; --doctor exits 1 when any happened
+fail(){ FAILS=$((FAILS+1)); printf '  \033[31m✗\033[0m %s\n' "$1"; }
 tiny_up(){ curl -sf -m 3 "localhost:$TINY_PORT/health" >/dev/null 2>&1; }
 hal_up(){  curl -sf -m 3 "localhost:$HAL_PORT/health"  >/dev/null 2>&1; }
 eng_up(){ curl -sf -m 3 "$ENG_URL/v1/models" >/dev/null 2>&1; }
@@ -214,12 +215,11 @@ if [ "$DOCTOR" = 1 ]; then
   if [ -z "${ACT:-}" ]; then :
   elif [[ "$RUNNING" != *" $ACT "* ]]; then fail "ready check skipped: $ACT is down"
   else
-    RC=$(mktemp); T0=$SECONDS
-    timeout 120 pi -p --no-skills --no-context-files --provider "$ACT_PROV" --model "$ACT_MID" --thinking low "Reply with exactly: OK" > "$RC" 2>/dev/null &
-    while kill -0 $! 2>/dev/null; do [ -t 1 ] && printf '\r  … ready check: asking %s for a reply (%ss, gives up at 120s)' "$ACT" $((SECONDS-T0)); sleep 1; done
+    # asks the engine over HTTP, not through pi, so it works for --no-pi installs and tests the engine alone
+    [ -t 1 ] && printf '  … ready check: asking %s for a reply (gives up at 120s)' "$ACT"
+    R=$(python3 "$REPO/setup/harness.py" verify "$ACT" "$ACT_MID" 2>&1); RRC=$?
     [ -t 1 ] && printf '\r\033[K'
-    R=$(grep -c 'OK' "$RC"); rm -f "$RC"
-    [ "$R" -ge 1 ] && ok "ready check: $ACT answered" || fail "ready check: no reply from $ACT"
+    [ "$RRC" = 0 ] && ok "ready check: $R" || fail "ready check: $R"
   fi
   # --refusals: ask the running model the tasks aligned builds flinch at (kill/inject/
   # pentest vocabulary, medical copy, blunt tone) and report the refusal rate.
@@ -238,7 +238,8 @@ if [ "$DOCTOR" = 1 ]; then
   elif [[ "$RUNNING" == *" ${ACT:-none} "* ]]; then
     echo "  tip: ./setup.sh --doctor --refusals checks $ACT for over-refusal on 19 one-line tasks"
   fi
-  exit 0
+  if [ "$FAILS" -gt 0 ]; then echo "doctor: $FAILS problem(s) found"; exit 1; fi
+  echo "doctor: all checks passed"; exit 0
 fi
 
 # first run: ask once whether start.sh should check for a newer halogen image (answer saved; env overrides)
