@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   tests:
-    runs-on: ubuntu-24.04 # pinned: ubuntu-latest moves to 26.04 on 2026-10-19, which would change the test box unannounced
+    runs-on: ubuntu-26.04 # pinned so the test box only changes on purpose (ubuntu-latest moves without notice)
     timeout-minutes: 15
     steps:
       # actions are pinned to commit SHAs (tags can move); bump on purpose
@@ -32,7 +32,7 @@ jobs:
 
   install:
     # the whole installer, no GPU: setup.sh against a stub engine in a throwaway HOME (tests/e2e-setup.sh)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

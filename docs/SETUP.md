@@ -116,7 +116,7 @@ small-context opt-out are in [Operations](OPS.md).
 ./setup.sh --uninstall
 ```
 
-Removes everything the installer provisioned (extensions, templates, theme, any skills it copied (the repo ships none; the pi packages bring their own), pi defaults, the providers and the
+Removes everything the installer provisioned (extensions, templates, theme, any skills older releases copied, pi defaults, the providers and the
 wizard's profile files where they still match what setup set, and the systemd units) after backing all of it up to
-`~/pi-harness-uninstall-backup-*.tar.gz`. **Deliberately left alone:** your own model entries, `mcp.json`, the sidecar
+`~/pi-harness-uninstall-backup-*.tar.gz`. The repo ships no skills itself; the pi packages bring their own. **Deliberately left alone:** your own model entries, `mcp.json`, the sidecar
 GGUF (the reclaim command is printed), the halogen container and your checkpoint files.
