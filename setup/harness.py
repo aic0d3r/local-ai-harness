@@ -387,7 +387,8 @@ def build_entry(engine, model_id, ctx, tuned):
     max_tokens = tuned.get("maxTokens") or min(mp["maxTokens"], max(1024, ctx // 8))
     # servers that prefix their ids with the engine (osmos-osmos-evo-a) need not repeat it in the name
     shown = model_id[len(engine) + 1:] if model_id.lower().startswith(engine.lower() + "-") else model_id
-    entry = {"id": model_id, "name": f"{shown} ({engine})", "reasoning": mp["reasoning"], "input": server_input(e["port"]),
+    entry = {"id": model_id, "name": mp.get("name") or f"{shown} ({engine})", "reasoning": mp["reasoning"],
+             "input": server_input(e["port"]),
              "contextWindow": ctx, "maxTokens": max_tokens, "samplingParams": mp["samplingParams"]}
     for k in ("compat", "thinkingLevelMap"):
         if k in mp:

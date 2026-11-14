@@ -137,7 +137,9 @@ python3 tools/install/osmos_install.py osmos-evo-a --models /path/to/models --se
 ```
 
 Measured here (osmos-evo-a, GPU only, drafted): **452 t/s prefill, 40.8 t/s decode** (`./harness tune`), 1M context,
-first request after start ~30 s while the expert cache fills. Two things the harness handles for it:
+first request after start ~30 s while the expert cache fills. It appears in pi and Paseo as **osmos deepseek** (a model
+profile can name itself: `models.osmos-deepseek`; the id osmos-api serves is `osmos-osmos-evo-a`). Two things the
+harness handles for it:
 
 - **It decodes greedily and rejects sampling**: `temperature 0`, `top_p 1` or a 400 (`sampling is not built`).
   `config/profiles.json` (`models.osmos-deepseek`) sends exactly those, so agents need no special casing.

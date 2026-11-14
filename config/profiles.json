@@ -74,6 +74,7 @@
     },
     "osmos-deepseek": {
    "match": "osmos-",
+   "name": "osmos deepseek",
    "reasoning": true,
    "maxTokens": 4096,
    "samplingParams": {
