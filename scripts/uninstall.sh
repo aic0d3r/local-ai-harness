@@ -64,6 +64,7 @@ echo "[3/8] extensions provisioned by the harness"
 for p in "$REPO"/extensions/*.ts "$REPO"/extensions/*/; do
   b=$(basename "$p"); [ -e "$AG/extensions/$b" ] && rm -rf "${AG:?}/extensions/$b"
 done
+[ -d "$AG/progress" ] && rm -rf "${AG:?}/progress"  # progress-tracker checkpoints
 for f in "${STATE[@]}"; do rm -f "${AG:?}/$f"; done  # wizard answers, tuning, markers, logs (all in the backup)
 [ -d "$AG/extensions/optional" ] && rm -rf "$AG/extensions/optional"
 [ -f "$AG/rag-index.py" ] && rm -f "$AG/rag-index.py" && echo "      rag-index.py removed (installed by setup)"

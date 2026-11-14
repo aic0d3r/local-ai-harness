@@ -22,6 +22,17 @@
                  "update": { "have": "/version version", "latest": "gh:vllm-project/vllm", "how": "pip install -U vllm (or pull the new vllm image)" } },
     "ollama":   { "port": 11434, "probe": "/v1/models",  "provider": "ollama",  "npu": false, "managed": false, "loses": "NPU tools (guard, triage, dedup)",
                  "update": { "have": "/api/version version", "latest": "gh:ollama/ollama", "how": "re-run the ollama installer or update it with your package manager" } },
+    "osmos": {
+      "port": 8091,
+      "probe": "/v1/models",
+      "provider": "osmos",
+      "npu": false,
+      "managed": false,
+      "ctx": 1048576,
+      "loses": "NPU tools (guard, triage, dedup)",
+      "note": "osmos-api (libosmos): DeepSeek-V4.1-Flash packs, 1M context; started by its installer --serve. It does not report its context window, so `ctx` is the pack's max_context in osmos.json - edit both together",
+      "start": "python3 tools/install/osmos_install.py <pack> --serve (in the libosmos checkout)"
+    },
     "lmstudio": { "port": 1234,  "probe": "/v1/models",  "provider": "lmstudio","npu": false, "managed": false, "loses": "NPU tools (guard, triage, dedup)" }
   },
   "recommend": {
@@ -34,7 +45,7 @@
     ],
     "extras_gb": 4,
     "ctx_tiers": [ { "spare_gb": 14, "ctx": 262144 }, { "spare_gb": 11, "ctx": 131072 }, { "spare_gb": 8, "ctx": 65536 } ],
-    "halogen_min_ram_gb": 110, "strata_min_gb": 72, "strata_order": ["flash-next-iq3_s", "flash-next-iq3_xxs", "flash-next-iq2_xs", "flash-next-q2_0", "qwen36-q4"], "halogen_download_gb": 124
+    "halogen_min_ram_gb": 110, "strata_min_gb": 72, "strata_listed_vram_gb": 12, "strata_order": ["flash-next-iq3_s", "flash-next-iq3_xxs", "flash-next-iq2_xs", "flash-next-q2_0", "qwen36-q4"], "halogen_download_gb": 124
   },
   "catalog": {
     "_doc": "Models the wizard can set up, one saved answer (harness-model). engines = who can load it; halogen always serves its own Flash-Next checkpoint and ignores the answer. strata = [family, size] for Strata's `setup.sh --family F --model SIZE` (it downloads the files itself); run = the start script that setup writes; ram_gb = RAM Strata's docs say to plan for (experts + ~10 GB); download_gb = what setup fetches. Sizes are Strata's MODELS.md / DETAILS.md and the Hugging Face repos; none of the non-default rows has run here.",
@@ -61,7 +72,16 @@
       "thinkingLevelMap": { "minimal": null, "low": "low", "medium": "medium", "high": "xhigh", "xhigh": null, "max": null },
       "samplingParams": { "temperature": 1.0, "top_p": 0.95, "top_k": 20, "min_p": 0.0 }
     },
-    "deepseek-r1": {
+    "osmos-deepseek": {
+   "match": "osmos-",
+   "reasoning": true,
+   "maxTokens": 4096,
+   "samplingParams": {
+    "temperature": 0,
+    "top_p": 1
+   }
+  },
+  "deepseek-r1": {
       "match": "deepseek.*r1|r1-distill",
       "reasoning": true,
       "samplingParams": { "temperature": 0.6, "top_p": 0.95 }

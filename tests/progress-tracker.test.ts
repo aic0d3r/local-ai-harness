@@ -4,7 +4,17 @@ import * as fs from "node:fs";
 
 const dir = fs.mkdtempSync("/tmp/pt-");
 process.env.PI_CODING_AGENT_DIR = dir; // read once at module load
-const { isContinuation, isOurs, stamp } = await import("../extensions/progress-tracker.ts");
+const { isContinuation, isOurs, stamp, progressPath } = await import("../extensions/progress-tracker.ts");
+
+test("checkpoints live under the agent dir, one file per project, not in the project", () => {
+	const a = progressPath("/work/a"), b = progressPath("/work/b");
+	expect(a.startsWith(`${dir}/progress/`) && a.endsWith(".md")).toBe(true);
+	expect(a).not.toBe(b);
+	expect(progressPath("/work/a")).toBe(a);
+	process.env.PI_PROGRESS_FILE = "TASK2.md"; // explicit override: a file inside the project, as before
+	expect(progressPath("/work/a")).toBe("/work/a/TASK2.md");
+	delete process.env.PI_PROGRESS_FILE;
+});
 
 test("a PROGRESS.md shipped in a repo is not ours; one we stamped is, until it changes", () => {
 	const f = `${dir}/PROGRESS.md`;

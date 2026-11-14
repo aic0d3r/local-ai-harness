@@ -95,12 +95,18 @@ def capacity():
             pools = [sum(int(open(f"{c}/mem_info_{k}_total").read()) for k in ("vram", "gtt")) / 2**30 for c in glob.glob("/sys/class/drm/card[0-9]/device") if os.path.exists(f"{c}/mem_info_gtt_total")]
             fast = max(pools) if pools else 0.0
             vram = max([int(open(f).read()) / 2**30 for f in glob.glob("/sys/class/drm/card[0-9]/device/mem_info_vram_total")] or [0])
-            lines = [l for l in subprocess.run(["lspci"], capture_output=True, text=True).stdout.splitlines() if re.search(r"VGA|Display|3D", l) and "AMD" in l]
-            name = re.sub(r"\s*(\[[^\]]*\]|\(rev [^)]*\))", "", lines[0].split("[AMD/ATI]", 1)[-1].split(": ", 1)[-1]).strip() if lines else ""
+            try:  # pciutils is not installed everywhere; the name is a label, the sizes above do not need it
+                lines = [l for l in subprocess.run(["lspci"], capture_output=True, text=True).stdout.splitlines() if re.search(r"VGA|Display|3D", l) and "AMD" in l]
+                name = re.sub(r"\s*(\[[^\]]*\]|\(rev [^)]*\))", "", lines[0].split("[AMD/ATI]", 1)[-1].split(": ", 1)[-1]).strip() if lines else ""
+            except OSError:
+                name = ""
+            # Strix Halo is gfx1151 (KFD gfx_target_version 110501): recognised from the kernel even without lspci or a new enough pci.ids
+            if "Strix Halo" not in name and any("gfx_target_version 110501" in open(p).read() for p in glob.glob("/sys/class/kfd/kfd/topology/nodes/*/properties")):
+                name = "Strix Halo"
             name = name or "AMD GPU"
     except Exception:
         pass
-    d = os.environ.get("ENGINE_DIR") or os.path.expanduser("~/LLMBench/models")
+    d = os.environ.get("ENGINE_DIR") or next((p for p in map(os.path.expanduser, ("~/LLMBench/models", "~/models")) if os.path.isdir(p)), os.path.expanduser("~/models"))
     while d != os.path.dirname(d) and not os.path.isdir(d):
         d = os.path.dirname(d)
     return {"gpu_name": name, "vram_gb": round(vram, 1), "fast_gb": round(fast, 1), "disk_free_gb": shutil.disk_usage(d).free // 2**30}
@@ -163,15 +169,17 @@ def recommend(hw, cap):
         return none(f"Strix Halo with {fast:.0f} GB addressable: the smallest quant ({R['quants'][-1]['gib']} GiB) plus context does not fit")
     if hw["gpu"] in ("amd", "nvidia"):
         cat = catalog()
+        # Strata does not state a VRAM minimum; the smallest card its published speeds list is 12 GB. Say so, do not refuse (0 = probe failed)
+        small = f" Only {vram:g} GB VRAM: Strata's published speeds start at {R['strata_listed_vram_gb']} GB cards, so expect it to be slow." if 0 < vram < R["strata_listed_vram_gb"] else ""
         if weights_pref() == "abliterated":  # only the Unsloth-layout Flash-Next has an abliterated build
             if ram + vram < R["strata_min_gb"]:
                 return none(f"{vram} GB VRAM + {ram} GB RAM: Strata's UD-Q4_K_XL (the abliterated weights) needs {R['strata_min_gb']}+ GB of RAM and VRAM together")
             return out(engine="strata", model=DEFAULT_MODEL, download_gb=quant_gb(DEFAULT_QUANT),
-                       why=f"{vram} GB VRAM + {ram} GB RAM: Strata runs the abliterated Flash-Next you chose (UD-Q4_K_XL layout)")
+                       why=f"{vram} GB VRAM + {ram} GB RAM: Strata runs the abliterated Flash-Next you chose (UD-Q4_K_XL layout).{small}")
         for mid in R["strata_order"]:  # the biggest pack whose RAM need (experts + ~10 GB, Strata's rule) fits
             if ram >= cat[mid]["ram_gb"]:
                 return out(engine="strata", model=mid, download_gb=cat[mid]["download_gb"],
-                           why=f"{vram} GB VRAM + {ram} GB RAM: {cat[mid]['label']} needs ~{cat[mid]['ram_gb']} GB RAM; Strata keeps what does not fit the card in RAM (and runs on Windows and Mac too)")
+                           why=f"{vram} GB VRAM + {ram} GB RAM: {cat[mid]['label']} needs ~{cat[mid]['ram_gb']} GB RAM; Strata keeps what does not fit the card in RAM (and runs on Windows and Mac too).{small}")
         return none(f"{ram} GB RAM is under the {cat[R['strata_order'][-1]]['ram_gb']} GB the smallest pack needs")
     return none(f"no supported GPU path on this box (gpu={hw['gpu']}); run Strata natively there and point pi at it: ./setup.sh --strata <url>")
 
@@ -353,6 +361,12 @@ def server_ctx(port):
     return 0
 
 
+def engine_ctx(engine):
+    """The window the engine serves: what the server says, else the profile's `ctx` (osmos reads its pack's osmos.json
+    and serves 1M without reporting it), else 0 = unknown."""
+    return server_ctx(PROFILES["engines"][engine]["port"]) or int(PROFILES["engines"][engine].get("ctx") or 0)
+
+
 def server_input(port):
     """Input modalities from the running server (gufo >=0.32 serves images via the adjacent mmproj); text-only if it will not say."""
     try:
@@ -407,16 +421,28 @@ def sync_ctx(engine):
             jput(sj, s)
 
 
+def known_ctx(engine, model_id, old):
+    """The server will not say what window it runs (Ollama and LM Studio do not report the loaded one, and load far less than
+    the model maximum by default). Keep what models.json already holds for this model, else ask. 0 = unknown: build_entry assumes
+    32768 and says so."""
+    prev = next((x.get("contextWindow") for x in (old or {}).get("models", []) if x.get("id") == model_id), 0)
+    if prev or not sys.stdin.isatty():
+        return prev or 0
+    hint = {"ollama": "num_ctx, or OLLAMA_CONTEXT_LENGTH", "lmstudio": "the context length the model is loaded with"}.get(engine, "the server's context setting")
+    ans = input(f"  {engine} does not report its context window. What is it set to? ({hint}) [32768] ").strip()
+    return int(ans) if ans.isdigit() and int(ans) >= 2048 else 0
+
+
 def apply(engine, model_id, tuned=None):
     tuned = tuned or {}
     e = PROFILES["engines"][engine]
-    ctx = server_ctx(e["port"])
     mj = os.path.join(AGENT, "models.json")
     m = jget(mj, {})
     if os.path.exists(mj) and not os.path.exists(mj + ".pre-harness"):
         shutil.copy(mj, mj + ".pre-harness")  # one-time backup before we first touch it
     prov = e["provider"]
     old = m.get("providers", {}).get(prov)
+    ctx = engine_ctx(engine) or known_ctx(engine, model_id, old)
     new = build_entry(engine, model_id, ctx, tuned)
     if old and engine == "halogen":  # setup.sh provisions the halogen provider; never overwrite it
         new = old
@@ -493,8 +519,10 @@ def hw_key(engine, model_id):
 
 
 def stream_once(port, model_id, prompt, max_tokens):
-    """-> (prompt_tokens, ttft_s, decode_tps) for one streamed chat completion."""
-    t0, first, n, ptok = time.time(), None, 0, 0
+    """-> (prompt_tokens, ttft_s, decode_tps) for one streamed chat completion. Decode counts tokens, not chunks: an
+    engine that drafts (osmos, halogen/gufo with a drafter) verifies several tokens per chunk, and counting chunks
+    reported a third of the real rate."""
+    t0, first, n, ptok, ctok = time.time(), None, 0, 0, 0
     body = {"model": model_id, "stream": True, "max_tokens": max_tokens, "temperature": 0,
             "stream_options": {"include_usage": True}, "messages": [{"role": "user", "content": prompt}]}
     for line in http(f"http://127.0.0.1:{port}/v1/chat/completions", body, timeout=TUNE_BUDGET_S):
@@ -503,19 +531,20 @@ def stream_once(port, model_id, prompt, max_tokens):
             continue
         d = json.loads(line[5:])
         if d.get("usage"):
-            ptok = d["usage"].get("prompt_tokens", 0)
+            ptok = d["usage"].get("prompt_tokens", 0) or ptok
+            ctok = d["usage"].get("completion_tokens", 0) or ctok
         for c in d.get("choices", []):
             delta = c.get("delta", {})
             if delta.get("content") or delta.get("reasoning_content"):
                 first = first or time.time()
                 n += 1
     end = time.time()
-    return ptok, (first or end) - t0, (n / (end - first)) if first and end > first else 0.0
+    return ptok, (first or end) - t0, ((ctok or n) / (end - first)) if first and end > first else 0.0
 
 
 def tune(engine, model_id):
     port = PROFILES["engines"][engine]["port"]
-    ctx = server_ctx(port)
+    ctx = engine_ctx(engine)
     words = min(3000, max(200, (ctx or 8192) // 8))  # ~words*1.3 tokens; never more than 1/6 of the window
     filler = " ".join(f"item{i}" for i in range(words))
     res = {"engine": engine, "model": model_id, "ctx": ctx, "when": time.strftime("%Y-%m-%d")}
@@ -977,15 +1006,29 @@ def sidecar_pref():
         return ""
 
 
+SIDECAR_MIN_GB = 24  # the sidecar holds ~8 GiB of GPU memory: below this it competes with the main model for the card
+
+
+def sidecar_default():
+    """Default answer for the sidecar: on where the GPU has room (Strix Halo, big cards, or a failed probe), off on small cards."""
+    fast = capacity()["fast_gb"]
+    return not 0 < fast < SIDECAR_MIN_GB
+
+
+def set_sidecar(on):
+    os.makedirs(AGENT, exist_ok=True)
+    open(os.path.join(AGENT, "harness-sidecar"), "w").write("1\n" if on else "0\n")
+
+
 def ask_sidecar(reconfigure):
-    """Ask once whether to run the ling-tiny sidecar (default yes); setup.sh reads the saved answer."""
+    """Ask once whether to run the ling-tiny sidecar (default: yes where the GPU has room); setup.sh reads the saved answer."""
     if (sidecar_pref() and not reconfigure) or not sys.stdin.isatty():
         return
     dl = "" if glob.glob(os.path.expanduser("~/.models/ling3.0-tiny/*.gguf")) + glob.glob(os.path.join(REPO, "models/ling3.0-tiny/*.gguf")) else ", first run downloads 4.5 GB"
-    on = ask_yn(f"Run the ling-tiny sidecar? ~2x faster commits/compaction, holds ~8 GiB GPU memory{dl}. "
-                "(No = the main model writes them)", True)
-    os.makedirs(AGENT, exist_ok=True)
-    open(os.path.join(AGENT, "harness-sidecar"), "w").write("1\n" if on else "0\n")
+    default, fast = sidecar_default(), capacity()["fast_gb"]
+    room = f" Your GPU has {fast:g} GB, so the default is No." if not default else ""
+    set_sidecar(ask_yn(f"Run the ling-tiny sidecar? ~2x faster commits/compaction, holds ~8 GiB GPU memory{dl}.{room} "
+                       "(No = the main model writes them)", default))
 
 
 def no_pi():
@@ -1382,6 +1425,8 @@ def cmd_setup(a):
     upgrade = bool(up and up[0])
     if not a.yes:
         ask_sidecar(a.reconfigure)
+    if not sidecar_pref() and not sidecar_default():  # not asked (--yes, no terminal) on a small card: do not reserve 8 GiB of it unasked
+        set_sidecar(False)
     voice = not a.yes and ask_once("voice", "Set up voice (local STT/TTS via Lemonade)?", a.reconfigure)
     if not a.yes and sys.stdin.isatty():
         steps = [("skip pi wiring (engine + sidecar only)" if no_pi() else f"install/update pi extensions, providers, skills{'' if verbose else f' (details: {SETUP_LOG})'}"),

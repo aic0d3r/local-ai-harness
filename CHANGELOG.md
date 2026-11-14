@@ -6,6 +6,7 @@
 ## Unreleased
 
 ### Added
+- `osmos` engine (libosmos, `osmos-api` on `:8091`): DeepSeek-V4.1-Flash packs at 1M context, wired like any other engine. Its profile carries the context window the server does not report (`ctx`, mirroring the pack's `osmos.json`) and the only sampling it accepts (`temperature 0`, `top_p 1`); see [docs/ENGINES.md](docs/ENGINES.md).
 - `./harness verify [engine] [model]`: asks the engine itself for a few tokens over HTTP (no agent needed) and exits 0 only if it answered.
 
 ### Changed
@@ -16,6 +17,9 @@
 - Engine and upgrade logs moved from fixed `/tmp` names to `~/.cache` (`local-ai-harness/<engine>.log`, `gufo-upgrade.log`, `strata-upgrade.log`, `local-ai-harness/start-servers.log`).
 - `scripts/stop-all.sh` stops a container on :8731/:8080 only if its image is halogen or gufo, so an unrelated container on :8080 survives.
 - `scripts/uninstall.sh` knows the multi-engine setup: it removes the provider the wizard wrote (only if it points at this box), the defaults it set, all three pi packages setup installs and the `harness-model/quant/pick` files; it honours `PI_CODING_AGENT_DIR` and no longer says "pi is back to stock".
+- Other-hardware readiness: the sidecar question defaults to No on a GPU with under 24 GB of memory (and says why; `--yes` or no terminal saves No there instead of reserving 8 GiB unasked); Strix Halo is recognised from the kernel (`gfx1151`) when `lspci` is missing; when a server does not report its context window (Ollama, LM Studio) the wizard keeps what `models.json` already holds for that model, else asks, instead of silently writing 32768; a card under 12 GB VRAM gets a visible caution on the Strata recommendation (Strata states no minimum, its published speeds start at 12 GB cards).
+- Author-specific defaults: the gufo launcher's model folder defaults to `~/models/qwen38-flash-next` (an existing `~/LLMBench/models/qwen38-flash-next` is still used), the sidecar's `llama-server` is found via `$LLAMA_SERVER`, PATH, `~/.local/bin` and then the newest `~/LLMBench/engines/*/vulkan/bin` build instead of three hard-coded versions, and the `setup.sh` header and `docs/ENGINES.md` opening no longer say halogen is the only engine the harness provisions.
+- `progress-tracker` keeps its checkpoint under `~/.pi/agent/progress/` (one file per project folder) instead of `PROGRESS.md` in the project, so project folders stay clean. A `PROGRESS.md` an older version left behind is read once, then ignored; `PI_PROGRESS_FILE` still names a file inside the project. New `/progress-reset` clears this project's note (it only deletes files this harness wrote).
 - Declining "Continue?" in the wizard (or pressing Esc / Ctrl-C before it) now puts every saved answer back (agent, sidecar, voice, update check, weights, model, quant, hardware pick). It used to print "nothing changed" with the new answers already saved.
 - Container matching by port alone is gone from the engine stop paths: `./harness` (`stop_engine`), `scripts/upgrade-halogen.sh` and `scripts/upgrade-gufo.sh` now stop only a container whose image is halogen or gufo (`scripts/lib-docker.sh`), as `stop-all.sh` already did.
 - `work-guard` no longer blocks harmless commands that merely quote `sed -i` or `perl -pi` (a `grep` pattern, a commit message, an `echo`); a real `sed -i`, including inside `bash -c`, `eval` or `xargs`, is still blocked.
@@ -28,6 +32,9 @@
 - Engine upgrades (`upgrade-halogen.sh`, `upgrade-gufo.sh`) store the new pin in `~/.pi/agent/harness-pins` instead of rewriting the tracked launchers, so the checkout stays clean and `/harness-update` is not blocked afterwards. The launchers keep the reviewed default (`DEFAULT_TAG`/`DEFAULT_DIGEST`, `DEFAULT_VERSION`/`DEFAULT_DIGEST`); a stored pin is ignored once a harness update ships a newer default.
 - `./start.sh`, `./harness up` and `/harness-update` no longer assume halogen: with no saved engine `up` says "not set up yet: run ./setup.sh" instead of starting a 124 GB download and install; `/harness-update` runs the new `./harness refresh` (re-install for the saved engine) instead of a bare `setup.sh`; a bare non-terminal `./setup.sh` on a box set up for another engine delegates to it; and `setup.sh` never downloads the 4.5 GB sidecar model with no terminal and no saved answer.
 - The wizard ends by running the doctor and prints "== NOT ready ==" (exit 1, no "start pi?" offer) instead of "== ready ==" when it fails.
+
+### Fixed
+- `./harness tune` counted stream chunks as tokens, so an engine that drafts (osmos, or halogen/gufo with DFlash2/MTP) reported a fraction of its real decode rate: osmos measured 6.0 t/s where it decodes 40.8 t/s. It now uses the token count the server reports with `include_usage`, falling back to chunk counting only when there is none.
 
 ## 2.1.0 - 2026-11-11
 

@@ -44,7 +44,7 @@ longer launched by default), and a Ling-3.0-tiny sidecar on :8090.
    setup.sh into mcp.json; indexes on first query, ~1s for this repo).
 
 Smoke test (expect the tool list to include commit + mcp__semble__search;
-"[progress-tracker] wrote PROGRESS.md" after ~10 responses):
+a checkpoint file under ~/.pi/agent/progress/ after ~10 responses):
 
     cd <indexed repo> && pi -p --no-skills --no-context-files \
       --provider halogen --model halogen-qwen3.8-flash-next --thinking medium \

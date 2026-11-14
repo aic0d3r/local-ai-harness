@@ -4,7 +4,8 @@
 # the two engines fight over the same 109GB heap and device-lost follows.
 # Spec decode: native MTP via the -shared- sidecar (the one gufo's docs name).
 set -u
-ENGINE_DIR=${ENGINE_DIR:-$HOME/LLMBench/models/qwen38-flash-next}
+# default ~/models/qwen38-flash-next; a box that already keeps the files under ~/LLMBench/models (the author's layout) keeps using them
+ENGINE_DIR=${ENGINE_DIR:-$([ -d "$HOME/LLMBench/models/qwen38-flash-next" ] && echo "$HOME/LLMBench/models/qwen38-flash-next" || echo "$HOME/models/qwen38-flash-next")}
 # model family: GUFO_FAMILY, else the wizard's saved model answer (harness-model; qwen38-27b is the only other one gufo
 # loads). --print-model ignores the saved answer: its callers (download scripts, Strata install) ask about Flash-Next.
 FAMILY="${GUFO_FAMILY:-}"

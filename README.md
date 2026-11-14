@@ -4,7 +4,7 @@ Run a coding agent on a local model, on any hardware. Built on [pi](https://gith
 Windows (beta). Tuned and measured on AMD Strix Halo.
 
 - **Detects your GPU and RAM**, recommends an engine and model, and sizes limits to your context window.
-- **Switches engines:** Strata, llama.cpp, vLLM, Ollama, LM Studio, halogen, gufo, or a cloud model.
+- **Switches engines:** Strata, llama.cpp, vLLM, Ollama, LM Studio, halogen, gufo, osmos (DeepSeek-V4.1-Flash at 1M context), or a cloud model.
 - **Cuts tokens:** compressed command output, symbol-level code tools, search by meaning.
 - **Resumes after a crash:** relaunch, say "continue".
 
@@ -126,8 +126,8 @@ Every lever and how it was measured: [BENCHMARKS.md](docs/BENCHMARKS.md#efficien
 Kill pi or the server mid-task, relaunch `./start.sh` in the same directory and say "continue": `progress-tracker` wrote a
 checkpoint and the fresh session picks it up. Verified across six scenarios, including `kill -9` at response 1, server
 death mid-task and 15-deep compaction chains (reliable to ~8-10 compactions). Limits: one pi task per repo (set
-`PI_PROGRESS_FILE` per task for parallel work), and a stale checkpoint is data, not instructions, so `rm PROGRESS.md`
-when switching tasks.
+`PI_PROGRESS_FILE` per task for parallel work), and a stale checkpoint is data, not instructions, so run `/progress-reset`
+when switching tasks. Checkpoints are kept under `~/.pi/agent/progress/`, not in your project folder.
 
 ## Strix Halo reference setup
 

@@ -4,7 +4,7 @@
 # Default revision is Unsloth Dynamic v3.1 commit d9620119 (the one gufo 0.31.0 and Strata 0.2.11+ name; `main` has
 # moved on since); UNSLOTH_REV=main or another commit overrides. The commit actually fetched is written to <engine dir>/UD-Q4_K_XL/.unsloth-revision. Resumable; asks first
 # unless --yes; exits 1 on abort/failure. Not gated.
-#   scripts/download-stock.sh [--yes]        folder: ENGINE_DIR, else ~/LLMBench/models/qwen38-flash-next
+#   scripts/download-stock.sh [--yes]        folder: ENGINE_DIR, else ~/models/qwen38-flash-next (or ~/LLMBench/models/qwen38-flash-next when that exists)
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 . "$REPO/scripts/lib-hf.sh"

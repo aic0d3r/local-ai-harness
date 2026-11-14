@@ -34,6 +34,11 @@ const readStamps = (): Record<string, string> => { try { return JSON.parse(fs.re
 export const isOurs = (file: string, content: string): boolean => readStamps()[file] === sha(content);
 export const stamp = (file: string, content: string) => { try { fs.mkdirSync(AGENT_DIR, { recursive: true }); fs.writeFileSync(STAMPS, JSON.stringify({ ...readStamps(), [file]: sha(content) })); } catch {} };
 
+// Checkpoints live under the agent dir, one file per project folder: project folders stay clean (nothing to gitignore, nothing for
+// `git add -A` to pick up). PI_PROGRESS_FILE still names a file inside the project when set (one per task for parallel work).
+export const progressPath = (cwd: string) =>
+	process.env.PI_PROGRESS_FILE ? path.join(cwd, process.env.PI_PROGRESS_FILE) : path.join(AGENT_DIR, "progress", sha(cwd).slice(0, 16) + ".md");
+
 function promptText(p: any): string {
 	if (typeof p === "string") return p;
 	if (Array.isArray(p)) return p.map((b: any) => (typeof b === "string" ? b : b?.text ?? "")).join("\n");
@@ -52,7 +57,9 @@ let responseCount = 0;
 	let injected = false;
 
 	pi.on("session_start", async (event: any, ctx: any) => {
-		const p = path.join(process.cwd(), PROGRESS_FILE);
+		let p = progressPath(process.cwd());
+		// a PROGRESS.md an older version left in the project is read once (until the first checkpoint writes the new file), then ignored
+		if (!fs.existsSync(p)) p = path.join(process.cwd(), PROGRESS_FILE);
 		if (!fs.existsSync(p)) return;
 		const content = fs.readFileSync(p, "utf8");
 		if (content.trim().length <= 50) return;
@@ -142,8 +149,10 @@ let responseCount = 0;
 		const lastNote = lastAssistantText(ctx);
 		const entry = `# Session Progress\n\n**Task:** ${taskLine}\n**Last updated:** ${new Date().toISOString()}\n**Responses:** ${responseCount}\n\n## Last state (assistant note)\n\n${lastNote || "(none yet)"}\n\n## Files modified\n\n\`\`\`\n${diffStat}\n\`\`\`\n\n## Recent commits\n\n\`\`\`\n${recentCommits}\n\`\`\`\n`;
 		try {
-			fs.writeFileSync(path.join(cwd, PROGRESS_FILE), entry);
-			stamp(path.join(cwd, PROGRESS_FILE), entry);
+			const file = progressPath(cwd);
+			fs.mkdirSync(path.dirname(file), { recursive: true });
+			fs.writeFileSync(file, entry);
+			stamp(file, entry);
 			// HUD: machine-readable per-checkpoint stats (tail -f it)
 			try {
 				fs.appendFileSync(path.join(AGENT_DIR, "hud.log"),
@@ -156,6 +165,19 @@ let responseCount = 0;
 	pi.on("after_provider_response", async (event: any, ctx: any) => {
 		responseCount++;
 		if (responseCount === 1 || responseCount % WRITE_INTERVAL === 0) await writeProgress(ctx);
+	});
+
+	pi.registerCommand("progress-reset", {
+		description: "Forget this project's saved progress note (a stale one resumes the wrong task)",
+		handler: async (_args: any, ctx: any) => {
+			const cwd = process.cwd();
+			for (const f of [progressPath(cwd), path.join(cwd, PROGRESS_FILE)]) {
+				// only files this harness wrote: a PROGRESS.md the project owns is not ours to delete
+				try { if (isOurs(f, fs.readFileSync(f, "utf8"))) fs.rmSync(f); } catch {}
+			}
+			taskDescription = ""; resumeNote = null;
+			ctx.ui.notify("progress note cleared for this project", "info");
+		},
 	});
 
 	pi.on("session_shutdown", async (event: any, ctx: any) => {

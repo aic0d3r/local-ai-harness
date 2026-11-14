@@ -1,5 +1,5 @@
 """python3 tests/test_harness.py - wizard core against a mock OpenAI server (no real engine needed)."""
-import json, os, re, subprocess, sys, tempfile, threading, http.server
+import json, os, re, subprocess, sys, tempfile, threading, time, http.server
 
 AGENT = tempfile.mkdtemp()
 os.environ["PI_CODING_AGENT_DIR"] = AGENT
@@ -405,6 +405,26 @@ img = {"a1": "ghcr.io/peonist-ai/halogen-flash-server:0.19.1@sha256:x", "b2": "n
 h.subprocess.run = lambda c, **k: types.SimpleNamespace(returncode=0, stdout="a1\nb2\n" if c[1] == "ps" else img[c[-1]] + "\n")
 assert h.engine_containers("halogen") == ["a1"] and h.engine_containers("gufo") == [] and h.engine_containers("llamacpp") == ["a1", "b2"]
 h.subprocess.run = real_run
+# sidecar default follows the card: off under 24 GB of GPU memory, on above it or when the probe failed; --yes on a small card saves "off"
+real_cap = h.capacity
+for gb, want in ((12, False), (23.9, False), (24, True), (125.5, True), (0, True)):
+    h.capacity = lambda gb=gb: {"fast_gb": gb, "vram_gb": gb, "gpu_name": "", "disk_free_gb": 1}
+    assert h.sidecar_default() is want, gb
+real_agent, h.AGENT = h.AGENT, tempfile.mkdtemp()
+h.set_sidecar(False)
+assert h.sidecar_pref() == "0"
+h.AGENT = real_agent
+h.capacity = real_cap
+# a server that will not report its window: keep what models.json holds, else ask, else say the guess
+old = {"models": [{"id": "m", "contextWindow": 16384}]}
+assert h.known_ctx("ollama", "m", old) == 16384 and h.known_ctx("ollama", "m", None) == 0  # no terminal: build_entry guesses and warns
+real_tty, real_input = h.sys.stdin.isatty, __builtins__["input"] if isinstance(__builtins__, dict) else __builtins__.input
+h.sys.stdin.isatty = lambda: True
+import builtins
+for said, want in (("8192", 8192), ("", 0), ("abc", 0), ("512", 0)):
+    builtins.input = lambda *_a, said=said: said
+    assert h.known_ctx("lmstudio", "m", None) == want, said
+builtins.input, h.sys.stdin.isatty = real_input, real_tty
 # an engine that will not report its context: the guess is announced, not silent
 import io, contextlib
 buf = io.StringIO()
@@ -416,3 +436,22 @@ with contextlib.redirect_stdout(buf):
     h.build_entry("ollama", "m", 8192, {})
 assert buf.getvalue() == ""
 print("ok")
+
+# an engine that drafts sends several tokens per chunk: decode counts tokens (usage), not chunks
+class DraftMock(http.server.BaseHTTPRequestHandler):
+    """one chunk with 4 tokens of text, then the usage line the server reports for the whole reply"""
+    def log_message(self, *a): pass
+    def do_POST(self):
+        self.rfile.read(int(self.headers["Content-Length"]))
+        self.send_response(200); self.end_headers()
+        self.wfile.write(b'data: {"choices":[{"delta":{"content":"abcd"}}]}\n\n')
+        time.sleep(0.3)  # the window decode is measured over
+        self.wfile.write(b'data: {"choices":[],"usage":{"prompt_tokens":900,"completion_tokens":12}}\n\n')
+        self.wfile.write(b"data: [DONE]\n\n")
+
+
+draft = http.server.ThreadingHTTPServer(("127.0.0.1", 0), DraftMock)
+threading.Thread(target=draft.serve_forever, daemon=True).start()
+ptok, _, tps = h.stream_once(draft.server_port, "osmos-x", "hi", 12)
+assert ptok == 900 and 20 < tps < 60, (ptok, tps)  # 12 tokens over ~0.3 s; chunk counting says 1/0.3 = 3.3
+print("ok: decode counts tokens, not chunks")

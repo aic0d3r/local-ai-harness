@@ -1,12 +1,11 @@
-# Inference Engines: Halogen vs gufo vs llama.cpp (NVIDIA, Apple, Strix Halo)
+# Inference engines: halogen, gufo, Strata, llama.cpp and the rest
 
-Any OpenAI-compatible server (or cloud provider) works with pi, so on other hardware (NVIDIA, Apple Silicon) use
-whatever engine fits: llama.cpp CUDA/Metal, vLLM, Ollama, LM Studio, MLX, or gufo where it
-supports your GPU. Only Strix Halo was measured here. On Strix Halo, **halogen and gufo are the
-best options**. Halogen is the only engine this harness provisions and verifies — by design: the
-extensions that make it worth running ride on halogen's NPU sidecars, and no other engine exposes
-them. Point `models.json` at your engine yourself; pi keeps working and the degradation is
-graceful but real (all measured on gufo / llama.cpp).
+Any OpenAI-compatible server (or cloud provider) works with pi. Only Strix Halo was measured here. On Strix Halo,
+**halogen and gufo are the best options**. The harness can install and start halogen, gufo and Strata (`./setup.sh`,
+`./harness use`); for llama.cpp, vLLM, Ollama and LM Studio it detects what is running and wires pi to it, and you start
+them yourself. The NPU tools (guard, triage, dedup) ride on halogen's NPU sidecars and no other engine exposes them, so
+on every other engine they are off; pi keeps working and the degradation is graceful but real (all measured on gufo /
+llama.cpp).
 
 ## Two first-class stacks
 
@@ -125,6 +124,29 @@ cd Strata && ROCM_PATH=/nonexistent ./setup.sh --yes --family unsloth --model UD
 - `--no-start` leaves the server down. Start it without opening a browser:
   `.venv/bin/python serve/server.py --engine strata --config strata-<model>.json --port 8080`.
 
+## osmos: DeepSeek-V4.1-Flash from the SSD, 1M context (Strix Halo)
+
+[libosmos](https://github.com/mrsirg97-rgb/libosmos) streams DeepSeek-V4.1-Flash (~768B) experts from the SSD on a
+Ryzen AI MAX+ 395. Its installer builds the engine and lays a pack down (`osmos_install.py osmos-evo-a --serve`), and
+`osmos-api` serves `:8091`. This repo wires pi to it like any other engine:
+
+```bash
+cd ~/engines/libosmos                       # the libosmos checkout
+python3 tools/install/osmos_install.py osmos-evo-a --models /path/to/models --serve   # ~381 GB fetched, ext4 needs ~522 GB
+./harness use osmos                         # in this repo: provider, model, context, no sampling params
+```
+
+Measured here (osmos-evo-a, GPU only, drafted): **452 t/s prefill, 40.8 t/s decode** (`./harness tune`), 1M context,
+first request after start ~30 s while the expert cache fills. Two things the harness handles for it:
+
+- **It decodes greedily and rejects sampling**: `temperature 0`, `top_p 1` or a 400 (`sampling is not built`).
+  `config/profiles.json` (`models.osmos-deepseek`) sends exactly those, so agents need no special casing.
+- **It does not report its context window** (`/v1/models` has no `context_length`, `/props` is 404). The engine
+  profile carries `ctx`, mirroring `max_context` in the pack's `osmos.json` - change both together.
+
+It has no NPU tools (guard, triage, dedup need halogen), and it will not fit beside another big engine: 91 GiB of GPU
+memory is the budget on a 128 GB box.
+
 ## Why there is no TabbyAPI engine
 
 TabbyAPI (ExLlamaV3, EXL3 quants) was added and removed before any release. It is NVIDIA and Linux only, serves
@@ -178,7 +200,7 @@ Strata runs from a `--gguf-dir`. `scripts/download-stock.sh` (offered by the wiz
 92.3% top-1 agreement and mean KLD 0.047 against the unquantized model, with 10-15% better benchmark accuracy than
 other quants of the same size. It also fetches gufo's shared Q8 MTP head and the vision projector when missing and
 writes the Unsloth commit it got to `UD-Q4_K_XL/.unsloth-revision`; `UNSLOTH_REV=<commit>` overrides the revision. The
-files land in `ENGINE_DIR` (default `~/LLMBench/models/qwen38-flash-next`) where `start-gufo-flashnext.sh`
+files land in `ENGINE_DIR` (default `~/models/qwen38-flash-next`, or `~/LLMBench/models/qwen38-flash-next` when that already exists) where `start-gufo-flashnext.sh`
 looks, and Strata uses them in place, so there is one copy, not two. UD-IQ4_XS (87 GiB), Strata's own previous
 stock pick, is no longer the default: gufo 0.12 stopped loading it, and one shared file replaces two downloads.
 

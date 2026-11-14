@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pi harness for Strix Halo — automated setup.
+# local AI harness: one setup for any machine (Strix Halo is the measured setup; others are untested).
 # Idempotent: safe to re-run. Applies what it safely can (extensions, pi
 # providers, sidecar), checks servers, prints exact next steps for what it can't fix.
 #
@@ -16,7 +16,7 @@
 #   ./setup.sh --no-halogen     pi-only install: skip the halogen provider, the NPU
 #                               extensions and all container management (for boxes that
 #                               run pi without a local halogen, e.g. a laptop against a
-#                               remote Strix Halo appliance)
+#                               remote halogen box)
 #   ./setup.sh --strata [url]   pi-only install + a provider for Strata (github.com/Niko1221/Strata,
 #                               NVIDIA/AMD desktop GPUs; default http://127.0.0.1:8080). Install
 #                               and start Strata itself first, per its README.
@@ -95,13 +95,11 @@ fclk_held(){
   done
   return 1
 }
-# resolve a usable llama-server for the sidecar (PATH, then known build dirs)
-LLS="$(command -v llama-server 2>/dev/null || true)"
-[ -z "$LLS" ] && for c in "$HOME/.local/bin/llama-server" \
-    "$HOME/LLMBench/engines/strix-v0761/vulkan/bin/llama-server" \
-    "$HOME/LLMBench/engines/strix-v075/vulkan/bin/llama-server" \
-    "$HOME/LLMBench/engines/strix-v0741/vulkan/bin/llama-server"; do
-  [ -x "$c" ] && LLS="$c" && break
+# resolve a usable llama-server for the sidecar: $LLAMA_SERVER, PATH, ~/.local/bin, then the newest build under ~/LLMBench/engines (the author's layout)
+LLS="${LLAMA_SERVER:-}"; [ -x "$LLS" ] || LLS="$(command -v llama-server 2>/dev/null || true)"
+[ -z "$LLS" ] && [ -x "$HOME/.local/bin/llama-server" ] && LLS="$HOME/.local/bin/llama-server"
+[ -z "$LLS" ] && for c in "$HOME"/LLMBench/engines/*/vulkan/bin/llama-server; do  # glob order is oldest first: the last hit wins
+  [ -x "$c" ] && LLS="$c"
 done
 # find the main halogen checkpoint: one search, owned by the launcher
 find_ckpt(){ bash "$REPO/server/start-halogen.sh" --print-ckpt; }
