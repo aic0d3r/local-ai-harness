@@ -57,6 +57,21 @@ env -i HOME="$H" PI_HOME="$H/sandbox" PATH="$H/bin:/usr/bin:/bin:/usr/local/bin"
 check "setup.sh with PI_HOME exits 0" '[ "$RC4" = 0 ]'
 check "files land in \$PI_HOME/agent and not in ~/.pi" '[ -s "$H/sandbox/agent/models.json" ] && [ -f "$H/sandbox/agent/extensions/taint-gate.ts" ] && [ ! -e "$H/.pi/agent" ]'
 
+echo "== halogen-path install with no engine running (no checkpoint, nothing started)"
+HAL="$H/halogen/agent"
+env -i HOME="$H" PI_HOME="$H/halogen" PATH="$H/bin:/usr/bin:/bin:/usr/local/bin" \
+  bash "$REPO/setup.sh" --no-sidecar < /dev/null >/dev/null 2>&1; RC6=$?
+check "bare setup.sh exits 0" '[ "$RC6" = 0 ]'
+check "halogen + llamacpp-tiny providers, defaults and the NPU extensions are in place" \
+  'python3 -c "import json,sys; p=json.load(open(sys.argv[1]+\"/models.json\"))[\"providers\"]; s=json.load(open(sys.argv[1]+\"/settings.json\")); sys.exit(not (\"halogen\" in p and \"llamacpp-tiny\" in p and s[\"defaultProvider\"]==\"halogen\"))" "$HAL" && [ -f "$HAL/extensions/npu-retrieval.ts" ]'
+check "no config temp files left behind" '[ -z "$(find "$H/halogen" -name "*.tmp")" ]'
+echo "== a models.json that does not parse is left exactly as it was"
+BAD="$H/bad/agent"; mkdir -p "$BAD"; printf '{ "providers": ' > "$BAD/models.json"
+env -i HOME="$H" PI_HOME="$H/bad" PATH="$H/bin:/usr/bin:/bin:/usr/local/bin" \
+  bash "$REPO/setup.sh" --no-sidecar < /dev/null >/dev/null 2>&1
+check "the broken models.json is untouched" '[ "$(cat "$BAD/models.json")" = "{ \"providers\": " ]'
+rm -rf "$H/halogen" "$H/bad"
+
 echo "== uninstall, agent dir outside PI_HOME (PI_HOME set = sandbox: real systemd units are skipped)"
 OUTSIDE="$H/elsewhere/agent"
 env -i HOME="$H" PI_HOME="$H/sandbox" PI_CODING_AGENT_DIR="$OUTSIDE" PATH="$H/bin:/usr/bin:/bin:/usr/local/bin" \

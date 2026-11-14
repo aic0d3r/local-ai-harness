@@ -18,6 +18,8 @@ Profiles live in config/profiles.json. Stdlib only. Never kills or restarts serv
 """
 import json, os, re, shutil, subprocess, sys, time, urllib.request, uuid, hashlib, glob
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import entries
+import jsonio
 import strata_doctor
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -43,11 +45,7 @@ def jget(path, default=None):
 
 
 def jput(path, obj):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path + ".tmp", "w") as f:  # temp + rename: a crash mid-write must not leave a truncated config
-        json.dump(obj, f, indent=2)
-        f.write("\n")
-    os.replace(path + ".tmp", path)
+    jsonio.put(path, obj)  # temp + rename: a crash mid-write must not leave a truncated config
 
 
 def http(url, body=None, timeout=3):
@@ -348,13 +346,7 @@ def choose(question, options, yes):
 
 # ---------- profile ----------
 def model_profile(model_id):
-    m = PROFILES["models"]
-    out = json.loads(json.dumps(m["default"]))
-    for k, v in m.items():
-        if k != "default" and re.search(v["match"], model_id, re.I):
-            out.update({a: b for a, b in v.items() if a != "match"})
-            break
-    return out
+    return entries.model_profile(model_id, PROFILES)
 
 
 def server_ctx(port):
@@ -388,20 +380,11 @@ def server_input(port):
 
 def build_entry(engine, model_id, ctx, tuned):
     e = PROFILES["engines"][engine]
-    mp = model_profile(model_id)
     if not ctx:
         print(f"  ! {engine} did not report its context window; assuming 32768. If it runs a different size, set contextWindow for {model_id} in models.json")
         ctx = 32768
-    max_tokens = tuned.get("maxTokens") or min(mp["maxTokens"], max(1024, ctx // 8))
-    # servers that prefix their ids with the engine (osmos-osmos-evo-a) need not repeat it in the name
-    shown = model_id[len(engine) + 1:] if model_id.lower().startswith(engine.lower() + "-") else model_id
-    entry = {"id": model_id, "name": mp.get("name") or f"{shown} ({engine})", "reasoning": mp["reasoning"],
-             "input": server_input(e["port"]),
-             "contextWindow": ctx, "maxTokens": max_tokens, "samplingParams": mp["samplingParams"]}
-    for k in ("compat", "thinkingLevelMap"):
-        if k in mp:
-            entry[k] = mp[k]
-    return {"baseUrl": f"http://127.0.0.1:{e['port']}/v1", "api": "openai-completions", "apiKey": "dummy", "models": [entry]}
+    return entries.build_provider(f"http://127.0.0.1:{e['port']}/v1", engine, model_id, ctx, server_input(e["port"]), PROFILES,
+                                  max_tokens=tuned.get("maxTokens"))
 
 
 def reserve_for(ctx):
@@ -460,11 +443,7 @@ def apply(engine, model_id, tuned=None):
     m.setdefault("providers", {})[prov] = new
     # compaction/branch-summary look the sidecar up in the model registry; setup.sh only adds it on
     # the halogen path, so without this every other engine silently fell back to main-model summaries
-    m["providers"].setdefault("llamacpp-tiny", {
-        "baseUrl": "http://127.0.0.1:8090/v1", "api": "openai-completions", "apiKey": "dummy",
-        "models": [{"id": "ling3.0-tiny", "name": "Ling-3.0-tiny sidecar", "reasoning": True, "input": ["text"],
-                    "contextWindow": 131072, "maxTokens": 8192,
-                    "compat": {"thinkingFormat": "chat-template", "chatTemplateKwargs": {"enable_thinking": False}}}]})
+    m["providers"].setdefault("llamacpp-tiny", entries.tiny_provider(PROFILES))
     jput(mj, m)
     ctx = new["models"][0]["contextWindow"]
     sj = os.path.join(AGENT, "settings.json")

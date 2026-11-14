@@ -4,10 +4,15 @@ setup.sh calls the sections below, setup.ps1 calls `all`. Stdlib only. Never ins
 
   adopt.py extensions [--no-halogen]   copy extensions/ into pi (the NPU ones only with halogen); write the harness-repo marker
   adopt.py provider URL ENGINE         add a provider for a running engine (strata, gufo) to models.json, from its /v1/models
+  adopt.py halogen-providers           the halogen + ling-tiny sidecar providers and pi's startup defaults (setup.sh's halogen path)
   adopt.py templates | skills | packages | agents
   adopt.py all [--engine strata|gufo] [--url URL]   everything above + mcp.json + image cap + sidecar off + engine doctor
 """
 import filecmp, glob, hashlib, json, os, platform, shutil, subprocess, sys, tarfile, tempfile, urllib.request, zipfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # jsonio lives beside this file, wherever it is imported from
+import entries
+import jsonio
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # same rule as setup.sh, setup.ps1 and setup/harness.py: pi's own PI_CODING_AGENT_DIR, then the harness' PI_HOME sandbox variable, then ~/.pi/agent
@@ -39,9 +44,7 @@ def read_json(path, default):
 
 
 def write_json(path, data, indent):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=indent)
+    jsonio.put(path, data, indent)  # atomic: temp file + rename
 
 
 def files_under(d):
@@ -119,9 +122,8 @@ def provider(url, eng):
     if eng in P:
         print(f"  {eng} provider exists - left untouched")
     else:
-        P[eng] = {"baseUrl": url + "/v1", "api": "openai-completions", "apiKey": "dummy",  # set the key here if Strata runs with API_KEY
-                  "models": [{"id": mid, "name": f"{eng} (local)", "reasoning": True, "input": inp,
-                              "contextWindow": ctx, "maxTokens": 8192}]}
+        # the same builder as the wizard: reasoning, chat-template, sampling and thinking levels come from config/profiles.json
+        P[eng] = entries.build_provider(url + "/v1", eng, mid, int(ctx), inp)  # set the apiKey by hand if the engine runs with one
         print(f"  added provider: {eng}")
     print(f"  model id: {mid}")
     write_json(path, m, 1)
@@ -136,6 +138,65 @@ def provider(url, eng):
     if not read_json(prof, {}):
         write_json(prof, {"engine": eng, "provider": eng, "model": mid, "npu": False,
                           "npuUrl": "http://127.0.0.1:8731", "sidecarUrl": "http://127.0.0.1:8090"}, 2)
+
+
+def halogen_providers():
+    """setup.sh's halogen path: the halogen and ling-tiny sidecar providers in models.json (an existing one is left as it is) and pi's
+    startup defaults (only keys the user has not set). Entries come from entries.py, the same builder the wizard uses."""
+    path = os.path.join(AGENT, "models.json")
+    m = read_json(path, {})  # only a missing file starts empty: a parse error stops here, the user's providers are never overwritten
+    P = m.setdefault("providers", {})
+    for name, build in (("halogen", entries.halogen_provider), ("llamacpp-tiny", entries.tiny_provider)):
+        if "baseUrl" not in P.get(name, {}):
+            P[name] = build()
+            print(f"  added provider: {name}")
+        else:
+            print(f"  {name} provider exists \u2014 left untouched")
+    # ling3.0-tiny thinks by default: the think pass ate budget and 8.6x'd latency (measured 10-06). Off at the template level for all
+    # registry-based callers, on installs that predate it too.
+    for e in P.get("llamacpp-tiny", {}).get("models", []):
+        if e.get("id") == entries.TINY_MODEL:
+            e.setdefault("compat", {})["chatTemplateKwargs"] = {"enable_thinking": False}
+    # cap maxTokens ONLY on our model ids (32768 requests get hard-rejected past ~32.7k ctx)
+    fixed = 0
+
+    def cap(o):
+        nonlocal fixed
+        if isinstance(o, dict):
+            if o.get("id") in (entries.HALOGEN_MODEL, entries.TINY_MODEL) and o.get("maxTokens", 0) > 8192:
+                o["maxTokens"] = 8192
+                fixed += 1
+            for v in o.values():
+                cap(v)
+        elif isinstance(o, list):
+            for v in o:
+                cap(v)
+    cap(m)
+    if fixed:
+        print(f"  capped maxTokens->8192 on {fixed} model entries (prevents 400 'does not fit' past ~32.7k ctx)")
+    write_json(path, m, 1)
+    # startup defaults so plain `pi` opens the TUI on halogen (only if the user hasn't chosen)
+    sp = os.path.join(AGENT, "settings.json")
+    s = read_json(sp, {})
+    changed = False
+    for k, v in (("defaultProvider", "halogen"), ("defaultModel", entries.HALOGEN_MODEL), ("defaultThinkingLevel", "medium")):
+        if k not in s:
+            s[k] = v
+            changed = True
+    # silence the builtin llama.cpp router autodiscovery: it probes :8080/:8090 and lists stray bench models / duplicates the sidecar entry
+    ext = s.setdefault("extensions", [])
+    if "-builtin:llama.cpp" not in ext:
+        ext.append("-builtin:llama.cpp")
+        changed = True
+    # the pi-llama-cpp package (if pre-installed) does the same autodetecting; we use the models.json providers
+    pkgs = s.get("packages", [])
+    if any("pi-llama-cpp" in p for p in pkgs):
+        s["packages"] = [p for p in pkgs if "pi-llama-cpp" not in p]
+        changed = True
+        print("  removed npm:pi-llama-cpp package (duplicates harness model list)")
+    if changed:
+        write_json(sp, s, 2)
+        print("  pi startup defaults -> halogen (existing user overrides untouched)")
 
 
 def templates():
@@ -359,6 +420,8 @@ def main():
         extensions("--no-halogen" in a)
     elif cmd == "provider" and len(a) == 3:
         provider(a[1], a[2])
+    elif cmd == "halogen-providers":
+        halogen_providers()
     elif cmd in ("templates", "skills", "packages", "agents"):
         globals()[cmd]()
     elif cmd == "all":

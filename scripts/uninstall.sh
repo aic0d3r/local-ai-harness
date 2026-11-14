@@ -85,9 +85,10 @@ if [ -f "$AG/themes/opencode.json" ] && cmp -s "$AG/themes/opencode.json" "$REPO
 fi
 
 echo "[5/8] pi defaults + providers"
-python3 - <<'PY'
-import json, os
+REPO="$REPO" python3 - <<'PY'
+import json, os, sys
 home = os.environ["AG"]
+sys.path.insert(0, os.path.join(os.environ["REPO"], "setup")); import jsonio  # atomic writes
 # what the wizard chose, saved before step 3 deletes the state files
 try:
     prof = json.loads(os.environ.get("PROFILE_JSON") or "{}")
@@ -103,7 +104,7 @@ if os.path.exists(sp):
         if s.get(k) == ours: s.pop(k, None)
     ours_pkgs = ("ponytail", "rpiv-ask-user-question", "pi-rtk-optimizer")  # adopt.py PACKAGES
     s["packages"] = [p for p in s.get("packages", []) if not any(o in str(p) for o in ours_pkgs)]
-    json.dump(s, open(sp, "w"), indent=2); open(sp, "a").write("\n")
+    jsonio.put(sp, s, 2)
 mp = os.path.join(home, "models.json")
 if os.path.exists(mp):
     m = json.load(open(mp))
@@ -111,7 +112,7 @@ if os.path.exists(mp):
         p = m.get("providers", {}).get(prov) or {}
         if prov in ("halogen", "llamacpp-tiny") or "127.0.0.1" in p.get("baseUrl", ""):
             m["providers"].pop(prov, None)
-    json.dump(m, open(mp, "w"), indent=2); open(mp, "a").write("\n")
+    jsonio.put(mp, m, 2)
 print("      defaults removed where they matched ours; providers removed: " + ", ".join(sorted(ours_prov)))
 PY
 

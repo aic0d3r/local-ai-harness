@@ -33,6 +33,7 @@ for prov, mid in models:
     else:  # built-in / extension models take it through modelOverrides
         p.setdefault("modelOverrides", {}).setdefault(mid, {})["inputLimits"] = limits
 
-path.parent.mkdir(parents=True, exist_ok=True)
-path.write_text(json.dumps(data, indent=1) + "\n")
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "setup"))
+import jsonio
+jsonio.put(str(path), data, 1)  # atomic: temp file + rename
 print(f"  image cap {W}x{H} on {len(models)} image-capable models")

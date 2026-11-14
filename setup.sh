@@ -279,75 +279,8 @@ if [ "$NO_HALOGEN" = 1 ]; then
   fi
 else
 if ! command -v python3 >/dev/null; then fail "python3 required for models.json merge — install python3 and re-run"; else
-if python3 - "$MODELS_JSON" <<'PY'
-import json, sys, os
-path = sys.argv[1]
-os.makedirs(os.path.dirname(path), exist_ok=True)
-# only a missing file starts empty: a parse error must stop here, not overwrite the user's providers
-try: m = json.load(open(path))
-except FileNotFoundError: m = {}
-m.setdefault("providers", {})
-def model(id_, name, ctx):
-    return {"id": id_, "name": name, "reasoning": True, "contextWindow": ctx,
-            "maxTokens": 8192,
-            "compat": {"thinkingFormat": "chat-template",
-                       "chatTemplateKwargs": {"reasoning_effort": {"$var": "thinking.effort"},
-                                              "enable_thinking": {"$var": "thinking.enabled"}}},
-            "thinkingLevelMap": {"minimal": None, "low": "low", "medium": "medium", "high": "xhigh", "xhigh": None, "max": None},
-            "samplingParams": {"temperature": 1.0, "top_p": 0.95, "top_k": 20, "min_p": 0.0},
-            "input": ["text", "image"]}  # vision tower enabled in start-halogen.sh (HALOGEN_VISION_TOWER=1)
-HAL = m["providers"].get("halogen", {})
-if "baseUrl" not in HAL:
-    m["providers"]["halogen"] = {"baseUrl": "http://127.0.0.1:8731/v1", "api": "openai-completions",
-        "apiKey": "dummy", "models": [model("halogen-qwen3.8-flash-next", "halogen Qwen3.8-Flash-Next", 262144)]}
-    print("  added provider: halogen")
-else:
-    print("  halogen provider exists — left untouched")
-TINY = m["providers"].get("llamacpp-tiny", {})
-if "baseUrl" not in TINY:
-    m["providers"]["llamacpp-tiny"] = {"baseUrl": "http://127.0.0.1:8090/v1", "api": "openai-completions",
-        "apiKey": "dummy", "models": [model("ling3.0-tiny", "Ling-3.0-tiny sidecar", 131072)]}
-    print("  added provider: llamacpp-tiny")
-else:
-    print("  llamacpp-tiny provider exists — left untouched")
-# ling3.0-tiny thinks by default: the think pass ate budget and 8.6x'd latency
-# (measured 10-06). Disable at the template level for all registry-based callers.
-for _e in m.get("providers", {}).get("llamacpp-tiny", {}).get("models", []):
-    if _e.get("id") == "ling3.0-tiny":
-        _e.setdefault("compat", {})["chatTemplateKwargs"] = {"enable_thinking": False}
-# cap maxTokens ONLY on our model ids (32768 requests get hard-rejected past ~32.7k ctx)
-fixed = 0
-def cap(o):
-    global fixed
-    if isinstance(o, dict):
-        if o.get("id") in ("halogen-qwen3.8-flash-next", "ling3.0-tiny") and o.get("maxTokens", 0) > 8192:
-            o["maxTokens"] = 8192; fixed += 1
-        for v in o.values(): cap(v)
-    elif isinstance(o, list):
-        for v in o: cap(v)
-cap(m)
-if fixed: print(f"  capped maxTokens->8192 on {fixed} model entries (prevents 400 'does not fit' past ~32.7k ctx)")
-json.dump(m, open(path, "w"), indent=1)
-# startup defaults so plain `pi` opens the TUI on halogen (only if the user hasn't chosen)
-sp = os.path.join(os.path.dirname(path), "settings.json")
-try: s = json.load(open(sp))
-except FileNotFoundError: s = {}
-changed = False
-for k, v in (("defaultProvider", "halogen"), ("defaultModel", "halogen-qwen3.8-flash-next"), ("defaultThinkingLevel", "medium")):
-    if k not in s: s[k] = v; changed = True
-# silence the builtin llama.cpp router autodiscovery: it probes :8080/:8090 and lists
-# stray bench models / duplicates the sidecar entry as "llama-server=http://..."
-ext = s.setdefault("extensions", [])
-if "-builtin:llama.cpp" not in ext: ext.append("-builtin:llama.cpp"); changed = True
-# pi-llama-cpp package (if pre-installed) autodetects local llama-servers and lists
-# stray bench models / duplicates our sidecar entry - remove it; we use models.json providers.
-pkgs = s.get("packages", [])
-if any("pi-llama-cpp" in p for p in pkgs):
-    s["packages"] = [p for p in pkgs if "pi-llama-cpp" not in p]; changed = True
-    print("  removed npm:pi-llama-cpp package (duplicates harness model list)")
-if changed:
-    json.dump(s, open(sp, "w"), indent=2); print("  pi startup defaults -> halogen (existing user overrides untouched)")
-PY
+# the halogen + sidecar entries come from setup/entries.py, the same builder the wizard and the flag installer use
+if python3 "$REPO/setup/adopt.py" halogen-providers
 then ok "providers configured in $MODELS_JSON"
 else fail "could not parse $MODELS_JSON or settings.json - fix the JSON and re-run (left untouched)"; fi
 fi

@@ -13,6 +13,9 @@ import os
 import shutil
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import jsonio
+
 SERENA_COMMAND = "~/.local/bin/serena"
 SERENA_ARGS = ["start-mcp-server", "--project-from-cwd"]
 SERENA_DESC = "Serena LSP toolbox: symbol-precise code navigation, diagnostics, and edits (activate_project first)"
@@ -94,8 +97,7 @@ def load(path):
 
 
 def save(path, data):
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
+    jsonio.put(path, data, 2)  # atomic: temp file + rename
 
 
 def backup_once(path, suffix):
