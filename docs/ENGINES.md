@@ -141,6 +141,7 @@ first request after start ~30 s while the expert cache fills. Two things the har
 
 - **It decodes greedily and rejects sampling**: `temperature 0`, `top_p 1` or a 400 (`sampling is not built`).
   `config/profiles.json` (`models.osmos-deepseek`) sends exactly those, so agents need no special casing.
+- **Thinking is real, with three levels**: DeepSeek maps seven effort names onto three real ones ([its docs](https://api-docs.deepseek.com/guides/thinking_mode/)): `low`, `high`, `max`. The profile keeps exactly those and marks `minimal`/`medium`/`xhigh` unsupported (`null`), so pi and Paseo offer `off, low, high, max` instead of advertising levels the model collapses anyway. `off` sends `reasoning_effort: none` and the reply carries no reasoning at all.
 - **It does not report its context window** (`/v1/models` has no `context_length`, `/props` is 404). The engine
   profile carries `ctx`, mirroring `max_context` in the pack's `osmos.json` - change both together.
 

@@ -79,6 +79,18 @@
    "samplingParams": {
     "temperature": 0,
     "top_p": 1
+   },
+   "compat": {
+    "thinkingFormat": "openai"
+   },
+   "thinkingLevelMap": {
+    "off": "none",
+    "minimal": null,
+    "low": "low",
+    "medium": null,
+    "high": "high",
+    "xhigh": null,
+    "max": "max"
    }
   },
   "deepseek-r1": {

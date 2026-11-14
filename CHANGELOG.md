@@ -6,13 +6,14 @@
 ## Unreleased
 
 ### Added
-- `osmos` engine (libosmos, `osmos-api` on `:8091`): DeepSeek-V4.1-Flash packs at 1M context, wired like any other engine. Its profile carries the context window the server does not report (`ctx`, mirroring the pack's `osmos.json`) and the only sampling it accepts (`temperature 0`, `top_p 1`); see [docs/ENGINES.md](docs/ENGINES.md).
+- `osmos` engine (libosmos, `osmos-api` on `:8091`): DeepSeek-V4.1-Flash packs at 1M context, wired like any other engine. Its profile carries the context window the server does not report (`ctx`, mirroring the pack's `osmos.json`) and the only sampling it accepts (`temperature 0`, `top_p 1`); thinking offers the three efforts DeepSeek really has (`low`, `high`, `max`, plus `off` for no reasoning) rather than its six aliases; see [docs/ENGINES.md](docs/ENGINES.md).
 - `./harness verify [engine] [model]`: asks the engine itself for a few tokens over HTTP (no agent needed) and exits 0 only if it answered.
 
 ### Changed
 - `./setup.sh --doctor` exits 1 when any check fails (it always exited 0), so scripts can rely on it. Its ready check now uses `./harness verify`, so `--no-pi` installs no longer report "no reply" from a healthy engine.
 - halogen's host requirements (docker usable, `/dev/accel/accel0`, `/dev/kfd`, the three XRT libraries) are checked before the ~124 GB download is offered, and `server/start-halogen.sh` stops with the fix instead of letting docker create root-owned mount directories when an XRT library is missing.
 - `./setup.sh` no longer downloads the 4.5 GB sidecar model when there is no `llama-server` to run it. `./setup.sh --halogen --voice` no longer takes `--voice` as the checkpoint path.
+- When an engine reports its model id with the engine's own name in front (`osmos-osmos-evo-a`), the name written to `models.json` no longer repeats it (`osmos-evo-a (osmos)`); halogen's becomes `qwen3.8-flash-next (halogen)`.
 - When an engine does not report its context window the wizard says it is assuming 32768 instead of doing it silently.
 - Engine and upgrade logs moved from fixed `/tmp` names to `~/.cache` (`local-ai-harness/<engine>.log`, `gufo-upgrade.log`, `strata-upgrade.log`, `local-ai-harness/start-servers.log`).
 - `scripts/stop-all.sh` stops a container on :8731/:8080 only if its image is halogen or gufo, so an unrelated container on :8080 survives.

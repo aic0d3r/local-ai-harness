@@ -385,7 +385,9 @@ def build_entry(engine, model_id, ctx, tuned):
         print(f"  ! {engine} did not report its context window; assuming 32768. If it runs a different size, set contextWindow for {model_id} in models.json")
         ctx = 32768
     max_tokens = tuned.get("maxTokens") or min(mp["maxTokens"], max(1024, ctx // 8))
-    entry = {"id": model_id, "name": f"{model_id} ({engine})", "reasoning": mp["reasoning"], "input": server_input(e["port"]),
+    # servers that prefix their ids with the engine (osmos-osmos-evo-a) need not repeat it in the name
+    shown = model_id[len(engine) + 1:] if model_id.lower().startswith(engine.lower() + "-") else model_id
+    entry = {"id": model_id, "name": f"{shown} ({engine})", "reasoning": mp["reasoning"], "input": server_input(e["port"]),
              "contextWindow": ctx, "maxTokens": max_tokens, "samplingParams": mp["samplingParams"]}
     for k in ("compat", "thinkingLevelMap"):
         if k in mp:
