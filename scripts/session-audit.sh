@@ -9,10 +9,10 @@ PERF=0; HARN=0; _args=()
 for a in "$@"; do case "$a" in --perf) PERF=1 ;; --harness) HARN=1 ;; *) _args+=("$a") ;; esac; done
 F="${_args[0]:-}"
 if [ -n "$F" ] && [ ! -f "$F" ]; then  # accept a bare session id too
-  F=$(find "$HOME/.pi/agent/sessions" -name "*${F%.jsonl}*" 2>/dev/null | head -1)
+  F=$(find "${PI_CODING_AGENT_DIR:-${PI_HOME:-$HOME/.pi}/agent}/sessions" -name "*${F%.jsonl}*" 2>/dev/null | head -1)
 fi
 if [ -z "$F" ]; then
-  F=$(find "$HOME/.pi/agent/sessions" -name "*.jsonl" -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-)
+  F=$(find "${PI_CODING_AGENT_DIR:-${PI_HOME:-$HOME/.pi}/agent}/sessions" -name "*.jsonl" -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-)
 fi
 [ -z "$F" ] || [ ! -f "$F" ] && { echo "no session file found"; exit 1; }
 
@@ -117,7 +117,7 @@ fi
 
 # --- --harness: what the sidecar + NPU models did inside this session's window ---
 if [ "$HARN" = 1 ]; then
-  python3 "$(cd "$(dirname "$0")" && pwd)/harness-events.py" "$F" "${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/harness-events.jsonl" || W=$((W+1))
+  python3 "$(cd "$(dirname "$0")" && pwd)/harness-events.py" "$F" "${PI_CODING_AGENT_DIR:-${PI_HOME:-$HOME/.pi}/agent}/harness-events.jsonl" || W=$((W+1))
   hr
 fi
 

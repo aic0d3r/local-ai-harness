@@ -10,7 +10,8 @@ spec = (sys.argv[1:2] or [os.environ.get("PI_IMAGE_MAX", "450x1000")])[0]
 if spec == "off":
     sys.exit(0)
 W, H = (int(v) for v in spec.lower().split("x"))
-path = pathlib.Path(os.environ.get("PI_HOME", pathlib.Path.home() / ".pi")) / "agent/models.json"
+# same rule as setup.sh: pi's PI_CODING_AGENT_DIR, then the harness' PI_HOME sandbox variable, then ~/.pi/agent
+path = pathlib.Path(os.environ.get("PI_CODING_AGENT_DIR") or pathlib.Path(os.environ.get("PI_HOME", pathlib.Path.home() / ".pi")) / "agent") / "models.json"
 limits = {"images": {"resize": {"maxWidth": W, "maxHeight": H}}}
 
 rows = subprocess.run([shutil.which("pi") or "pi", "--list-models"], capture_output=True, text=True, check=True).stdout.splitlines()[1:]

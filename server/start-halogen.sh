@@ -119,7 +119,7 @@ fi
 python3 - "$CTX" <<'PY' 2>/dev/null || true
 import json, os, sys
 ctx = int(sys.argv[1])
-base = os.environ.get("PI_CODING_AGENT_DIR") or os.path.expanduser("~/.pi/agent")
+base = os.environ.get("PI_CODING_AGENT_DIR") or os.path.join(os.environ.get("PI_HOME") or os.path.expanduser("~/.pi"), "agent")
 mp = os.path.join(base, "models.json")
 try:
     m = json.load(open(mp))

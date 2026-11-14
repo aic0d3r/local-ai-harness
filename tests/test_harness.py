@@ -376,7 +376,7 @@ h.ask_yn = lambda *a, **k: (_ for _ in ()).throw(AssertionError("asked about a d
 assert "docker is not installed" in h.halogen_preflight()[0]
 assert h.plan_start("halogen", {}) is None
 h.shutil.which, h.ask_yn = real_which, real_ask
-assert h.engine_log("gufo").startswith(h.LOGDIR) and not h.engine_log("gufo").startswith("/tmp")
+assert h.engine_log("gufo") == os.path.join(h.LOGDIR, "gufo.log") and h.LOGDIR.endswith("local-ai-harness") and h.LOGDIR != "/tmp/local-ai-harness"
 # a box that was never set up is not assumed to be halogen; a pre-wizard halogen install (NPU extension, no profile) still is
 real_agent, h.AGENT = h.AGENT, tempfile.mkdtemp()
 assert h.saved_engine() is None

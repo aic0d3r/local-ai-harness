@@ -10,8 +10,9 @@ setup.sh calls the sections below, setup.ps1 calls `all`. Stdlib only. Never ins
 import filecmp, glob, hashlib, json, os, platform, shutil, subprocess, sys, tarfile, tempfile, urllib.request, zipfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PI_HOME = os.environ.get("PI_HOME") or os.path.join(os.path.expanduser("~"), ".pi")
-AGENT = os.path.join(PI_HOME, "agent")
+# same rule as setup.sh, setup.ps1 and setup/harness.py: pi's own PI_CODING_AGENT_DIR, then the harness' PI_HOME sandbox variable, then ~/.pi/agent
+AGENT = os.environ.get("PI_CODING_AGENT_DIR") or os.path.join(os.environ.get("PI_HOME") or os.path.join(os.path.expanduser("~"), ".pi"), "agent")
+PI_HOME = os.path.dirname(AGENT)  # the folder above it: the old templates/ dir
 EXT_DIR = os.path.join(AGENT, "extensions")
 NPU_EXTENSIONS = ("npu-retrieval.ts", "auto-guard.ts")  # need halogen on :8731
 
@@ -129,6 +130,12 @@ def provider(url, eng):
     for k, v in (("defaultProvider", eng), ("defaultModel", mid)):
         st.setdefault(k, v)
     write_json(sp, st, 2)
+    # the wizard's record of the active engine; a CLI install had none, so uninstall could not tell which provider
+    # to remove and the doctor reported halogen. Written only when absent: never clobber a wizard profile.
+    prof = os.path.join(AGENT, "harness-profile.json")
+    if not read_json(prof, {}):
+        write_json(prof, {"engine": eng, "provider": eng, "model": mid, "npu": False,
+                          "npuUrl": "http://127.0.0.1:8731", "sidecarUrl": "http://127.0.0.1:8090"}, 2)
 
 
 def templates():

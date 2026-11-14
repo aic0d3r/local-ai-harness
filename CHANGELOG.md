@@ -7,6 +7,7 @@
 
 ### Added
 - `osmos` engine (libosmos, `osmos-api` on `:8091`): DeepSeek-V4.1-Flash packs at 1M context, wired like any other engine. Its profile carries the context window the server does not report (`ctx`, mirroring the pack's `osmos.json`) and the only sampling it accepts (`temperature 0`, `top_p 1`); thinking offers the three efforts DeepSeek really has (`low`, `high`, `max`, plus `off` for no reasoning) rather than its six aliases; see [docs/ENGINES.md](docs/ENGINES.md).
+- CI (`.github/workflows/ci.yml`, GitHub Actions, Linux, actions pinned to commit SHAs): the Python and bun tests, `shellcheck -S error`, and a new end-to-end install check, `tests/e2e-setup.sh`, which runs `setup.sh` against the stub engine in a throwaway `HOME` with a fake `pi`, asserts what it wrote, that a second run changes nothing, and that `./harness verify` passes while the engine is up and fails (exit 1) once it is gone.
 - `./harness verify [engine] [model]`: asks the engine itself for a few tokens over HTTP (no agent needed) and exits 0 only if it answered.
 
 ### Changed

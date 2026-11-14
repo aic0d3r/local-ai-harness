@@ -60,21 +60,25 @@ while [ $# -gt 0 ]; do
   esac
 done
 REPO="$(cd "$(dirname "$0")" && pwd)"
-PI_HOME="${PI_HOME:-$HOME/.pi}"
-EXT_DIR="$PI_HOME/agent/extensions"
-MODELS_JSON="$PI_HOME/agent/models.json"
+# The config folder: pi's own PI_CODING_AGENT_DIR first, then this harness' PI_HOME sandbox variable, then ~/.pi/agent. Resolved once and
+# exported, so adopt.py, mcp.py, the wizard and the launchers write to the same place. PI_HOME is then the folder above it (speak.json).
+AGENT_DIR="${PI_CODING_AGENT_DIR:-${PI_HOME:-$HOME/.pi}/agent}"
+export PI_CODING_AGENT_DIR="$AGENT_DIR"
+PI_HOME="$(dirname "$AGENT_DIR")"
+EXT_DIR="$AGENT_DIR/extensions"
+MODELS_JSON="$AGENT_DIR/models.json"
 TINY_PORT=8090; HAL_PORT=8731
 # ling-tiny sidecar is a saved choice (1/0), asked by the wizard; absent = on (old installs keep working)
-SC_PREF="$PI_HOME/agent/harness-sidecar"
+SC_PREF="$AGENT_DIR/harness-sidecar"
 [ -n "$SIDECAR_SET" ] && { mkdir -p "$(dirname "$SC_PREF")"; echo "$SIDECAR_SET" > "$SC_PREF"; }
 # which agent gets wired: pi (default, also when absent) or none (engine only); the wizard asks, --pi/--no-pi set it
-AGENT_PREF="$PI_HOME/agent/harness-agent"
+AGENT_PREF="$AGENT_DIR/harness-agent"
 [ -n "$AGENT_SET" ] && { mkdir -p "$(dirname "$AGENT_PREF")"; echo "$AGENT_SET" > "$AGENT_PREF"; }
 NO_PI=0; [ "$(cat "$AGENT_PREF" 2>/dev/null)" = none ] && NO_PI=1
 SIDECAR_ON=1; [ "$(cat "$SC_PREF" 2>/dev/null)" = 0 ] && SIDECAR_ON=0
 # sidecar batch size shared with /tune and start-ling-tiny.sh; without this the
 # unit and first-boot spawn ran llama.cpp's 512 default, 8x below the measured 4096
-UB_TINY=$(tr -dc '0-9' 2>/dev/null < "${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/harness-ubatch"); UB_TINY=${UB_TINY:-4096}
+UB_TINY=$(tr -dc '0-9' 2>/dev/null < "$AGENT_DIR/harness-ubatch"); UB_TINY=${UB_TINY:-4096}
 ok(){ printf '  \033[32m✓\033[0m %s\n' "$1"; }
 warn(){ printf '  \033[33m!\033[0m %s\n' "$1"; }
 FAILS=0  # every fail() counts; --doctor exits 1 when any happened
@@ -104,7 +108,7 @@ done
 # find the main halogen checkpoint: one search, owned by the launcher
 find_ckpt(){ bash "$REPO/server/start-halogen.sh" --print-ckpt; }
 # sudo one-time fixes: full command on the first install run (always in --doctor), then only in the log until fixed
-HINTS="$PI_HOME/agent/harness-hints-shown"
+HINTS="$AGENT_DIR/harness-hints-shown"
 hint(){ local k=$1; shift
   if [ "$DOCTOR" = 1 ] || ! grep -qx "$k" "$HINTS" 2>/dev/null; then
     for l in "$@"; do warn "$l"; done; [ "$DOCTOR" = 1 ] || echo "$k" >> "$HINTS"
@@ -148,10 +152,10 @@ if [ "$DOCTOR" = 1 ]; then
   # halogen provider is only ours on NPU installs (--no-halogen skips it and the NPU extensions)
   python3 -c "import json,os;p=json.load(open('$MODELS_JSON'))['providers'];p['llamacpp-tiny'];os.path.exists('$EXT_DIR/npu-retrieval.ts') and p['halogen']" 2>/dev/null \
                                     && ok "providers configured"   || fail "providers missing - run ./setup.sh"
-  [ -f "$PI_HOME/agent/mcp.json" ]  && ok "mcp.json present (serena+ddg+jina+semble)" || warn "no mcp.json - serena/ddg/jina/semble unavailable (run ./setup.sh)"
-  [ -f "$PI_HOME/agent/mcp.json" ] && { [ -x "$HOME/.local/bin/serena" ] || warn "serena not found at ~/.local/bin/serena - symbol tools off (uv tool install -p 3.13 serena-agent)"; }
-  if [ -f "$PI_HOME/agent/mcp.json" ]; then
-    MCP_DRIFT=$(python3 "$REPO/setup/mcp.py" check "$PI_HOME/agent/mcp.json" 2>/dev/null)
+  [ -f "$AGENT_DIR/mcp.json" ]  && ok "mcp.json present (serena+ddg+jina+semble)" || warn "no mcp.json - serena/ddg/jina/semble unavailable (run ./setup.sh)"
+  [ -f "$AGENT_DIR/mcp.json" ] && { [ -x "$HOME/.local/bin/serena" ] || warn "serena not found at ~/.local/bin/serena - symbol tools off (uv tool install -p 3.13 serena-agent)"; }
+  if [ -f "$AGENT_DIR/mcp.json" ]; then
+    MCP_DRIFT=$(python3 "$REPO/setup/mcp.py" check "$AGENT_DIR/mcp.json" 2>/dev/null)
     [ -n "$MCP_DRIFT" ] && warn "$MCP_DRIFT"
   fi
   fi
@@ -161,7 +165,7 @@ if [ "$DOCTOR" = 1 ]; then
   else fail "sidecar not installed - run ./setup.sh"; fi
   # the active engine (what the wizard set pi up for) decides what "down" means; detect tells gufo/Strata apart on :8080
   read -r ACT ACT_PROV ACT_MID < <(python3 -c 'import json,sys;p=json.load(open(sys.argv[1]));print(p["engine"],p["provider"],p["model"])' \
-    "${PI_CODING_AGENT_DIR:-$PI_HOME/agent}/harness-profile.json" 2>/dev/null)
+    "$AGENT_DIR/harness-profile.json" 2>/dev/null)
   [ -z "${ACT:-}" ] && [ -f "$EXT_DIR/npu-retrieval.ts" ] && { ACT=halogen; ACT_PROV=halogen; ACT_MID=halogen-qwen3.8-flash-next; }
   RUNNING=" $(python3 "$REPO/setup/harness.py" detect 2>/dev/null | python3 -c 'import json,sys;print(" ".join(e["engine"] for e in json.load(sys.stdin)["engines"]))' 2>/dev/null) "
   if [ -f "$EXT_DIR/npu-retrieval.ts" ] && [ "${ACT:-}" = halogen ]; then
@@ -203,14 +207,14 @@ if [ "$DOCTOR" = 1 ]; then
   # the weights answer the launchers read (docs/ENGINES.md#abliterated-models). An abliterated
   # model will not argue with instructions it reads; taint-gate confirms risky actions after
   # outside content, on either weights.
-  W=$(head -1 "$PI_HOME/agent/harness-weights" 2>/dev/null); W=${W:-stock}
+  W=$(head -1 "$AGENT_DIR/harness-weights" 2>/dev/null); W=${W:-stock}
   if [ "$W" = abliterated ]; then
     ok "weights: abliterated (refusals removed; taint-gate confirms risky actions after outside content)"
   else
     ok "weights: stock (refusals kept; ./harness config -> weights abliterated removes them)"
   fi
   # a non-default model (gufo and Strata): the stock/abliterated answer above is about Flash-Next only
-  M=$(head -1 "$PI_HOME/agent/harness-model" 2>/dev/null)
+  M=$(head -1 "$AGENT_DIR/harness-model" 2>/dev/null)
   if [ -n "$M" ] && [ "$M" != flash-next ] && python3 "$REPO/setup/harness.py" model-info "$M" engines 2>/dev/null | grep -qw "${ACT:-none}"; then
     ok "model: $M on $ACT (the weights answer above applies to Flash-Next only; ./harness config -> model)"
   fi
@@ -249,7 +253,7 @@ if [ "$DOCTOR" = 1 ]; then
 fi
 
 # first run: ask once whether start.sh should check for a newer halogen image (answer saved; env overrides)
-UPD_PREF="${PI_CODING_AGENT_DIR:-$PI_HOME/agent}/harness-update-check"
+UPD_PREF="$AGENT_DIR/harness-update-check"
 # -s: an empty file is not an answer (an older harness-update extension left empty files here)
 if [ "$NO_HALOGEN" = 0 ] && [ ! -s "$UPD_PREF" ] && [ -t 0 ]; then
   read -r -p "Check for engine updates each time start.sh runs? (one short network call; never installs without asking) [y/N] " A
@@ -364,7 +368,7 @@ python3 "$REPO/setup/adopt.py" skills
 python3 "$REPO/setup/adopt.py" packages  # pi packages, rtk binary + config
 
 echo "== 2b. MCP servers (mcp.json) =="
-MCP_JSON="$PI_HOME/agent/mcp.json"
+MCP_JSON="$AGENT_DIR/mcp.json"
 if [ -f "$MCP_JSON" ]; then
   if [ "$REFRESH_MCP" = 1 ]; then
     if python3 "$REPO/setup/mcp.py" refresh "$MCP_JSON"; then
@@ -504,7 +508,7 @@ if [ "$VOICE" = 1 ]; then
     warn "  Ubuntu: snap install lemonade-server; or docker: see lemonade-server.ai docs), then re-run ./setup.sh --voice"
   fi
   if command -v pi >/dev/null; then
-    if ! python3 -c "import json,sys; sys.exit(0 if any('privateer-speak' in p for p in json.load(open('$PI_HOME/agent/settings.json')).get('packages',[])) else 1)" 2>/dev/null; then
+    if ! python3 -c "import json,sys; sys.exit(0 if any('privateer-speak' in p for p in json.load(open('$AGENT_DIR/settings.json')).get('packages',[])) else 1)" 2>/dev/null; then
       pi install npm:privateer-speak >/dev/null 2>&1 && ok "installed privateer-speak (pi package)" || warn "privateer-speak install failed - run: pi install npm:privateer-speak"
     else ok "privateer-speak present"; fi
     if [ ! -f "$PI_HOME/speak.json" ]; then

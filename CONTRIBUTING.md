@@ -13,6 +13,9 @@ For a pull request:
   ```bash
   for t in tests/test_*.py; do python3 "$t" || break; done   # each prints "ok"; plain scripts, run them like this, not with pytest
   bun test tests/                                            # extension tests
+  bash tests/e2e-setup.sh                                    # setup.sh against a stub engine in a throwaway HOME (needs :8080 free)
   ```
+
+  CI (`.github/workflows/ci.yml`) runs the same three plus `shellcheck -S error` on every push and pull request.
 
 - New hardware or engine paths: say what you tested on and what you didn't, as the Windows page does.

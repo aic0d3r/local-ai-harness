@@ -8,7 +8,7 @@ PHASE="${2:-all}"
 TASK_FILE="$(dirname "$0")/harness-ab-task.txt"
 OUT=/tmp/harness-ab-$$; mkdir -p $OUT
 RESERVE=50000   # force compaction so the sidecar path fires
-AG="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
+AG="${PI_CODING_AGENT_DIR:-${PI_HOME:-$HOME/.pi}/agent}"
 # the bench resets the repo (checkout + clean): never run it where it can eat work
 cd "$REPO" || exit 1
 DIRTY=$(git status --porcelain | grep -vE '^\?\? (PROGRESS\.md|BIG_TEST_REPORT\.md|SURVEY\.md)$')

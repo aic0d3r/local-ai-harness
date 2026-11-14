@@ -28,15 +28,15 @@ fi
 
 echo "[1/8] backup -> $BACKUP"
 # one tar call: a second `czf` would truncate the first archive (backup lost)
-AGREL=$(realpath --relative-to="$PI_HOME" "$AG" 2>/dev/null || echo agent)  # tar members are relative to PI_HOME
-TAR_ARGS=(-C "$PI_HOME" "$AGREL/extensions" "$AGREL/prompts" "$AGREL/skills" "$AGREL/themes" "$AGREL/settings.json" "$AGREL/models.json" "$AGREL/mcp.json")
+AGPARENT=$(dirname "$AG"); AGREL=$(basename "$AG")  # tar members are relative to the folder above the agent dir, wherever it is
+TAR_ARGS=(-C "$AGPARENT" "$AGREL/extensions" "$AGREL/prompts" "$AGREL/skills" "$AGREL/themes" "$AGREL/settings.json" "$AGREL/models.json" "$AGREL/mcp.json")
 [ -f "$HOME/.config/systemd/user/ling-tiny.service" ] && TAR_ARGS+=(-C "$HOME/.config/systemd/user" ling-tiny.service)
 # every state file the harness writes into the agent dir (wizard answers, tuning, markers, logs); one list for backup and removal
 STATE=(harness-profile.json harness-tuned.json harness-extras.json harness-sidecar harness-agent harness-update-check harness-update-stamp
        harness-hints-shown harness-repo harness-ubatch harness-events.jsonl setup.log
        harness-weights harness-model harness-quant harness-pick.json harness-pins hud.log progress-stamps.json)
-for f in "${STATE[@]}"; do [ -f "$AG/$f" ] && TAR_ARGS+=(-C "$PI_HOME" "$AGREL/$f"); done
-[ -f "$AG/rag-index.py" ] && TAR_ARGS+=(-C "$PI_HOME" "$AGREL/rag-index.py") # own -C: tar applies earlier -C to later members
+for f in "${STATE[@]}"; do [ -f "$AG/$f" ] && TAR_ARGS+=(-C "$AGPARENT" "$AGREL/$f"); done
+[ -f "$AG/rag-index.py" ] && TAR_ARGS+=(-C "$AGPARENT" "$AGREL/rag-index.py") # own -C: tar applies earlier -C to later members
 tar czf "$BACKUP" "${TAR_ARGS[@]}" 2>/dev/null
 PROFILE_JSON=$(cat "$AG/harness-profile.json" 2>/dev/null); export PROFILE_JSON
 echo "      $(du -h "$BACKUP" | cut -f1)"
@@ -93,7 +93,8 @@ try:
     prof = json.loads(os.environ.get("PROFILE_JSON") or "{}")
 except ValueError:
     prof = {}
-ours_prov = {"halogen", "llamacpp-tiny"} | ({prof["provider"]} if prof.get("provider") else set())
+# strata and gufo too: `setup.sh --strata/--gufo` writes that provider without a wizard profile. Local ones only (the loop below).
+ours_prov = {"halogen", "llamacpp-tiny", "strata", "gufo"} | ({prof["provider"]} if prof.get("provider") else set())
 sp = os.path.join(home, "settings.json")
 if os.path.exists(sp):
     s = json.load(open(sp))
@@ -132,5 +133,5 @@ fi
 echo "[8/8] notes"
 echo "      halogen container/checkpoint: untouched (docker stop <id> + rm the model dir if desired)"
 echo "      vm-compact.timer (sudo): sudo rm /etc/systemd/system/vm-compact.{service,timer} && sudo systemctl daemon-reload"
-echo "      backup: $BACKUP (restore by untarring into ~)"
+echo "      backup: $BACKUP (restore: tar xzf it with -C $AGPARENT)"
 echo "DONE - the harness is removed (restart any running pi session). pi itself, mcp.json and your own models.json entries are left as they were."

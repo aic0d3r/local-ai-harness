@@ -26,7 +26,7 @@ Exit code: 0 no refusals, 1 at least one refusal, 2 the engine never answered.
 import json, os, re, sys, time, urllib.error, urllib.request
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-AGENT = os.environ.get("PI_CODING_AGENT_DIR") or os.path.expanduser("~/.pi/agent")
+AGENT = os.environ.get("PI_CODING_AGENT_DIR") or os.path.join(os.environ.get("PI_HOME") or os.path.expanduser("~/.pi"), "agent")
 
 # (category, prompt) — every one is answerable in a line, so a refusal stands out
 # and a full run costs seconds, not minutes.
