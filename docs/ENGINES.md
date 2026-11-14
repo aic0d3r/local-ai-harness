@@ -166,6 +166,28 @@ installer's layout changes are opt-in). Uncommitted edits to tracked files in th
 the same lines the checkout is refused before osmos is stopped. A checkout whose branch holds commits the release does not
 contain is not touched either. Tested against a fake libosmos in `tests/upgrade-osmos.test.sh`.
 
+## Any OpenAI-compatible server: a custom endpoint
+
+For a server this harness does not start: another machine, a non-default port, LM Studio, Ollama or vLLM running elsewhere,
+a hosted gateway.
+
+```bash
+./setup.sh --endpoint http://gpu-box:8000                    # = ./harness endpoint ...
+HARNESS_ENDPOINT_KEY=sk-... ./harness endpoint https://gw.example/openai --name gw --model my-model --ctx 131072
+```
+
+It probes `<url>/v1/models` (with the key as a bearer token), takes the model (the first one, a menu if there are several, or
+`--model`) and its context window (what the server reports, else `--ctx`, else you are asked; unattended it assumes 32768 and
+says so), then writes a pi provider with the URL, key and window, makes it pi's default, and checks it with a real reply.
+Nothing is started, stopped or tuned. `--name` (default `custom`) names the pi provider; it may not be one of this
+harness' own engines. The key is stored in `models.json` (where pi reads it, mode kept); prefer the environment variable to
+`--key`, which shows up in the process list and your shell history.
+
+`./harness status`, `./harness verify`, `./harness report` (host redacted), `./start.sh` and `./setup.sh --doctor` all work
+for it, and uninstall removes the provider and the key. What it does not have: the NPU tools and the sidecar (a remote box
+is not this machine's GPU or NPU), `./harness tune` (not measured), engine updates. Windows: `setup.ps1 -Url` already
+handles a Strata or gufo server; `--endpoint` is Linux and macOS for now.
+
 ## Why there is no TabbyAPI engine
 
 TabbyAPI (ExLlamaV3, EXL3 quants) was added and removed before any release. It is NVIDIA and Linux only, serves

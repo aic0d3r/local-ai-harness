@@ -110,7 +110,8 @@ if os.path.exists(mp):
     m = json.load(open(mp))
     for prov in ours_prov:  # a provider pointing somewhere else than this box is the user's own
         p = m.get("providers", {}).get(prov) or {}
-        if prov in ("halogen", "llamacpp-tiny") or "127.0.0.1" in p.get("baseUrl", ""):
+        # a custom endpoint (./harness endpoint) is remote by design, but we wrote it (and the key stored with it): it goes too
+        if prov in ("halogen", "llamacpp-tiny") or "127.0.0.1" in p.get("baseUrl", "") or (prof.get("engine") == "custom" and prov == prof.get("provider")):
             m["providers"].pop(prov, None)
     jsonio.put(mp, m, 2)
 print("      defaults removed where they matched ours; providers removed: " + ", ".join(sorted(ours_prov)))

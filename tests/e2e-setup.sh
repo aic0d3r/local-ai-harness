@@ -85,6 +85,20 @@ check "the harness's extensions are gone from the custom dir" '[ ! -e "$OUTSIDE/
 check "the provider it wrote is removed from models.json" '! grep -q strata "$OUTSIDE/models.json"'
 rm -rf "$H/sandbox" "$H/elsewhere" "$H"/pi-harness-uninstall-backup-*.tar.gz
 
+echo "== setup.sh --endpoint: a custom server (reached as localhost, so uninstall's local-only rule does not apply), doctor, uninstall"
+EPA="$H/ep/agent"
+epenv() { env -i HOME="$H" PI_HOME="$H/ep" PATH="$H/bin:/usr/bin:/bin:/usr/local/bin" "$@"; }
+epenv bash "$REPO/setup.sh" --endpoint "http://localhost:$PORT" --name remote --model stub-model --ctx 8192 < /dev/null >"$H/ep.out" 2>&1; RC7=$?
+check "setup.sh --endpoint exits 0 and the live check answered" '[ "$RC7" = 0 ] && grep -q "custom answered" "$H/ep.out"'
+check "provider, default model and a custom profile (with the URL) are written; extensions installed" \
+  'python3 -c "import json,sys; a=sys.argv[1]; p=json.load(open(a+\"/models.json\"))[\"providers\"][\"remote\"]; s=json.load(open(a+\"/settings.json\")); f=json.load(open(a+\"/harness-profile.json\")); sys.exit(not (p[\"baseUrl\"].endswith(\":$PORT/v1\") and p[\"models\"][0][\"contextWindow\"]==8192 and s[\"defaultProvider\"]==\"remote\" and f[\"engine\"]==\"custom\" and f[\"url\"].startswith(\"http://localhost\")))" "$EPA" && [ -f "$EPA/extensions/taint-gate.ts" ]'
+DOC=$(epenv bash "$REPO/setup.sh" --doctor < /dev/null 2>&1)
+check "the doctor's ready check asks the custom endpoint" 'echo "$DOC" | grep -q "ready check: custom answered"'
+check "./harness status names it" 'epenv python3 "$REPO/setup/harness.py" status | grep -q "^engine custom http://localhost:$PORT UP"'
+epenv bash "$REPO/scripts/uninstall.sh" --yes < /dev/null >/dev/null 2>&1
+check "uninstall removes the remote provider it wrote" '! grep -q remote "$EPA/models.json"'
+rm -rf "$H/ep" "$H/ep.out" "$H"/pi-harness-uninstall-backup-*.tar.gz
+
 echo "== harness verify + doctor"
 run python3 "$REPO/setup/harness.py" verify strata stub-model >/dev/null 2>&1; V1=$?
 check "./harness verify gets a reply from the stub" '[ "$V1" = 0 ]'

@@ -17,6 +17,9 @@
 #                               extensions and all container management (for boxes that
 #                               run pi without a local halogen, e.g. a laptop against a
 #                               remote halogen box)
+#   ./setup.sh --endpoint URL [--name N] [--key K] [--model ID] [--ctx N]
+#                               use any OpenAI-compatible server (another machine, LM Studio/Ollama/vLLM elsewhere) as the
+#                               main engine: nothing is started; = ./harness endpoint (key: HARNESS_ENDPOINT_KEY)
 #   ./setup.sh --strata [url]   pi-only install + a provider for Strata (github.com/Niko1221/Strata,
 #                               NVIDIA/AMD desktop GPUs; default http://127.0.0.1:8080). Install
 #                               and start Strata itself first, per its README.
@@ -43,6 +46,7 @@ fi
 HALOGEN_CKPT=""; SIDECAR_SET=""; AGENT_SET=""; DOCTOR=0; REFUSALS=0; REFRESH_MCP=0; VOICE=0; NO_HALOGEN=0; STRATA=0; GUFO=0; ENG=strata; ENG_URL=http://127.0.0.1:8080
 while [ $# -gt 0 ]; do
   case "$1" in
+    --endpoint)    shift; exec python3 -u "$(dirname "$(readlink -f "$0")")/setup/harness.py" endpoint "$@" ;;  # any OpenAI-compatible server: see ./harness endpoint --help
     --no-halogen)  NO_HALOGEN=1; shift ;;
     --halogen) case "${2:-}" in ""|-*) HALOGEN_CKPT=auto; shift ;; *) HALOGEN_CKPT="$2"; shift 2 ;; esac ;;  # a following flag is not a checkpoint path
     --strata|--gufo) [ "$1" = --gufo ] && { GUFO=1; ENG=gufo; } || STRATA=1; NO_HALOGEN=1
@@ -223,6 +227,10 @@ if [ "$DOCTOR" = 1 ]; then
     ok "engine $ACT: no NPU guard/triage/dedup (halogen only); taint-gate, refusal canary, semble search and the sidecar work unchanged"
   fi
   if [ -z "${ACT:-}" ]; then :
+  elif [ "$ACT" = custom ]; then
+    # a remote / non-default server (./harness endpoint): not in the local engine list, so ask it directly (URL and key come from the profile)
+    R=$(python3 "$REPO/setup/harness.py" verify custom "$ACT_MID" 2>&1); RRC=$?
+    [ "$RRC" = 0 ] && ok "ready check: $R" || fail "ready check: $R"
   elif [[ "$RUNNING" != *" $ACT "* ]]; then fail "ready check skipped: $ACT is down"
   else
     # asks the engine over HTTP, not through pi, so it works for --no-pi installs and tests the engine alone

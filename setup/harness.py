@@ -48,9 +48,9 @@ def jput(path, obj):
     jsonio.put(path, obj)  # temp + rename: a crash mid-write must not leave a truncated config
 
 
-def http(url, body=None, timeout=3):
-    req = urllib.request.Request(url, data=json.dumps(body).encode() if body else None, headers={"Content-Type": "application/json"})
-    return urllib.request.urlopen(req, timeout=timeout)
+def http(url, body=None, timeout=3, key=None):
+    headers = {"Content-Type": "application/json", **({"Authorization": f"Bearer {key}"} if key else {})}  # key: a custom endpoint's
+    return urllib.request.urlopen(urllib.request.Request(url, data=json.dumps(body).encode() if body else None, headers=headers), timeout=timeout)
 
 
 # ---------- detect ----------
@@ -248,11 +248,11 @@ def ask_model(engine):
     return m != cur
 
 
-def served_models(port, engine=None):
-    """Model ids the server lists, minus helper models the engine hides (halogen's NPU sidecars)."""
+def served_models(port, engine=None, base=None, key=None):
+    """Model ids the server lists, minus helper models the engine hides (halogen's NPU sidecars). base/key: a custom endpoint's."""
     hide = PROFILES["engines"].get(engine or "", {}).get("hide")
     try:
-        ids = [m["id"] for m in json.load(http(f"http://127.0.0.1:{port}/v1/models"))["data"]]
+        ids = [m["id"] for m in json.load(http(f"{base or f'http://127.0.0.1:{port}'}/v1/models", key=key))["data"]]
     except (OSError, ValueError, LookupError):
         return []
     return [i for i in ids if not (hide and re.search(hide, i))]
@@ -349,13 +349,13 @@ def model_profile(model_id):
     return entries.model_profile(model_id, PROFILES)
 
 
-def server_ctx(port):
-    """Real context window from the server, or 0 if it will not say."""
+def server_ctx(port, base=None, key=None):
+    """Real context window from the server, or 0 if it will not say. base/key: a custom endpoint's."""
     for path, pick in (("/props", lambda d: d["default_generation_settings"]["n_ctx"]), ("/v1/models", lambda d: d["data"][0]["meta"]["n_ctx"]),
                        ("/v1/models", lambda d: d["data"][0]["context_length"]),  # gufo
                        ("/v1/models", lambda d: d["data"][0]["max_model_len"])):  # vLLM
         try:
-            return int(pick(json.load(http(f"http://127.0.0.1:{port}{path}"))))
+            return int(pick(json.load(http(f"{base or f'http://127.0.0.1:{port}'}{path}", key=key))))
         except Exception:
             pass
     return 0
@@ -1158,7 +1158,7 @@ def pin_value(name, default):
 
 def engine_have(engine):
     """The version of engine that is installed here (profiles.json engines.<e>.update.have), or '' when it has none / cannot be told."""
-    u = PROFILES["engines"][engine].get("update")
+    u = PROFILES["engines"].get(engine, {}).get("update")  # .get: a custom endpoint has no profile entry
     if not u:
         return ""
     kind, *rest = u["have"].split()
@@ -1173,7 +1173,7 @@ def engine_have(engine):
 
 def engine_update(engine):
     """-> one line if a newer release of engine exists; '' when current, unknown or offline. Never installs."""
-    u = PROFILES["engines"][engine].get("update")
+    u = PROFILES["engines"].get(engine, {}).get("update")
     if not u:
         return ""
     try:
@@ -1264,6 +1264,13 @@ def cmd_up(_):
     eng = saved_engine()
     if not eng:
         sys.exit("not set up yet: run ./setup.sh first (nothing was started or installed)")
+    ep = custom_endpoint()
+    if ep:  # a custom endpoint is not ours to start: say if it is not answering, refresh the install, done
+        if not served_models(0, base=ep["url"], key=ep["key"]):
+            print(f"! custom endpoint {ep['url']} is not answering; {'continuing' if no_pi() else 'pi opens anyway'}", file=sys.stderr)
+        if not install_extensions(CUSTOM, verbose=False, show_ok=False):
+            print(f"! setup.sh reported problems (details: {SETUP_LOG})", file=sys.stderr)
+        return
     running = {x["engine"]: x for x in detect()["engines"]}
     if eng not in running:
         plan = plan_start(eng, running, ask_start=False)
@@ -1320,14 +1327,28 @@ def launch_offer(eng, prov, mid):
         os.execvp("pi", ["pi", "--provider", prov, "--model", mid])
 
 
+CUSTOM = "custom"  # the engine name of a profile written by ./harness endpoint: any OpenAI-compatible server, no port table, no launcher
+
+
+def custom_endpoint():
+    """{url, provider, key} when the saved profile is a custom endpoint, else None. The key stays in models.json, where pi reads it."""
+    p = active() or {}
+    if p.get("engine") != CUSTOM or not p.get("url"):
+        return None
+    key = (((jget(os.path.join(AGENT, "models.json"), {}) or {}).get("providers") or {}).get(p.get("provider")) or {}).get("apiKey")
+    return {"url": p["url"], "provider": p["provider"], "key": None if key in (None, "", "dummy") else key}
+
+
 def live_reply(eng, model_id, timeout=120):
     """Ask the engine itself for a few tokens over HTTP (no agent needed) -> (ok, detail)."""
-    port = PROFILES["engines"][eng]["port"]
+    ep = custom_endpoint() if eng == CUSTOM else None
+    port = "" if ep else PROFILES["engines"][eng]["port"]
+    base, key, where = (ep["url"], ep["key"], ep["url"]) if ep else (f"http://127.0.0.1:{port}", None, f":{port}")
     body = {"model": model_id, "stream": True, "max_tokens": 64, "temperature": 0,
             "messages": [{"role": "user", "content": "Reply with exactly: OK"}]}
     t0 = time.time()
     try:
-        with http(f"http://127.0.0.1:{port}/v1/chat/completions", body, timeout=timeout) as r:
+        with http(f"{base}/v1/chat/completions", body, timeout=timeout, key=key) as r:
             for line in r:
                 line = line.decode().strip()
                 if not line.startswith("data:") or line.endswith("[DONE]"):
@@ -1337,21 +1358,94 @@ def live_reply(eng, model_id, timeout=120):
                     if d.get("content") or d.get("reasoning_content") or d.get("reasoning"):  # a thinking model may answer in reasoning first
                         return True, f"{eng} answered in {time.time() - t0:.1f}s"
     except urllib.error.HTTPError as e:
-        return False, f"{eng} on :{port} returned HTTP {e.code} for model {model_id}"
+        return False, f"{eng} on {where} returned HTTP {e.code} for model {model_id}" + (" (wrong or missing key?)" if e.code in (401, 403) else "")
     except (OSError, ValueError) as e:
-        return False, f"no reply from {eng} on :{port} ({e})"
-    return False, f"{eng} on :{port} sent no text"
+        return False, f"no reply from {eng} on {where} ({e})"
+    return False, f"{eng} on {where} sent no text"
 
 
 def cmd_verify(a):
     """./harness verify [engine] [model]: a live reply from the engine; exit 0 only if it answered."""
     p = active() or {}
     eng, mod = a.engine or p.get("engine"), a.model or p.get("model")
-    if not eng or eng not in PROFILES["engines"] or not mod:
+    if not eng or (eng not in PROFILES["engines"] and eng != CUSTOM) or not mod:
         sys.exit("fail: nothing configured to check (run ./harness setup)")
     ok, msg = live_reply(eng, mod)
     print(msg)
     sys.exit(0 if ok else 1)
+
+
+def probe_endpoint(url, key):
+    """GET <url>/v1/models -> ([model dicts], '') or ([], why)."""
+    try:
+        return json.load(http(url + "/v1/models", timeout=10, key=key))["data"], ""
+    except urllib.error.HTTPError as e:
+        return [], f"HTTP {e.code}" + (" - this server wants a key: --key, or HARNESS_ENDPOINT_KEY in the environment" if e.code in (401, 403) else "")
+    except (OSError, ValueError, LookupError) as e:
+        return [], str(e)
+
+
+def cmd_endpoint(a):
+    """./harness endpoint URL [--name N] [--key K] [--model ID] [--ctx N]: use any OpenAI-compatible server (another machine, a
+    non-default port, LM Studio/Ollama/vLLM elsewhere) as the main engine. Nothing is started or stopped; pi gets a provider with
+    the URL, key and context window, and the saved profile remembers the URL so status, verify and the doctor can reach it."""
+    import getpass
+    url = a.url.strip().rstrip("/")
+    url = url[:-3] if url.endswith("/v1") else url
+    if not re.fullmatch(r"https?://[^/\s]+(/\S*)?", url):
+        sys.exit(f"not a URL: {a.url!r} (want http://host:port or https://host/prefix; /v1 is added for you)")
+    name = a.name or CUSTOM
+    if not re.fullmatch(r"[a-z][a-z0-9_-]{0,30}", name):
+        sys.exit(f"--name {name!r}: lower-case letters, digits, - and _ (it names the pi provider)")
+    if name in PROFILES["engines"] or name == "llamacpp-tiny":
+        sys.exit(f"--name {name}: that is one of this harness' own engines/providers; pick another (default: {CUSTOM})")
+    key = a.key or os.environ.get("HARNESS_ENDPOINT_KEY") or None
+    models, why = probe_endpoint(url, key)
+    if why.startswith("HTTP 40") and not key and sys.stdin.isatty():
+        key = getpass.getpass("  this server wants an API key (not echoed): ").strip() or None
+        models, why = probe_endpoint(url, key)
+    if not models and not (a.model and a.ctx):
+        sys.exit(f"{url}/v1/models did not answer ({why or 'no models listed'}). Fix that, or give both --model and --ctx to configure it anyway.")
+    ids = [m["id"] for m in models]
+    mid = a.model or (choose("Which model?", ids, False) if len(ids) > 1 and sys.stdin.isatty() else ids[0])
+    if len(ids) > 1 and not a.model and not sys.stdin.isatty():
+        print(f"  {len(ids)} models listed ({', '.join(ids[:6])}{', ...' if len(ids) > 6 else ''}); using {mid} - pick another with --model")
+    mdl = next((m for m in models if m["id"] == mid), {})
+    ctx = a.ctx or next((int(x) for x in (mdl.get("meta", {}).get("n_ctx"), mdl.get("context_length"), mdl.get("max_model_len"), mdl.get("max_context_length")) if x), 0) \
+        or (server_ctx(0, url, key) if models else 0)
+    if not ctx and sys.stdin.isatty():
+        ans = input("  the server does not report its context window. Tokens? [32768]: ").strip()
+        ctx = int(ans) if ans.isdigit() else 0
+    if not ctx:
+        print(f"  ! the context window is unknown; assuming 32768. Set it with --ctx N (or contextWindow for {mid} in models.json)")
+        ctx = 32768
+    inputs = mdl.get("architecture", {}).get("input_modalities") or ["text"]
+    mj = os.path.join(AGENT, "models.json")
+    m = jget(mj, {})
+    if os.path.exists(mj) and not os.path.exists(mj + ".pre-harness"):
+        shutil.copy(mj, mj + ".pre-harness")
+    prov = entries.build_provider(url + "/v1", name, mid, ctx, inputs, PROFILES, name=f"{mid} ({name})")
+    prov["apiKey"] = key or "dummy"  # pi sends this as the bearer token
+    m.setdefault("providers", {})[name] = prov  # an explicit command replaces an earlier entry of the same name
+    m["providers"].setdefault("llamacpp-tiny", entries.tiny_provider(PROFILES))
+    jput(mj, m)
+    sj = os.path.join(AGENT, "settings.json")
+    if os.path.exists(sj) and not os.path.exists(sj + ".pre-harness"):
+        shutil.copy(sj, sj + ".pre-harness")
+    s = jget(sj, {})
+    s["defaultProvider"], s["defaultModel"] = name, mid
+    s.setdefault("compaction", {}).update({"enabled": True, "reserveTokens": reserve_for(ctx)})
+    jput(sj, s)
+    jput(os.path.join(AGENT, "harness-profile.json"), {"engine": CUSTOM, "provider": name, "model": mid, "url": url, "npu": False,
+                                                     "npuUrl": "http://127.0.0.1:8731", "sidecarUrl": "http://127.0.0.1:8090"})
+    print(f"  endpoint {url}/v1 -> pi provider '{name}', model {mid}, context {ctx}{', key saved in models.json' if key else ''}")
+    if not install_extensions(CUSTOM, verbose=False, show_ok=False, launch=False):
+        print(f"! setup.sh reported problems (details: {SETUP_LOG})")
+    ok, msg = live_reply(CUSTOM, mid, timeout=120)
+    print(("  ✓ " if ok else "  ✗ ") + msg)
+    if not ok:
+        sys.exit(1)
+    print("  ready: start pi in a project with ./start.sh (the sidecar and the NPU tools are not part of a custom endpoint)")
 
 
 def run_doctor():
@@ -1501,6 +1595,8 @@ def cmd_use(a):
 
 def cmd_tune(_):
     p = active() or sys.exit("no active profile: run ./harness setup")
+    if p["engine"] == CUSTOM:
+        sys.exit("./harness tune measures the engines this harness starts; a custom endpoint is not measured (set --ctx when you add it)")
     finish(p["engine"], p["model"], False)
 
 
@@ -1508,6 +1604,10 @@ def cmd_status(_):
     p = active()
     if not p:
         return print("not configured: run ./harness setup")
+    ep = custom_endpoint()
+    if ep:
+        up = bool(served_models(0, base=ep["url"], key=ep["key"]))
+        return print(f"engine custom {ep['url']} {'UP' if up else 'DOWN'}  model {p['model']}  provider {ep['provider']}  (a custom endpoint: not started, stopped or tuned by this harness)")
     port = PROFILES["engines"][p["engine"]]["port"]
     up = bool(served_models(port, p["engine"]))
     print(f"engine {p['engine']} :{port} {'UP' if up else 'DOWN'}  model {p['model']}  npu {p['npu']}")
@@ -1551,6 +1651,12 @@ def report_text(doctor=True):
     port = PROFILES["engines"][eng]["port"] if eng in PROFILES["engines"] else 0
     tuned = jget(os.path.join(AGENT, "harness-tuned.json"), {}).get(hw_key(eng, p.get("model", "")), {}) if eng else {}
     up = [e["engine"] for e in detect()["engines"]]
+    ep = custom_endpoint()
+    if ep:  # remote: say it is one, never where (the host may be private)
+        is_up = bool(served_models(0, base=ep["url"], key=ep["key"]))
+        where, ctx = f"custom endpoint, {ep['url'].split('://')[0]}://<host>, {'up' if is_up else 'DOWN'}", (server_ctx(0, ep["url"], ep["key"]) if is_up else 0)
+    else:
+        where, ctx = f"port {port}, {'up' if eng in up else 'DOWN'}", (engine_ctx(eng) if eng in up else 0)
     L = ["local-ai-harness report (./harness report: no prompts, keys or paths; home folder and user name redacted)", "",
          f"harness:  {out('git', '-C', REPO, 'describe', '--tags', '--always', '--dirty') or 'unknown (not a git checkout)'}",
          f"OS:       {platform.platform()} / python {platform.python_version()}",
@@ -1558,8 +1664,8 @@ def report_text(doctor=True):
          f"RAM:      {hw['ram_gb']} GB",
          f"GPU:      {cap['gpu_name'] or hw['gpu']}, {cap['vram_gb']:g} GB VRAM, {cap['fast_gb']:g} GB GPU-addressable",
          f"NPU:      {'yes' if hw['npu'] else 'no'}    disk free: {cap['disk_free_gb']} GB",
-         f"engine:   {eng or 'not set up'}{' ' + have if have else ''} (port {port}, {'up' if eng in up else 'DOWN'}); engines answering: {', '.join(up) or 'none'}",
-         f"model:    {p.get('model', '-')}    context: {(engine_ctx(eng) if eng in up else 0) or 'unknown'}    weights: {weights_pref() if eng in WEIGHTS_ENGINES else '-'}",
+         f"engine:   {eng or 'not set up'}{' ' + have if have else ''} ({where}); local engines answering: {', '.join(up) or 'none'}",
+         f"model:    {p.get('model', '-')}    context: {ctx or 'unknown'}    weights: {weights_pref() if eng in WEIGHTS_ENGINES else '-'}",
          f"speed:    {tuned.get('prefill_tps', '?')} t/s prefill, {tuned.get('decode_tps', '?')} t/s decode (./harness tune, {tuned.get('when', 'not measured')})",
          f"pi:       {out('pi', '--version') or 'not found'}"]
     if doctor:
@@ -1649,7 +1755,7 @@ def main():
     import argparse
     ap = argparse.ArgumentParser(prog="harness")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for n, f in (("detect", cmd_detect), ("setup", cmd_setup), ("use", cmd_use), ("tune", cmd_tune), ("status", cmd_status), ("config", cmd_config), ("update-check", cmd_update_check), ("up", cmd_up), ("recommend", cmd_recommend), ("quant-info", cmd_quant_info), ("ctx-info", cmd_ctx_info), ("model-info", cmd_model_info), ("monitor", cmd_monitor), ("verify", cmd_verify), ("refresh", cmd_refresh), ("report", cmd_report)):
+    for n, f in (("detect", cmd_detect), ("setup", cmd_setup), ("use", cmd_use), ("tune", cmd_tune), ("status", cmd_status), ("config", cmd_config), ("update-check", cmd_update_check), ("up", cmd_up), ("recommend", cmd_recommend), ("quant-info", cmd_quant_info), ("ctx-info", cmd_ctx_info), ("model-info", cmd_model_info), ("monitor", cmd_monitor), ("verify", cmd_verify), ("refresh", cmd_refresh), ("report", cmd_report), ("endpoint", cmd_endpoint)):
         p = sub.add_parser(n)
         p.set_defaults(fn=f)
         if n in ("setup", "use"):
@@ -1665,6 +1771,12 @@ def main():
             p.add_argument("engine", nargs="?", help="default: the active engine (halogen or strata)")
             p.add_argument("--url", help="server root, e.g. a remote Strata (default: this box)")
             p.add_argument("--once", action="store_true", help="Strata only: print one snapshot and exit")
+        if n == "endpoint":
+            p.add_argument("url", help="http://host:port (or https://host/prefix); /v1 is added")
+            p.add_argument("--name", help=f"the pi provider's name (default: {CUSTOM})")
+            p.add_argument("--key", help="API key (or set HARNESS_ENDPOINT_KEY: a flag shows in the process list and shell history)")
+            p.add_argument("--model", help="model id (default: the server's first, or a menu when there are several)")
+            p.add_argument("--ctx", type=int, help="context window in tokens (default: what the server reports, else asked)")
         if n == "report":
             p.add_argument("--no-doctor", action="store_true", help="skip the doctor run (a few seconds, includes a live reply from the engine)")
         if n == "verify":

@@ -56,6 +56,7 @@ and it never downloads the sidecar model without a saved answer or a terminal.
 - `--no-halogen` installs pi without container management: a laptop pi against your own providers, or against a remote
   Strix Halo appliance via `baseUrl` + `PI_NPU_BASE`.
 - `--strata [url]` and `--gufo [url]` do a pi-only install with a provider for that engine.
+- `--endpoint URL [--name N] [--key K] [--model ID] [--ctx N]` uses any OpenAI-compatible server (another machine, a hosted gateway) as the main engine: no launcher, the key stays in `models.json` ([docs/ENGINES.md](ENGINES.md#any-openai-compatible-server-a-custom-endpoint)).
 - `--no-pi` (also asked by the wizard) skips all pi wiring: engine and ling-tiny sidecar only, then prints the
   OpenAI-compatible endpoints for opencode or any other agent. Independent of `--no-halogen`. The pi extensions (NPU
   tools, guards, turn-timer, MCP exposure, skills) are pi-only and are not installed. `./setup.sh --pi` undoes it.
