@@ -41,7 +41,11 @@ rollback(){
   [ -n "$id" ] && docker stop -t 30 "$id" >/dev/null
   if [ "$WAS_UP" = 1 ]; then
     setsid nohup bash "$START" > "$LOG.rollback" 2>&1 < /dev/null &
-    echo "      restarted on $CUR (log: $LOG.rollback); pin unchanged"
+    local pid=$!
+    echo "      restarting on $CUR (log: $LOG.rollback); pin unchanged"
+    # wait for it: whoever sees this script exit (the wizard) must not start a second server on the same port
+    for _ in $(seq 1 18); do kill -0 "$pid" 2>/dev/null || break; curl -sf -m 3 "http://127.0.0.1:$PORT/v1/models" >/dev/null 2>&1 && break; sleep 20; done
+    curl -sf -m 5 "http://127.0.0.1:$PORT/v1/models" >/dev/null && echo "      $CUR is serving again" || echo "      $CUR did not come back (see $LOG.rollback)"
   else echo "      gufo was not running before; left stopped. pin unchanged"; fi
   exit 1
 }

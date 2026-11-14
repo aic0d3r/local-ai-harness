@@ -144,6 +144,10 @@ PY
 for f in libxrt_coreutil.so.2 libxrt_core.so.2 libxrt_driver_xdna.so.2; do
   [ -e "/usr/lib/$f" ] || { echo "/usr/lib/$f is missing - install the XRT runtime (xrt / xrt-plugin-amdxdna) first" >&2; exit 1; }
 done
+# the plugin is built against one xrt: after an xrt-only update it cannot load and the NPU engine dies with "No such device" after the image is up
+if command -v ldd >/dev/null 2>&1 && BAD=$(ldd -r /usr/lib/libxrt_driver_xdna.so.2 2>&1 | grep -m1 'undefined symbol'); then
+  echo "xrt-plugin-amdxdna does not match the installed xrt ($BAD) - update or rebuild xrt and xrt-plugin-amdxdna together, then start halogen again" >&2; exit 1
+fi
 RENDER_GID=$(getent group render | cut -d: -f3); VIDEO_GID=$(getent group video | cut -d: -f3)
 # reranker dropped from the default NPU set (v1.2): nothing calls /v1/rerank since search moved
 # to semble (0 calls in harness-events.jsonl) and it is never loaded on demand either - 821 MB

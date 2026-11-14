@@ -766,6 +766,14 @@ def halogen_preflight():
     out += [f"{d} is missing (the NPU/GPU driver is not loaded)" for d in ("/dev/accel/accel0", "/dev/kfd") if not os.path.exists(d)]
     out += [f"/usr/lib/{f} is missing (install the XRT runtime; the launcher mounts it)" for f in ("libxrt_coreutil.so.2", "libxrt_core.so.2", "libxrt_driver_xdna.so.2")
             if not os.path.exists(f"/usr/lib/{f}")]
+    if not out:  # the plugin is built against one xrt: after an xrt-only update it cannot load, and the NPU engine dies with "No such device"
+        try:
+            r = subprocess.run(["ldd", "-r", "/usr/lib/libxrt_driver_xdna.so.2"], capture_output=True, text=True, timeout=20)
+            bad = re.findall(r"undefined symbol: (\S+)", r.stdout + r.stderr)
+        except (OSError, subprocess.TimeoutExpired):
+            bad = []  # no ldd: the launcher's own check still runs
+        if bad:
+            out.append(f"xrt-plugin-amdxdna does not match the installed xrt (it needs {bad[0]}): update/rebuild both together, then re-run - halogen's NPU engine cannot start until then")
     return out
 
 

@@ -376,6 +376,16 @@ h.ask_yn = lambda *a, **k: (_ for _ in ()).throw(AssertionError("asked about a d
 assert "docker is not installed" in h.halogen_preflight()[0]
 assert h.plan_start("halogen", {}) is None
 h.shutil.which, h.ask_yn = real_which, real_ask
+# an xrt-only update leaves xrt-plugin-amdxdna with an undefined symbol: caught before the download, not as "No such device" after it
+real_run, real_exists = h.subprocess.run, h.os.path.exists
+R = lambda rc, out: types.SimpleNamespace(returncode=rc, stdout=out, stderr="")
+h.shutil.which = lambda n, *a, **k: "/usr/bin/" + n if n == "docker" else real_which(n, *a, **k)
+h.os.path.exists = lambda p: True if str(p).startswith(("/dev/accel", "/dev/kfd", "/usr/lib/libxrt_")) else real_exists(p)
+for ldd_out, want in (("\tundefined symbol: _ZN8xrt_core7elf_int18get_partition_sizeE\t(/usr/lib/libxrt_driver_xdna.so.2)\n", True), ("\tlibc.so.6 => /usr/lib/libc.so.6\n", False)):
+    h.subprocess.run = lambda cmd, *a, _o=ldd_out, **k: R(0, _o if cmd[0] == "ldd" else "")
+    got = h.halogen_preflight()
+    assert bool(got) == want and (not want or "does not match the installed xrt" in got[0] and "get_partition_size" in got[0]), got
+h.subprocess.run, h.os.path.exists, h.shutil.which = real_run, real_exists, real_which
 assert h.engine_log("gufo") == os.path.join(h.LOGDIR, "gufo.log") and h.LOGDIR.endswith("local-ai-harness") and h.LOGDIR != "/tmp/local-ai-harness"
 # a box that was never set up is not assumed to be halogen; a pre-wizard halogen install (NPU extension, no profile) still is
 real_agent, h.AGENT = h.AGENT, tempfile.mkdtemp()

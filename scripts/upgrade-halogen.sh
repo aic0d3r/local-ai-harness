@@ -40,7 +40,11 @@ rollback(){
       && echo "      NPU models restored (failed set kept at $NPU-$TAG-failed)"
   fi
   HALOGEN_IMAGE_TAG="$CUR" setsid nohup bash "$START" > "$LOG.rollback" 2>&1 < /dev/null &
-  echo "      restarted on $CUR (log: $LOG.rollback); pin unchanged"
+  local pid=$!
+  echo "      restarting on $CUR (log: $LOG.rollback); pin unchanged"
+  # wait for it: whoever sees this script exit (the wizard) must not start a second server on the same port
+  for _ in $(seq 1 18); do kill -0 "$pid" 2>/dev/null || break; curl -sf -m 3 "$HEALTH" >/dev/null 2>&1 && break; sleep 20; done
+  curl -sf -m 5 "$HEALTH" >/dev/null && echo "      $CUR is serving again" || echo "      $CUR did not come back (see $LOG.rollback)"
   exit 1
 }
 
@@ -116,9 +120,14 @@ python3 - <<'PY' || rollback "decode"
 import json, time, urllib.request
 body=json.dumps({"model":"halogen-qwen3.8-flash-next","max_tokens":300,"temperature":0,
   "messages":[{"role":"user","content":"Count from 1 to 80, digits only, no spaces."}]}).encode()
+def ask(b):
+    return json.load(urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:8731/v1/chat/completions",
+      data=b,headers={"content-type":"application/json"}),timeout=120))
+# the first chat completion after a load is cold (0.20.4: 6.8s wall for 2.4s of decode = a false 26 t/s FAIL, 74 t/s by its own log);
+# a short request first, then the measured one
+ask(json.dumps({"model":"halogen-qwen3.8-flash-next","max_tokens":24,"temperature":0,"messages":[{"role":"user","content":"Say OK."}]}).encode())
 t0=time.time()
-d=json.load(urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:8731/v1/chat/completions",
-  data=body,headers={"content-type":"application/json"}),timeout=120))
+d=ask(body)
 dt=time.time()-t0; n=d["usage"]["completion_tokens"]; ts=n/dt
 print(f"      {n} tok in {dt:.1f}s = {ts:.1f} t/s")
 assert ts > 30, f"decode {ts:.1f} t/s below 30"
