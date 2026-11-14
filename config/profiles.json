@@ -30,8 +30,14 @@
       "managed": false,
       "ctx": 1048576,
       "loses": "NPU tools (guard, triage, dedup)",
-      "note": "osmos-api (libosmos): DeepSeek-V4.1-Flash packs, 1M context; started by its installer --serve. It does not report its context window, so `ctx` is the pack's max_context in osmos.json - edit both together",
-      "start": "python3 tools/install/osmos_install.py <pack> --serve (in the libosmos checkout)"
+      "note": "osmos-api (libosmos): DeepSeek-V4.1-Flash packs, 1M context. It does not report its context window, so `ctx` is the pack's max_context in osmos.json - edit both together",
+      "script": "server/start-osmos.sh",
+      "ready": "/health",
+      "weights_labels": {
+        "stock": "stock osmos-evo-A (UD-IQ1_M + the evo-A delta, default)",
+        "abliterated": "abliterated (huihui-ai's UD-IQ1_M patch as an overlay, +0.6 GB, refusals removed)"
+      },
+      "start": "server/start-osmos.sh [stock|abliterated] (OSMOS_DIR, OSMOS_MODELS, OSMOS_PACK)"
     },
     "lmstudio": { "port": 1234,  "probe": "/v1/models",  "provider": "lmstudio","npu": false, "managed": false, "loses": "NPU tools (guard, triage, dedup)" }
   },

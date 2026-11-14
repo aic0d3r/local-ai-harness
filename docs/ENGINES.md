@@ -146,6 +146,10 @@ harness handles for it:
 - **Thinking is real, with three levels**: DeepSeek maps seven effort names onto three real ones ([its docs](https://api-docs.deepseek.com/guides/thinking_mode/)): `low`, `high`, `max`. The profile keeps exactly those and marks `minimal`/`medium`/`xhigh` unsupported (`null`), so pi and Paseo offer `off, low, high, max` instead of advertising levels the model collapses anyway. `off` sends `reasoning_effort: none` and the reply carries no reasoning at all.
 - **It does not report its context window** (`/v1/models` has no `context_length`, `/props` is 404). The engine
   profile carries `ctx`, mirroring `max_context` in the pack's `osmos.json` - change both together.
+- **Stock or abliterated from `./harness config` -> weights**, like halogen and gufo: huihui-ai's UD-IQ1_M patch
+  (0.6 GB) as an overlay, so the 141 GB pack is never rewritten. `server/start-osmos.sh` applies it by calling
+  libosmos's own installer (`--abliterated`), which fetches only the patch and sets `overlay` in `osmos.json`;
+  the launch then waits for `/health`, because osmos lists its model while it is still loading 91 GiB.
 
 It has no NPU tools (guard, triage, dedup need halogen), and it will not fit beside another big engine: 91 GiB of GPU
 memory is the budget on a 128 GB box.

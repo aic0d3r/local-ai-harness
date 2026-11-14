@@ -260,6 +260,14 @@ def served_models(port, engine=None):
     return [i for i in ids if not (hide and re.search(hide, i))]
 
 
+def answers_ready(port, path):
+    """A server that lists models before it can answer (osmos loads 91 GiB first) is not up yet: its ready path says."""
+    try:
+        return b"ok" in http(f"http://127.0.0.1:{port}{path}", timeout=2).read().lower()
+    except Exception:
+        return False
+
+
 def identify(name, port):
     """Several engines share :8080 (strata / llamacpp): tell them apart by what answers."""
     if name == "llamacpp":  # llama-server tags its models owned_by=llamacpp; Strata also serves /props, so that is no tell
@@ -613,7 +621,7 @@ def last_speed(engine):
     return f"{t[-1]['prefill_tps']}/{t[-1]['decode_tps']} t/s pf/dec" if t else "not measured"
 
 
-BIG = ("halogen", "gufo", "strata")  # big engines: one GPU memory heap (VRAM on NVIDIA), and gufo/strata also share :8080
+BIG = ("halogen", "gufo", "strata", "osmos")  # big engines: one GPU memory heap (VRAM on NVIDIA), and gufo/strata also share :8080
 
 
 def heap_holder(running):
@@ -695,7 +703,7 @@ def halogen_ckpt():
 
 # ---------- weights (stock / abliterated), one saved answer the halogen and gufo launchers read ----------
 WEIGHTS = os.path.join(AGENT, "harness-weights")
-WEIGHTS_ENGINES = {"halogen": ("--print-ckpt", 89), "gufo": ("--print-model", 112)}  # launcher flag, download GB
+WEIGHTS_ENGINES = {"halogen": ("--print-ckpt", 89), "gufo": ("--print-model", 112), "osmos": ("--print-weights", 1)}  # launcher flag, download GB
 WEIGHTS_ASK = (*WEIGHTS_ENGINES, "strata")  # strata: the answer picks which model scripts/install-strata.sh installs and starts
 WEIGHTS_LABELS = {"stock": "stock Qwen3.8-Flash-Next (default)",
                   "abliterated": "abliterated (refusals removed; orcarouter edit, see docs/ENGINES.md#abliterated-models)"}
@@ -723,13 +731,19 @@ def weights_download_gb(engine):
     return 5 if engine == "gufo" and not os.path.isfile(mtp) else 0
 
 
+def weights_labels(engine):
+    """The stock/abliterated labels to offer: a profile's own (osmos runs DeepSeek, not Qwen), else the Qwen ones."""
+    return PROFILES["engines"].get(engine, {}).get("weights_labels") or WEIGHTS_LABELS
+
+
 def ask_weights(engine):
-    """Which weights halogen/gufo load by default; current answer first. -> True if the answer changed."""
+    """Which weights the engine loads by default; current answer first. -> True if the answer changed."""
     if engine not in WEIGHTS_ASK or not sys.stdin.isatty():
         return False
     cur = weights_pref()
-    opts = sorted(WEIGHTS_LABELS, key=lambda k: k != cur)
-    pick = {WEIGHTS_LABELS[k]: k for k in opts}[choose("Default model weights? (halogen, gufo and Strata load these; abliterated on Strata = gufo's orca-uncensored shards)", [WEIGHTS_LABELS[k] for k in opts], False)]
+    labels = weights_labels(engine)
+    opts = sorted(labels, key=lambda k: k != cur)
+    pick = {labels[k]: k for k in opts}[choose("Default model weights? (halogen, gufo and Strata load these; abliterated on Strata = gufo's orca-uncensored shards)", [labels[k] for k in opts], False)]
     os.makedirs(AGENT, exist_ok=True)
     open(WEIGHTS, "w").write(pick + "\n")
     return pick != cur
@@ -868,7 +882,7 @@ def engine_log(engine):
 
 
 def start_engine(engine, running, plan=None, wait_s=900):
-    """Start an engine we ship a launcher for (halogen, gufo); asks first unless given a plan. -> True once it answers."""
+    """Start an engine we ship a launcher for (halogen, gufo, osmos); asks first unless given a plan. -> True once it answers."""
     plan = plan or plan_start(engine, running)
     if plan is None or not prepare_start(plan, running):
         return False
@@ -880,9 +894,10 @@ def start_engine(engine, running, plan=None, wait_s=900):
         env.setdefault("GUFO_CTX", str(pick["ctx"]))  # the accepted hardware pick; an explicit GUFO_CTX still wins
     proc = subprocess.Popen(["bash", os.path.join(REPO, c["script"])], stdout=log, stderr=log, stdin=subprocess.DEVNULL, start_new_session=True, env=env)
     t0 = time.time()
+    ready = (PROFILES["engines"][engine].get("ready") or "").strip()  # e.g. osmos lists its model while still loading
     try:
         while time.time() - t0 < wait_s:
-            if served_models(c["port"], engine):
+            if served_models(c["port"], engine) and not (ready and not answers_ready(c["port"], ready)):
                 print(f"\n  {engine} is up")
                 return True
             if proc.poll() is not None:  # launchers exec the server: an exited launcher means the start failed
