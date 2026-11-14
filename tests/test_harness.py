@@ -120,6 +120,25 @@ assert "! careful" in open(h.SETUP_LOG).read()
 # engine update check: versions compare across the formats engines report; different schemes never compare
 assert h._ver("Strata 0.1.44.1") < h._ver("v0.1.45") and h._ver("b6312-abc") == ("b", (6312,)) and h._ver("") is None
 assert h.engine_update("lmstudio") == ""  # no update source: silent
+# osmos: the running version is the libosmos checkout's tag (start-osmos.sh --print-dir), the latest the GitHub release; the upgrader is found
+co = tempfile.mkdtemp()
+for g in ("init -q", "-c user.name=t -c user.email=t@t commit -q --allow-empty -m x", "tag v0.7.1"):
+    subprocess.run(["git", "-C", co, *g.split()], check=True)
+real_http, real_od = h.http, os.environ.get("OSMOS_DIR")
+os.environ["OSMOS_DIR"] = co
+for latest, want in (("v0.7.5", True), ("v0.7.1", False), ("v0.7.0", False)):
+    h.http = lambda url, *a, _l=latest, **k: __import__("io").BytesIO(json.dumps({"tag_name": _l}).encode())
+    msg = h.engine_update("osmos")
+    assert bool(msg) == want and (not want or ("osmos v0.7.5 available (running v0.7.1)" in msg and "upgrade-osmos.sh" in msg)), (latest, msg)
+h.http = real_http
+if real_od is None: os.environ.pop("OSMOS_DIR")
+else: os.environ["OSMOS_DIR"] = real_od
+assert h.upgrader("osmos") and h.upgrader("osmos").endswith("upgrade-osmos.sh")
+# osmos serves DeepSeek-V4.1-Flash only: the summary names that, never the saved Qwen preference; other engines still show the preference
+open(h.MODEL_FILE, "w").write("qwen38-27b\n")
+assert "DeepSeek-V4.1-Flash" in h.choices_line("osmos") and "qwen38-27b" not in h.choices_line("osmos")
+assert "model qwen38-27b" in h.choices_line("gufo") and "model qwen38-27b" in h.choices_line()
+os.remove(h.MODEL_FILE)
 # status reports an opted-out sidecar as off, not down
 open(f"{AGENT}/harness-sidecar", "w").write("0\n")
 assert "sidecar off" in h.choices_line()

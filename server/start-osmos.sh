@@ -24,6 +24,7 @@ print_weights() {
   fi
 }
 [ "${1:-}" = --print-weights ] && { print_weights; exit 0; }
+[ "${1:-}" = --print-dir ] && { echo "$OSMOS_DIR"; exit 0; }  # the checkout: the update check reads its tag, upgrade-osmos.sh rebuilds it
 
 case "${1:-$WEIGHTS}" in
   stock|abliterated) W=${1:-$WEIGHTS} ;;

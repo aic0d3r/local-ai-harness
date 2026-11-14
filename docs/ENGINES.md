@@ -151,8 +151,20 @@ harness handles for it:
   libosmos's own installer (`--abliterated`), which fetches only the patch and sets `overlay` in `osmos.json`;
   the launch then waits for `/health`, because osmos lists its model while it is still loading 91 GiB.
 
+osmos is for DeepSeek-V4.1-Flash only: the wizard shows that model for it (never your saved Qwen choice), and the Qwen
+models run on halogen, gufo or Strata.
+
 It has no NPU tools (guard, triage, dedup need halogen), and it will not fit beside another big engine: 91 GiB of GPU
 memory is the budget on a 128 GB box.
+
+**Updating.** `./setup.sh` / `./start.sh` tell you when a newer libosmos release exists (the check compares your checkout's
+tag with the latest GitHub release; `HARNESS_NO_UPDATE_CHECK=1` turns it off) and offer `scripts/upgrade-osmos.sh [tag]`.
+It checks the release out in the checkout, rebuilds (`make`, `make serve`, `make api`; with `NPU=1` when the existing build
+uses XRT), restarts osmos, and runs the answer + decode check. If anything fails it checks the old commit out again,
+rebuilds it and waits until it serves before it exits. The pack on disk is not touched (a release changes the engine; the
+installer's layout changes are opt-in). Uncommitted edits to tracked files in the checkout are kept; if the release changes
+the same lines the checkout is refused before osmos is stopped. A checkout whose branch holds commits the release does not
+contain is not touched either. Tested against a fake libosmos in `tests/upgrade-osmos.test.sh`.
 
 ## Why there is no TabbyAPI engine
 

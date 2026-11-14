@@ -1277,9 +1277,11 @@ def notice(msg):
     print(f"\033[1;33m{msg}\033[0m" if sys.stdout.isatty() else msg)
 
 
-def choices_line():
-    """One line with every saved answer, for summaries and the config menu."""
-    return (f"model {model_pref()} · weights {weights_pref()} · sidecar {'off' if sidecar_pref() == '0' else 'on'} · voice {'on' if jget(EXTRAS, {}).get('voice') else 'off'}"
+def choices_line(eng=None):
+    """One line with every saved answer, for summaries and the config menu. An engine that serves one model only (osmos:
+    DeepSeek-V4.1-Flash) names it, so the saved preference for the Qwen engines is not shown as what osmos runs."""
+    model = PROFILES["engines"].get(eng or "", {}).get("model_label") or model_pref()
+    return (f"model {model} · weights {weights_pref()} · sidecar {'off' if sidecar_pref() == '0' else 'on'} · voice {'on' if jget(EXTRAS, {}).get('voice') else 'off'}"
             f" · update check {'on' if update_pref() == '1' else 'off'}")
 
 
@@ -1376,7 +1378,7 @@ def finish(eng, mod, no_tune, launch=False):
     print("  start    ./start.sh ~/your-project")
     if eng in ("halogen", "strata"):
         print("  monitor  ./harness monitor   (live speed, memory and requests; Ctrl-C to quit)")
-    print(f"  choices  {choices_line()}   (change: ./harness config)")
+    print(f"  choices  {choices_line(eng)}   (change: ./harness config)")
     print("  check    ./setup.sh --doctor   (status: ./harness status)")
     if not passed:
         sys.exit(1)
@@ -1435,7 +1437,7 @@ def cmd_setup(a):
     voice = not a.yes and ask_once("voice", "Set up voice (local STT/TTS via Lemonade)?", a.reconfigure)
     if not a.yes and sys.stdin.isatty():
         steps = [("skip pi wiring (engine + sidecar only)" if no_pi() else f"install/update pi extensions, providers, skills{'' if verbose else f' (details: {SETUP_LOG})'}"),
-                 choices_line()] + (
+                 choices_line(eng)] + (
             [f"stop {plan['stop']} and the ling-tiny sidecar"] if plan and plan["stop"] else []) + (
             ["download halogen (~124 GB, resumable)"] if plan and plan["download"] else []) + (
             [f"install Strata with {catalog()[engine_model('strata')]['label']} (its setup downloads ~{catalog()[engine_model('strata')]['download_gb']} GB, resumable)" if engine_model("strata") != DEFAULT_MODEL else
@@ -1504,7 +1506,7 @@ def cmd_status(_):
 def cmd_config(a):
     """Menu of every saved answer; change one, applied right away."""
     if not sys.stdin.isatty():
-        return print(choices_line())
+        return print(choices_line((active() or {}).get("engine")))
     hints = os.path.join(AGENT, "harness-hints-shown")
     while True:
         p = active() or {}

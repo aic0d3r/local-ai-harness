@@ -14,8 +14,9 @@ For a pull request:
   for t in tests/test_*.py; do python3 "$t" || break; done   # each prints "ok"; plain scripts, run them like this, not with pytest
   bun test tests/                                            # extension tests
   bash tests/e2e-setup.sh                                    # setup.sh against a stub engine in a throwaway HOME (needs :8080 free)
+  bash tests/upgrade-osmos.test.sh                           # scripts/upgrade-osmos.sh against a fake libosmos repo (needs :18091 free)
   ```
 
-  CI (`.github/workflows/ci.yml`) runs the same three plus `shellcheck -S error` on every push and pull request.
+  CI (`.github/workflows/ci.yml`) runs the same four plus `shellcheck -S error` on every push and pull request.
 
 - New hardware or engine paths: say what you tested on and what you didn't, as the Windows page does.

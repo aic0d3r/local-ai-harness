@@ -41,3 +41,5 @@ jobs:
           python-version: "3.12"
       - name: setup.sh end to end
         run: bash tests/e2e-setup.sh
+      - name: engine upgrade scripts against fakes (upgrade, rollback, local edits)
+        run: bash tests/upgrade-osmos.test.sh
