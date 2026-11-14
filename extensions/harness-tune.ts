@@ -30,7 +30,12 @@ const MAIN_MODEL = profile().model;
 const DEFAULTS: Record<string, number> = { compactAt: 202, maxTokens: 8192, temperature: 1.0, ubatch: 4096 };
 
 const readJson = (p: string): any => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, "utf8")) : {});
-const writeJson = (p: string, v: any) => fs.writeFileSync(p, JSON.stringify(v, null, 2) + "\n");
+// temp + rename: a crash mid-write must not leave pi a truncated models.json; the temp keeps the file's mode (0600 stays 0600)
+const writeJson = (p: string, v: any) => {
+	const tmp = `${p}.${process.pid}.tmp`;
+	fs.writeFileSync(tmp, JSON.stringify(v, null, 2) + "\n", { mode: fs.existsSync(p) ? fs.statSync(p).mode & 0o777 : 0o600 });
+	fs.renameSync(tmp, p);
+};
 // the launcher syncs contextWindow on every start (262k normally, 65k on the
 // allocator fallback); computing compactAt from the hardcoded 262k on a 65k
 // day produced a reserve larger than the context - compaction never fired

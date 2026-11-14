@@ -89,7 +89,8 @@ export default function taintGate(pi: ExtensionAPI) {
 	for (const e of ["session_start", "session_compact", "session_tree", "session_switch", "session_fork"]) pi.on(e as any, async () => { tainted = null; okForSession.clear(); });
 
 	pi.on("tool_result", async (event: any) => {
-		if (process.env.TAINT_GATE_DISABLED || event?.isError) return;
+		// a failed bash or subagent still returns what it fetched (pi marks any non-zero exit as an error), so only other errors are skipped
+		if (process.env.TAINT_GATE_DISABLED || (event?.isError && event?.toolName !== "bash" && event?.toolName !== "subagent")) return;
 		// a subagent that fetched a page hands the text back as its answer: that is outside content too
 		if (!tainted && (isOutsideContent(String(event?.toolName ?? ""), event?.input) || (event?.toolName === "subagent" && subagentSawOutside(event?.details)))) tainted = String(event.toolName);
 	});

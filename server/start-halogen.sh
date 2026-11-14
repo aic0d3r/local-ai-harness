@@ -118,9 +118,10 @@ PY
 fi
 
 # keep pi honest: sync contextWindow + compaction reserve to the window we actually serve
-python3 - "$CTX" <<'PY' 2>/dev/null || true
+python3 - "$CTX" "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../setup" <<'PY' || true
 import json, os, sys
 ctx = int(sys.argv[1])
+sys.path.insert(0, sys.argv[2]); import jsonio  # atomic, keeps a 0600 models.json at 0600
 base = os.environ.get("PI_CODING_AGENT_DIR") or os.path.join(os.environ.get("PI_HOME") or os.path.expanduser("~/.pi"), "agent")
 mp = os.path.join(base, "models.json")
 try:
@@ -128,7 +129,7 @@ try:
     for mod in m.get("providers", {}).get("halogen", {}).get("models", []):
         if mod.get("id") == "halogen-qwen3.8-flash-next":
             mod["contextWindow"] = ctx
-            json.dump(m, open(mp + ".tmp", "w"), indent=1); os.replace(mp + ".tmp", mp)
+            jsonio.put(mp, m, 1)
             print(f"models.json: halogen contextWindow -> {ctx}")
     sp = os.path.join(os.path.dirname(mp), "settings.json")
     s = json.load(open(sp))
@@ -136,10 +137,14 @@ try:
     # only overwrite launcher-owned values; a /tune compactAt survives a restart
     # ...unless it no longer fits this window: a 262k-day /tune value on a 65k day
     # (e.g. 60144 from /tune reset) left ~5k of room and compacted every turn
-    if comp.get("reserveTokens") in (None, 60000, 10240) or comp["reserveTokens"] >= ctx // 2:
-        comp["reserveTokens"] = 60000 if ctx > 65536 else 10240
-    json.dump(s, open(sp + ".tmp", "w"), indent=2); os.replace(sp + ".tmp", sp)
-except Exception: pass
+    # same rule as sync_ctx/reserve_for in setup/harness.py: a quarter of the window, at most 60k
+    if comp.get("reserveTokens") in (None, 10240, 16384, 60000) or comp["reserveTokens"] >= ctx // 2:
+        comp["reserveTokens"] = min(60000, ctx // 4)
+    jsonio.put(sp, s, 2)
+except FileNotFoundError:
+    pass  # no pi wiring (--no-pi) or not set up yet: nothing to sync
+except (OSError, ValueError) as e:
+    print(f"! could not sync contextWindow/compaction to {ctx}: {e}", file=sys.stderr)
 PY
 
 # docker would create a missing mount source as a root-owned directory; fail with the fix instead

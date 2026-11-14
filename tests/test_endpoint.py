@@ -75,6 +75,7 @@ e = p["models"][0]
 assert p["baseUrl"] == URL + "/v1" and p["apiKey"] == KEY and p["api"] == "openai-completions", p
 assert e["id"] == "gw-model" and e["contextWindow"] == 65536 and e["input"] == ["text", "image"] and e["name"] == "gw-model (gw)", e
 assert "llamacpp-tiny" in m  # the sidecar entry pi's compaction looks up
+assert os.stat(os.path.join(h.AGENT, "models.json")).st_mode & 0o077 == 0  # it holds the key: owner only
 s = rj("settings.json")
 assert s["defaultProvider"] == "gw" and s["defaultModel"] == "gw-model" and s["compaction"]["reserveTokens"] == h.reserve_for(65536), s
 prof = rj("harness-profile.json")

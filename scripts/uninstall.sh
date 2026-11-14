@@ -29,7 +29,8 @@ fi
 echo "[1/8] backup -> $BACKUP"
 # one tar call: a second `czf` would truncate the first archive (backup lost)
 AGPARENT=$(dirname "$AG"); AGREL=$(basename "$AG")  # tar members are relative to the folder above the agent dir, wherever it is
-TAR_ARGS=(-C "$AGPARENT" "$AGREL/extensions" "$AGREL/prompts" "$AGREL/skills" "$AGREL/themes" "$AGREL/settings.json" "$AGREL/models.json" "$AGREL/mcp.json")
+TAR_ARGS=(-C "$AGPARENT")
+for p in extensions prompts skills themes settings.json models.json mcp.json; do [ -e "$AG/$p" ] && TAR_ARGS+=("$AGREL/$p"); done  # only what exists: a missing member makes tar fail
 [ -f "$HOME/.config/systemd/user/ling-tiny.service" ] && TAR_ARGS+=(-C "$HOME/.config/systemd/user" ling-tiny.service)
 # every state file the harness writes into the agent dir (wizard answers, tuning, markers, logs); one list for backup and removal
 STATE=(harness-profile.json harness-tuned.json harness-extras.json harness-sidecar harness-agent harness-update-check harness-update-stamp
@@ -37,7 +38,7 @@ STATE=(harness-profile.json harness-tuned.json harness-extras.json harness-sidec
        harness-weights harness-model harness-quant harness-pick.json harness-pins harness-models-dir hud.log progress-stamps.json)
 for f in "${STATE[@]}"; do [ -f "$AG/$f" ] && TAR_ARGS+=(-C "$AGPARENT" "$AGREL/$f"); done
 [ -f "$AG/rag-index.py" ] && TAR_ARGS+=(-C "$AGPARENT" "$AGREL/rag-index.py") # own -C: tar applies earlier -C to later members
-tar czf "$BACKUP" "${TAR_ARGS[@]}" 2>/dev/null
+tar czf "$BACKUP" "${TAR_ARGS[@]}" || { echo "backup failed - nothing was removed"; rm -f "$BACKUP"; exit 1; }
 PROFILE_JSON=$(cat "$AG/harness-profile.json" 2>/dev/null); export PROFILE_JSON
 echo "      $(du -h "$BACKUP" | cut -f1)"
 
@@ -72,14 +73,7 @@ echo "      done (extensions you added yourself are left in place)"
 
 echo "[4/8] templates + skills + theme"
 for f in gauntlet.md speedtest.md; do rm -f "$AG/prompts/$f" "$PI_HOME/templates/$f"; done
-for d in "$REPO"/skills/*/; do
-  b=$(basename "$d"); [ -d "$AG/skills/$b" ] && rm -rf "$AG/skills/$b"
-done
-# design skills vendored in earlier releases no longer live in skills/ - clean them from
-# older installs explicitly (the repo loop above can't see them anymore)
-for b in frontend-design token-optimizer ui-ux-pro-max web-design-guidelines; do
-  [ -d "$AG/skills/$b" ] && rm -rf "$AG/skills/$b"
-done
+# skills are left alone: the harness ships none, and a skill dir with an old vendored name may be the user's own install
 if [ -f "$AG/themes/opencode.json" ] && cmp -s "$AG/themes/opencode.json" "$REPO/config/themes/opencode.json" 2>/dev/null; then
   rm -f "$AG/themes/opencode.json"; echo "      theme removed (we installed it)"
 fi

@@ -286,12 +286,10 @@ if [ "$NO_HALOGEN" = 1 ]; then
     eng_up && ok "$ENG up ($ENG_URL)" || warn "$ENG not answering at $ENG_URL - start it before using pi"
   fi
 else
-if ! command -v python3 >/dev/null; then fail "python3 required for models.json merge — install python3 and re-run"; else
 # the halogen + sidecar entries come from setup/entries.py, the same builder the wizard and the flag installer use
 if python3 "$REPO/setup/adopt.py" halogen-providers
 then ok "providers configured in $MODELS_JSON"
 else fail "could not parse $MODELS_JSON or settings.json - fix the JSON and re-run (left untouched)"; fi
-fi
 fi
 
 # screenshots cost tokens by pixel size: cap every image-capable model (re-run covers new models)

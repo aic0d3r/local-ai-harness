@@ -235,16 +235,10 @@ def skills():
         shutil.copy(theme, theme_dst)
         print('  installed theme: opencode (select via /settings, or set "theme": "opencode")')
     dup = os.path.join(skill_dir, "micro-interactions")  # ships in ~/.agents/skills (pi scans it natively): a pi-side copy collides
-    if os.path.isdir(dup):
+    if os.path.isdir(dup) and os.path.isdir(os.path.join(os.path.expanduser("~"), ".agents", "skills", "micro-interactions")):  # only when the native copy exists: else it is the user's only one
         shutil.rmtree(dup)
         print("  removed duplicate micro-interactions (native ~/.agents/skills copy is used)")
-    n = 0
-    for d in subdirs(os.path.join(REPO, "skills")):
-        dst = os.path.join(skill_dir, os.path.basename(os.path.normpath(d)))
-        if not same_tree(d, dst):
-            copy_tree(d, dst)
-            n += 1
-    ok(f"installed/updated {n} skills" if n else f"skills current ({len(os.listdir(skill_dir))} dirs)")
+    ok("theme checked (the harness ships no skills of its own)")
 
 
 # pinned: these run inside every session (the rtk one rewrites every bash command), so a new release must not arrive unreviewed.
@@ -266,8 +260,10 @@ def packages():
         return
     have = " ".join(read_json(os.path.join(AGENT, "settings.json"), {}).get("packages", []))
     for key, spec, label in PACKAGES:
-        if key in have:
+        if spec in have:
             ok(f"{label} package present")
+        elif key in have:  # an older, unpinned install: `pi update` would move it to whatever is published
+            warn(f"{label} is installed without the reviewed pin - run: pi install {spec}")
         elif subprocess.run([pi, "install", spec], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
             ok(f"{label} installed (pi package)")
         else:

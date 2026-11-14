@@ -6,7 +6,6 @@
 // Off switch: TOOL_TRIM_DISABLED=1. Savings are logged to harness-events.jsonl (c: "tool-trim").
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { BOUNDED, trim } from "./core.ts";
@@ -14,7 +13,7 @@ import { ev } from "../harness-profile/index.ts";
 
 const NUDGE_CHARS = 6000;
 const SOURCE = /\.(py|tsx?|jsx?|mjs|go|rs|java|kt|c|cc|cpp|h|hpp|cs|rb|php|swift)$/i;
-const OUT_DIR = path.join(os.tmpdir(), "pi-out");
+const OUT_DIR = path.join(getAgentDir(), "pi-out"); // not /tmp: another local user could own a shared folder there and swap the files the agent reads back
 
 // saved originals are only worth keeping while the session that cut them is likely alive
 const sweep = () => { try { for (const f of fs.readdirSync(OUT_DIR)) { const p = path.join(OUT_DIR, f); if (Date.now() - fs.statSync(p).mtimeMs > 2 * 86_400_000) fs.rmSync(p, { force: true }); } } catch {} };

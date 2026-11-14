@@ -40,8 +40,8 @@ def jget(path, default=None):
         return default
     except ValueError as e:
         sys.exit(f"! {path} is not valid JSON ({e}); fix or remove it, then re-run. Nothing was changed.")
-    except OSError:
-        return default
+    except OSError as e:  # unreadable is not missing: the default would be written over the user's file
+        sys.exit(f"! cannot read {path} ({e}); fix its owner/permissions, then re-run. Nothing was changed.")
 
 
 def jput(path, obj):
@@ -268,14 +268,9 @@ def answers_ready(port, path):
 
 def identify(name, port):
     """Several engines share :8080 (strata / llamacpp): tell them apart by what answers."""
-    if name == "llamacpp":  # llama-server tags its models owned_by=llamacpp; Strata also serves /props, so that is no tell
+    if name in ("llamacpp", "gufo"):  # both tag their models owned_by=<name>; Strata also serves /props, so that is no tell
         try:
-            return any(m.get("owned_by") == "llamacpp" for m in json.load(http(f"http://127.0.0.1:{port}/v1/models"))["data"])
-        except (OSError, ValueError, LookupError):
-            return False
-    if name == "gufo":  # gufo tags its models owned_by=gufo
-        try:
-            return any(m.get("owned_by") == "gufo" for m in json.load(http(f"http://127.0.0.1:{port}/v1/models"))["data"])
+            return any(m.get("owned_by") == name for m in json.load(http(f"http://127.0.0.1:{port}/v1/models"))["data"])
         except (OSError, ValueError, LookupError):
             return False
     if name == "strata":
@@ -1429,6 +1424,8 @@ def cmd_endpoint(a):
     m.setdefault("providers", {})[name] = prov  # an explicit command replaces an earlier entry of the same name
     m["providers"].setdefault("llamacpp-tiny", entries.tiny_provider(PROFILES))
     jput(mj, m)
+    if key:
+        os.chmod(mj, 0o600)  # the key is a secret: owner only, like pi's auth.json
     sj = os.path.join(AGENT, "settings.json")
     if os.path.exists(sj) and not os.path.exists(sj + ".pre-harness"):
         shutil.copy(sj, sj + ".pre-harness")

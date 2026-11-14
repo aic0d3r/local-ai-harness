@@ -65,6 +65,15 @@ except ValueError:
 open(os.path.join(AGENT, "AGENTS.md"), "w").write("mine")
 assert "left untouched" in run(adopt.agents) and open(os.path.join(AGENT, "AGENTS.md")).read() == "mine"
 
+# skills: a pi-side micro-interactions is the user's only copy unless ~/.agents/skills has one
+mine = os.path.join(AGENT, "skills", "micro-interactions")
+os.makedirs(mine)
+run(adopt.skills)
+assert os.path.isdir(mine)
+os.makedirs(os.path.join(HOME, ".agents", "skills", "micro-interactions"))
+run(adopt.skills)
+assert not os.path.isdir(mine)
+
 # rtk: pinned sha256, tar (Linux) and zip (Windows), mismatch refused
 exe_data = b"MZ-fake-rtk"
 def tar_bytes():

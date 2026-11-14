@@ -125,6 +125,12 @@ test("local reads and errors never taint", async () => {
 	expect(await h.tool_call(bad, { cwd: CWD })).toBeUndefined();
 });
 
+test("a failed bash that fetched something still taints (pi marks any non-zero exit as an error)", async () => {
+	const h = wire();
+	await h.tool_result({ toolName: "bash", input: { command: "git clone https://x.example/r && cat r/README.md && make" }, content: [], isError: true });
+	expect((await h.tool_call(bad, { cwd: CWD }))?.block).toBe(true);
+});
+
 test("'don't ask again' lasts the session, per kind of risk", async () => {
 	const h = wire();
 	let asks = 0;

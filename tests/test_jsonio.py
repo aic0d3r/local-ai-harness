@@ -10,6 +10,11 @@ p = os.path.join(d, "sub", "models.json")  # parent folder is created
 jsonio.put(p, {"a": 1})
 assert json.load(open(p)) == {"a": 1} and open(p).read().endswith("}\n")
 assert not os.path.exists(p + ".tmp")
+assert stat.S_IMODE(os.stat(p).st_mode) == 0o600  # a new file may hold API keys: owner only
+# the replaced file keeps a wider mode it already had
+os.chmod(p, 0o644)
+jsonio.put(p, {"a": 1})
+assert stat.S_IMODE(os.stat(p).st_mode) == 0o644
 
 # a value json cannot serialise raises before the file is touched
 try:
@@ -39,5 +44,7 @@ assert stat.S_IMODE(os.stat(p).st_mode) == 0o600 and json.load(open(p)) == {"a":
 # a stale temp file from an earlier crash does not block the next write
 open(p + ".tmp", "w").write("{half")
 jsonio.put(p, {"a": 4})
-assert json.load(open(p)) == {"a": 4} and not os.path.exists(p + ".tmp")
+assert json.load(open(p)) == {"a": 4} and open(p + ".tmp").read() == "{half"  # unique temp names: a stale one is never reused
+# no temp file of ours is ever left behind
+assert sorted(os.listdir(os.path.dirname(p))) == ["models.json", "models.json.tmp"], os.listdir(os.path.dirname(p))
 print("ok")
