@@ -13,7 +13,7 @@
 # to a history CSV that session-audit.sh --perf later diffs (column order is fixed).
 # Not a TTY (piped/logged)? One line per finished request instead of the dashboard.
 exec python3 - "$@" <<'PY'
-import collections, datetime, json, os, shutil, sys, time, urllib.request
+import collections, datetime, json, os, shutil, signal, sys, time, urllib.request
 
 _a = sys.argv[1:]
 STRATA = "--strata" in _a
@@ -21,7 +21,20 @@ _a = [x for x in _a if x != "--strata"]
 _url = next((x for x in _a if x.startswith("http")), None)
 URL = (_url or os.environ.get("HALOGEN_URL") or
        ("http://127.0.0.1:8080" if STRATA else "http://127.0.0.1:8731")).rstrip("/")
-INTERVAL = max(0.2, float(next((x for x in _a if not x.startswith("http")), 1)))
+
+
+def _num(x):
+    try:
+        return float(x)
+    except ValueError:
+        return None
+
+
+_nums = [x for x in _a if not x.startswith("http")]
+if any(_num(x) is None for x in _nums):
+    print("usage: halogen-top.sh [--strata] [http://host:port] [interval_s]", file=sys.stderr)
+    sys.exit(2)
+INTERVAL = max(0.2, float(_nums[0]) if _nums else 1.0)
 HIST = os.path.join(os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")),
                     "halogen-top", "history.csv")
 # order is the CSV column order — halogen-perf.py reads it positionally/by name
@@ -267,7 +280,7 @@ def log_line(r, m):
     # when the between-scrape deltas are flat
     agg = (f"  |  since start  prefill {rrate(rate(m.get(KEYS['prompt_tokens'], 0), m.get(KEYS['prompt_seconds'], 0)))} t/s"
            f"  decode {rrate(rate(m.get(KEYS['pred_tokens'], 0), m.get(KEYS['pred_seconds'], 0)))} t/s")
-    return (f"{ts}  x{r['n']}  prefill {r['ptok']:>7,.0f} tok {'cached' if r['ptok'] <= 0 else f'{r["pre"]:7.1f} t/s'}"
+    return (f"{ts}  x{r['n']}  prefill {r['ptok']:>7,.0f} tok {'cached' if r['ptok'] <= 0 else format(r['pre'], '7.1f') + ' t/s'}"
             f"  decode {r['gtok']:>6,.0f} tok {r['dec']:6.1f} t/s"
             f"  mtp {r['mtp']:4.0%}  cache {r['cache']}  saved {human(r['saved'])}" + agg)
 
@@ -319,10 +332,10 @@ def render(m, h, cache, offline):
             many = f" ({r['n']} requests)" if r["n"] > 1 else ""
             L.append(row("LAST FINISHED", f"{many}{DIM('  ' + ago + ' ago')}"))
             pre_cell = (DIM(pad("all prompt tokens from cache", 24)) if r["ptok"] <= 0 else
-                        f"{pad(f'{r["ptok"]:,.0f}',9)} tok  {pad(f'{r["psec"]:.2f}',6)}s  {prefmt(r, 7, True)}")
+                        f"{pad(format(r['ptok'], ',.0f'),9)} tok  {pad(format(r['psec'], '.2f'),6)}s  {prefmt(r, 7, True)}")
             L.append(f"{IND}{CYN('prefill')}  {pre_cell}"
                      f"   {DIM(('cache ' + r['cache'] + ', ' if hal else '') + human(r['saved']) + ' tok reused')}")
-            L.append(f"{IND}{MAG('decode')}    {pad(f'{r["gtok"]:,.0f}',9)} tok  {pad(f'{r["gsec"]:.2f}',7)}s  {MAG(pad(rrate(dec), 7))} t/s"
+            L.append(f"{IND}{MAG('decode')}    {pad(format(r['gtok'], ',.0f'),9)} tok  {pad(format(r['gsec'], '.2f'),7)}s  {MAG(pad(rrate(dec), 7))} t/s"
                      f"   {DIM(f'mtp accept {mtp:.0%}')}")
         else:
             L.append(row("LAST FINISHED", DIM("none yet since start — waiting for a request to finish")))
@@ -383,9 +396,9 @@ def render(m, h, cache, offline):
         for r in reversed(recent):
             ts = time.strftime("%H:%M:%S", time.localtime(r["t"]))
             pre, dec = r["pre"], r["dec"]
-            L.append(f"{IND}{ts}  {pad(r['n'],2)}  {pad(f'{r["ptok"]:,.0f}',11)}  {prefmt(r,11)}"
-                     f"  {pad(f'{r["gtok"]:,.0f}',9)}  {MAG(pad(rrate(dec),10))}"
-                     f"  {pad(f'{r["mtp"]:.0%}',5)}  {r['cache']}")
+            L.append(f"{IND}{ts}  {pad(r['n'],2)}  {pad(format(r['ptok'], ',.0f'),11)}  {prefmt(r,11)}"
+                     f"  {pad(format(r['gtok'], ',.0f'),9)}  {MAG(pad(rrate(dec),10))}"
+                     f"  {pad(format(r['mtp'], '.0%'),5)}  {r['cache']}")
     L.append("")
     L.append(DIM(f" every {INTERVAL:g}s  ·  history {HIST} ({rows} rows)  ·  Ctrl-C quits"))
     H = shutil.get_terminal_size((100, 30)).lines
@@ -431,13 +444,18 @@ def main():
         elif not TTY:
             print(f"{time.strftime('%H:%M:%S')}  offline: {last_err}", flush=True)
         if TTY:
-            render(m if first is not None else {}, h, cache, offline)
+            try:
+                render(m if first is not None else {}, h, cache, offline)
+            except Exception:  # e.g. /health or /cache replied with an unexpected shape
+                sys.stdout.write("\033[H\033[J unexpected reply from the server\n")
+                sys.stdout.flush()
         tick += 1
         time.sleep(INTERVAL)
 
 
 if TTY:
     sys.stdout.write("\033[?1049h\033[?25l")  # alt screen, hide cursor
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # unwinds through the finally below
 try:
     main()
 except KeyboardInterrupt:

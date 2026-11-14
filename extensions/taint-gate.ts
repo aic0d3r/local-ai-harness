@@ -23,7 +23,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent";
-import { isOutsideContent, ev } from "./harness-profile/index.ts";
+import { isOutsideContent, subagentSawOutside, ev } from "./harness-profile/index.ts";
 
 
 // shortcut: regex heuristics on the command string. A determined agent can obfuscate around them
@@ -90,7 +90,8 @@ export default function taintGate(pi: ExtensionAPI) {
 
 	pi.on("tool_result", async (event: any) => {
 		if (process.env.TAINT_GATE_DISABLED || event?.isError) return;
-		if (!tainted && isOutsideContent(String(event?.toolName ?? ""), event?.input)) tainted = String(event.toolName);
+		// a subagent that fetched a page hands the text back as its answer: that is outside content too
+		if (!tainted && (isOutsideContent(String(event?.toolName ?? ""), event?.input) || (event?.toolName === "subagent" && subagentSawOutside(event?.details)))) tainted = String(event.toolName);
 	});
 
 	pi.on("tool_call", async (event: any, ctx: any) => {

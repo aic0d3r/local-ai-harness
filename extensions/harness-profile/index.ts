@@ -40,6 +40,17 @@ export function isOutsideContent(toolName: string, input: any): boolean {
 	return false;
 }
 
+/** Did a subagent's run call a network tool? What it fetched comes back to the parent as the subagent's answer, so the
+ *  answer is outside content. `details` is the subagent tool result's details ({results: [{messages: [...]}]}). */
+export function subagentSawOutside(details: any): boolean {
+	for (const r of Array.isArray(details?.results) ? details.results : [])
+		for (const m of Array.isArray(r?.messages) ? r.messages : [])
+			if (m?.role === "assistant")
+				for (const p of Array.isArray(m.content) ? m.content : [])
+					if (p?.type === "toolCall" && isOutsideContent(String(p.name ?? ""), p.arguments)) return true;
+	return false;
+}
+
 /** true when the session's model is the local engine this harness was set up for (false on cloud hybrid turns) */
 export const isMain = (ctx: any): boolean => ctx?.model?.provider === profile().provider;
 

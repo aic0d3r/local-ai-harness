@@ -62,7 +62,9 @@ This tool executes a separate `pi` subprocess with a delegated system prompt and
 
 To enable project-local agents, pass `agentScope: "both"` (or `"project"`). Only do this for repositories you trust.
 
-When running interactively, the tool prompts for confirmation before running project-local agents in untrusted projects. Trusted projects skip the additional prompt. Set `confirmProjectAgents: false` to disable confirmation.
+The tool asks for confirmation before running project-local agents in untrusted projects (trusted projects skip the prompt). The model cannot switch that off, and with no one to ask (print mode, a nested run) project agents are refused. A project agent also cannot choose its own `model:` (it runs on the session's), and its `skills:` are limited to bare names under `~/.pi/agent/skills`: an absolute, `~/` or `../` path is ignored.
+
+**Limits.** A child is a leaf: the `subagent` tool is not registered inside a subagent (`PI_SUBAGENT=1`), so delegation cannot recurse. A child that runs longer than 30 minutes is stopped (`PI_SUBAGENT_TIMEOUT_S`, `0` = no limit); stopping, by abort or timeout, ends the child's whole process group, and its stderr is capped at 64 KB. If a subagent used a network tool (web fetch, MCP search, `curl`...), what it fetched comes back as its answer, so the taint gate treats the parent as tainted from then on, exactly as if the parent had fetched it.
 
 ## Usage
 

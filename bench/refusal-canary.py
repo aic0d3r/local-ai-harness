@@ -91,7 +91,7 @@ def engine_target():
         w = open(os.path.join(AGENT, "harness-weights")).read().strip() or "stock"
     except OSError:
         w = "stock"
-    return f"http://127.0.0.1:{port}", prof["model"], w
+    return f"http://127.0.0.1:{port}", model, w
 
 
 def ask(base, model, prompt, max_tokens=160, thinking=False):

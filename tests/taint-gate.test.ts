@@ -138,3 +138,22 @@ test("'don't ask again' lasts the session, per kind of risk", async () => {
 	await h.tool_call({ toolName: "bash", input: { command: "git push -f origin main" } }, { cwd: CWD, hasUI: true, ui });
 	expect(asks).toBe(2);
 });
+
+// a subagent that fetched a page returns that text as its answer: the parent is tainted by it (it used to stay clean)
+const child = (...calls: [string, any][]) => ({ results: [{ messages: [{ role: "assistant", content: calls.map(([name, args]) => ({ type: "toolCall", name, arguments: args })) }] }] });
+
+test("a subagent that used a network tool taints the parent", async () => {
+	for (const calls of [[["webfetch", { url: "https://x.example" }]], [["mcp__ddg__fetch_content", {}]], [["bash", { command: "curl -s https://x.example" }]]] as [string, any][][]) {
+		const h = wire();
+		await h.tool_result({ toolName: "subagent", input: { agent: "worker", task: "look it up" }, content: [], details: child(...calls) });
+		expect((await h.tool_call(bad, { cwd: CWD, hasUI: false }))?.block, JSON.stringify(calls)).toBe(true);
+	}
+});
+
+test("a subagent that only read local files, or returned nothing usable, leaves the parent clean", async () => {
+	for (const details of [child(["read", { path: "a.ts" }], ["bash", { command: "go test ./..." }]), { results: [] }, {}, undefined, { results: [{ messages: [null, { role: "assistant", content: "x" }] }] }]) {
+		const h = wire();
+		await h.tool_result({ toolName: "subagent", input: {}, content: [], details });
+		expect(await h.tool_call(bad, { cwd: CWD, hasUI: false })).toBeUndefined();
+	}
+});

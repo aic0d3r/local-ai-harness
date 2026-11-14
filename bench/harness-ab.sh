@@ -3,9 +3,11 @@
 # survey task. Re-run after engine/extension updates; ~25 min.
 #   bench/harness-ab.sh <repo-dir> [baseline-only|resume-only]
 set -u
-REPO="${1:?usage: harness-ab.sh <repo-dir> [phase]}"
+# absolute before any cd: the script cd's into the repo and later reads the task file
+: "${1:?usage: harness-ab.sh <repo-dir> [phase]}"
+REPO=$(cd "$1" 2>/dev/null && pwd) || { echo "harness-ab: repo dir '$1' does not exist" >&2; exit 1; }
 PHASE="${2:-all}"
-TASK_FILE="$(dirname "$0")/harness-ab-task.txt"
+TASK_FILE="$(cd "$(dirname "$0")" && pwd)/harness-ab-task.txt"
 OUT=/tmp/harness-ab-$$; mkdir -p $OUT
 RESERVE=50000   # force compaction so the sidecar path fires
 AG="${PI_CODING_AGENT_DIR:-${PI_HOME:-$HOME/.pi}/agent}"

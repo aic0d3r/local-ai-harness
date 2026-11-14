@@ -21,7 +21,8 @@ T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
   && ok "tar backup holds unit + rag-index.py together" || bad "tar backup missing a member"
 
 # [2] setup --uninstall must route to uninstall.sh, not run the installer (README contract)
-./setup.sh --uninstall </dev/null 2>&1 | grep -q "removes everything" \
+mkdir -p "$T/home" "$T/pi/agent"  # sandbox: a routing regression must not run the real uninstaller on this machine
+HOME="$T/home" PI_HOME="$T/pi" PI_CODING_AGENT_DIR="$T/pi/agent" ./setup.sh --uninstall </dev/null 2>&1 | grep -q "removes everything" \
   && ok "--uninstall routes to uninstall.sh" || bad "--uninstall did not route to uninstall.sh"
 
 # [3] auto-guard: one timeout only (duplicate object key silently overrode it once)

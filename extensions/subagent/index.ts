@@ -34,6 +34,8 @@ const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
 const COLLAPSED_ITEM_COUNT = 10;
 const PER_TASK_OUTPUT_CAP = 50 * 1024;
+const MAX_STDERR_BYTES = 64 * 1024; // a child that spews errors must not grow the parent's memory or its tool result without bound
+const MAX_LINE_BYTES = 16 * 1024 * 1024; // one JSON event; a bigger "line" is dropped
 
 /**
  * Resolve a frontmatter `skills:` entry to a path pi can load: absolute or ~/ paths
@@ -384,6 +386,7 @@ async function runSingleAgent(
 
 		args.push(`Task: ${task}`);
 		let wasAborted = false;
+		let timedOut = false;
 
 		const exitCode = await new Promise<number>((resolve) => {
 			const invocation = getPiInvocation(args);
@@ -392,8 +395,27 @@ async function runSingleAgent(
 				shell: false,
 				stdio: ["ignore", "pipe", "pipe"],
 				env: { ...process.env, PI_SUBAGENT: "1" },
+				detached: process.platform !== "win32", // its own process group: a kill reaches the bash commands it started too
 			});
 			let buffer = "";
+			const killTree = (sig: NodeJS.Signals) => {
+				try {
+					if (process.platform !== "win32" && proc.pid) process.kill(-proc.pid, sig);
+					else proc.kill(sig);
+				} catch {
+					/* already gone */
+				}
+			};
+			let hardKill: ReturnType<typeof setTimeout> | undefined;
+			const stop = () => {
+				killTree("SIGTERM");
+				hardKill = setTimeout(() => {
+					if (proc.exitCode === null && proc.signalCode === null) killTree("SIGKILL"); // .killed is true once SIGTERM was sent
+				}, 5000);
+			};
+			// a hung child must not hold the parent turn for ever (PI_SUBAGENT_TIMEOUT_S, default 30 min; 0 = no limit)
+			const limitS = Number(process.env.PI_SUBAGENT_TIMEOUT_S ?? 1800);
+			const limitTimer = limitS > 0 ? setTimeout(() => { timedOut = true; stop(); }, limitS * 1000) : undefined;
 
 			const processLine = (line: string) => {
 				if (!line.trim()) return;
@@ -436,29 +458,35 @@ async function runSingleAgent(
 				buffer += data.toString();
 				const lines = buffer.split("\n");
 				buffer = lines.pop() || "";
+				if (buffer.length > MAX_LINE_BYTES) buffer = ""; // one endless line without a newline is not an event
 				for (const line of lines) processLine(line);
 			});
 
 			proc.stderr.on("data", (data) => {
-				currentResult.stderr += data.toString();
+				if (currentResult.stderr.length < MAX_STDERR_BYTES) currentResult.stderr += data.toString();
 			});
 
+			const done = () => {
+				if (limitTimer) clearTimeout(limitTimer);
+				if (hardKill) clearTimeout(hardKill);
+			};
 			proc.on("close", (code) => {
+				done();
 				if (buffer.trim()) processLine(buffer);
-				resolve(code ?? 0);
+				if (timedOut) currentResult.stderr += `\n[subagent stopped after ${limitS}s (PI_SUBAGENT_TIMEOUT_S)]`;
+				resolve(timedOut ? 124 : (code ?? 0));
 			});
 
-			proc.on("error", () => {
+			proc.on("error", (err) => {
+				done();
+				currentResult.stderr += `\n[could not start the subagent: ${err.message}]`; // a bad cwd or a missing pi used to end as "(no output)"
 				resolve(1);
 			});
 
 			if (signal) {
 				const killProc = () => {
 					wasAborted = true;
-					proc.kill("SIGTERM");
-					setTimeout(() => {
-						if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGKILL"); // .killed is true once SIGTERM was sent
-					}, 5000);
+					stop();
 				};
 				if (signal.aborted) killProc();
 				else signal.addEventListener("abort", killProc, { once: true });
@@ -507,13 +535,12 @@ const SubagentParams = Type.Object({
 	tasks: Type.Optional(Type.Array(TaskItem, { description: "Array of {agent, task} for parallel execution" })),
 	chain: Type.Optional(Type.Array(ChainItem, { description: "Array of {agent, task} for sequential execution" })),
 	agentScope: Type.Optional(AgentScopeSchema),
-	confirmProjectAgents: Type.Optional(
-		Type.Boolean({ description: "Prompt before running project-local agents. Default: true.", default: true }),
-	),
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process (single mode)" })),
 });
 
 export default function (pi: ExtensionAPI) {
+	// A child is a leaf: with the tool registered in it, an agent that lists no `tools:` could fan out 8 children per level without end.
+	if (process.env.PI_SUBAGENT === "1") return;
 	pi.registerTool({
 		name: "subagent",
 		label: "Subagent",
@@ -533,7 +560,6 @@ export default function (pi: ExtensionAPI) {
 			};
 			const discovery = discoverAgents(ctx.cwd, agentScope);
 			const agents = discovery.agents;
-			const confirmProjectAgents = params.confirmProjectAgents ?? true;
 
 			const hasChain = (params.chain?.length ?? 0) > 0;
 			const hasTasks = (params.tasks?.length ?? 0) > 0;
@@ -562,12 +588,9 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 
-			if (
-				(agentScope === "project" || agentScope === "both") &&
-				confirmProjectAgents &&
-				ctx.hasUI &&
-				!ctx.isProjectTrusted()
-			) {
+			// Project agents are repo content. The model cannot switch the question off (it is not a parameter), and with no
+			// one to ask (print mode, a nested run) they are refused rather than run unconfirmed.
+			if ((agentScope === "project" || agentScope === "both") && !ctx.isProjectTrusted()) {
 				const requestedAgentNames = new Set<string>();
 				if (params.chain) for (const step of params.chain) requestedAgentNames.add(step.agent);
 				if (params.tasks) for (const t of params.tasks) requestedAgentNames.add(t.agent);
@@ -580,13 +603,13 @@ export default function (pi: ExtensionAPI) {
 				if (projectAgentsRequested.length > 0) {
 					const names = projectAgentsRequested.map((a) => a.name).join(", ");
 					const dir = discovery.projectAgentsDir ?? "(unknown)";
-					const ok = await ctx.ui.confirm(
+					const ok = ctx.hasUI && await ctx.ui.confirm(
 						"Run project-local agents?",
 						`Agents: ${names}\nSource: ${dir}\n\nProject agents are repo-controlled. Only continue for trusted repositories.`,
 					);
 					if (!ok)
 						return {
-							content: [{ type: "text", text: "Canceled: project-local agents not approved." }],
+							content: [{ type: "text", text: ctx.hasUI ? "Canceled: project-local agents not approved." : "Refused: project-local agents need an interactive approval, and there is no one to ask here." }],
 							details: makeDetails(hasChain ? "chain" : hasTasks ? "parallel" : "single")([]),
 						};
 				}
@@ -598,7 +621,7 @@ export default function (pi: ExtensionAPI) {
 
 				for (let i = 0; i < params.chain.length; i++) {
 					const step = params.chain[i];
-					const taskWithContext = step.task.replace(/\{previous\}/g, previousOutput);
+					const taskWithContext = step.task.replace(/\{previous\}/g, () => previousOutput) /* a function: `$&` in the output must stay text */;
 
 					// Create update callback that includes all previous results
 					const chainUpdate: OnUpdateCallback | undefined = onUpdate

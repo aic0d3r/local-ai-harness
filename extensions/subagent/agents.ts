@@ -5,6 +5,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
+import { confine } from "./confine.ts";
 
 export type AgentScope = "user" | "project" | "both";
 
@@ -94,7 +95,7 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig
 			continue;
 		}
 
-		agents.push({
+		agents.push(confine(source, {
 			name: frontmatter.name,
 			description: frontmatter.description,
 			tools: parseToolList(frontmatter.tools),
@@ -103,7 +104,7 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig
 			systemPrompt: body,
 			source,
 			filePath,
-		});
+		}));
 	}
 
 	return agents;
