@@ -79,6 +79,7 @@ also works after setup: startup defaults point at the engine you chose, and exis
 | `./harness tune` | re-run the speed probe and re-size the limits |
 | `./harness monitor` | the live dashboard for the active engine (see [Operations](OPS.md#watching-speed-prefill--decode)) |
 | `./harness verify` | ask the active engine for a live reply over HTTP; exit 0 only if it answered (the doctor's ready check) |
+| `./harness report` | what a bug report needs, as plain text to paste into an issue: versions, hardware, engine, model, context, measured speed, the doctor's failures. No prompts, keys or paths; home folder and user name redacted (`--no-doctor` skips the doctor run) |
 | `./setup.sh --doctor` | read-only health check of the whole install; exits 1 if any check fails (`--refusals` also checks the running model for over-refusal on 19 one-line tasks) |
 | `./setup.sh --refresh-mcp` | reset the serena/semble MCP exposure and ensure the default DDG server (backs up `mcp.json` first) |
 

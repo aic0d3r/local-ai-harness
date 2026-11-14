@@ -47,6 +47,13 @@ if ! hf_dl "${ARGS[@]}" --local-dir "$DIR"; then
   [ "$ENG" = gufo ] && echo "  the gufo repo is gated: accept its terms on huggingface.co/brainnxdomain/Qwen3.8-Flash-Next-Uncensored-Gufo-GGUF, then: $HF_BIN auth login" >&2
   echo "  download failed/incomplete - re-run to resume" >&2; exit 1
 fi
+# the weights against the repo's own sizes + sha256: the named files (halogen), or every .gguf that is there (gufo's folder holds only these)
+VR=main; VF=(); i=1
+while [ "$i" -lt "${#ARGS[@]}" ]; do
+  case "${ARGS[$i]}" in --revision) VR=${ARGS[$((i+1))]}; i=$((i+2)) ;; --*) i=$((i+2)) ;; *) VF+=("${ARGS[$i]}"); i=$((i+1)) ;; esac
+done
+hf_verify "${ARGS[0]}" "$VR" "$DIR" ${VF[@]:+--require "${VF[@]}"} \
+  || { echo "  a downloaded file does not match the repo - delete the file(s) named above and re-run" >&2; exit 1; }
 # gufo sidecars from the stock repo when this box never had the stock gufo setup: MTP head + vision projector
 if [ "$ENG" = gufo ]; then
   if [ ! -f "$ROOT/$MTP" ]; then

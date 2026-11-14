@@ -30,6 +30,12 @@ body:
     validations:
       required: true
   - type: textarea
+    id: report
+    attributes:
+      label: Report
+      description: Linux/macOS, in the checkout run `./harness report` and paste its output (versions, hardware, engine, model, context, measured speed, the doctor's failures; no prompts, keys or paths, and your home folder and user name are redacted). Windows, skip this and use Diagnostics below.
+      render: text
+  - type: textarea
     id: doctor
     attributes:
       label: Diagnostics

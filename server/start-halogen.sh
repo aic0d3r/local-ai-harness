@@ -24,7 +24,9 @@ IMAGE="ghcr.io/peonist-ai/halogen-flash-server:${IMAGE_TAG}${IMAGE_DIGEST:+@$IMA
 # locate the stock v2 checkpoint (exclude ngram/vision/mtp/w4b sidecars); its folder also holds
 # the tokenizer, vision tower, n-gram table, MTP head and npu/ that every checkpoint here uses
 # ~/models/*/ covers scripts/download-halogen.sh's ~/models/halogen-qwen3.8-flash-next
-STOCK=$(ls "$PWD"/*.hgn /models/*.hgn "$HOME"/models/*.hgn "$HOME"/models/*/*.hgn "$HOME"/Downloads/*.hgn \
+# HALOGEN_MODELS (or the folder download-halogen.sh was told to use, remembered in harness-models-dir) comes first
+MODELS_DIR="${HALOGEN_MODELS:-$(cat "${PI_CODING_AGENT_DIR:-${PI_HOME:-$HOME/.pi}/agent}/harness-models-dir" 2>/dev/null)}"
+STOCK=$(ls ${MODELS_DIR:+"$MODELS_DIR"/*.hgn "$MODELS_DIR"/*/*.hgn} "$PWD"/*.hgn /models/*.hgn "$HOME"/models/*.hgn "$HOME"/models/*/*.hgn "$HOME"/Downloads/*.hgn \
   "${LLMBENCH:-$HOME/LLMBench}"/models/*/*.hgn 2>/dev/null \
   | grep -v 'ngram\|vision\|mtp\|w4b' | grep 'v2\.hgn' | head -1)
 [ "${1:-}" = --print-stock ] && { echo "$STOCK"; exit 0; }

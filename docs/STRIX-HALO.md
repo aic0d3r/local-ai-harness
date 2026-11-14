@@ -60,6 +60,10 @@ startup is normal.
 Do not clone the whole model repo: it carries ~190 GB of optional variants and the minimum set is ~124 GB.
 `./setup.sh --halogen auto` offers to fetch exactly the right files and resumes where it stopped if interrupted.
 
+- **Space first.** It checks the disk before it asks: with less than ~135 GB free where the files would go (a resume only needs what is missing) it says so and does not offer the download.
+- **Another disk.** `HALOGEN_MODELS=/big/disk/models ./setup.sh` puts the files in `/big/disk/models/halogen-qwen3.8-flash-next`. The folder is remembered (`~/.pi/agent/harness-models-dir`), so the launcher finds the checkpoint later without the variable.
+- **Checked afterwards.** Every file is compared with the repo's own size and sha256 (`scripts/verify-hf.py`), so a cut-short or corrupt file is named instead of failing later as a model that will not load. The sha256 pass takes a few minutes for ~124 GB; a file it already checked and that has not changed is skipped on re-runs (`.hf-verified.json` in the folder), and `HF_VERIFY_HASH=0` checks sizes only. Offline it says it skipped the check. The Qwen weights scripts (`download-stock.sh`, `download-qwen38-27b.sh`, `download-abliterated.sh`) do the same.
+
 ## The NPU
 
 The NPU is not where the big model runs. By default it runs three small models whose whole job is to answer, in 0.1-1 s,

@@ -139,6 +139,21 @@ open(h.MODEL_FILE, "w").write("qwen38-27b\n")
 assert "DeepSeek-V4.1-Flash" in h.choices_line("osmos") and "qwen38-27b" not in h.choices_line("osmos")
 assert "model qwen38-27b" in h.choices_line("gufo") and "model qwen38-27b" in h.choices_line()
 os.remove(h.MODEL_FILE)
+# ./harness report: the lines a bug report needs, and nothing private (home folder and user name are redacted)
+real_home, real_user = os.environ.get("HOME"), os.environ.get("USER")
+os.environ["HOME"], os.environ["USER"] = "/home/alice_example", "alice_example"
+assert h.redact("/home/alice_example/models/x by alice_example") == "~/models/x by <user>"
+assert h.redact("nothing here") == "nothing here"
+rep = h.report_text(doctor=False)
+for key in ("harness:", "OS:", "CPU:", "RAM:", "GPU:", "NPU:", "engine:", "model:", "speed:", "pi:"):
+    assert f"\n{key}" in rep, (key, rep)
+assert "alice_example" not in rep and "doctor:" not in rep
+real_rd = h.run_doctor
+h.run_doctor = lambda: (False, ["\u2717 halogen down /home/alice_example/x"])
+rep = h.report_text(doctor=True)
+assert "doctor:   1 problem(s)" in rep and "halogen down ~/x" in rep and "alice_example" not in rep, rep
+h.run_doctor = real_rd
+os.environ["HOME"], os.environ["USER"] = real_home, real_user
 # status reports an opted-out sidecar as off, not down
 open(f"{AGENT}/harness-sidecar", "w").write("0\n")
 assert "sidecar off" in h.choices_line()
@@ -405,6 +420,18 @@ for ldd_out, want in (("\tundefined symbol: _ZN8xrt_core7elf_int18get_partition_
     got = h.halogen_preflight()
     assert bool(got) == want and (not want or "does not match the installed xrt" in got[0] and "get_partition_size" in got[0]), got
 h.subprocess.run, h.os.path.exists, h.shutil.which = real_run, real_exists, real_which
+# the download question comes after the space check: a disk that cannot hold ~135 GB gets an explanation and no question
+real_pf, real_ck, real_fg, real_ask2, real_hold = h.halogen_preflight, h.halogen_ckpt, h.free_gb, h.ask_yn, h.heap_holder
+h.halogen_preflight, h.halogen_ckpt, h.heap_holder = (lambda: []), (lambda: "/nonexistent/x.hgn"), (lambda running: None)
+asked = []
+h.ask_yn = lambda q, *a, **k: asked.append(q) or True
+h.free_gb = lambda p: 40
+assert h.plan_start("halogen", {}) is None and not asked
+h.free_gb = lambda p: 500
+plan = h.plan_start("halogen", {})
+assert plan and plan["download"] is True and asked and "checked against the repo" in asked[0], (plan, asked)
+assert h.free_gb("/nonexistent/a/b") > 0  # the nearest existing parent counts
+h.halogen_preflight, h.halogen_ckpt, h.free_gb, h.ask_yn, h.heap_holder = real_pf, real_ck, real_fg, real_ask2, real_hold
 assert h.engine_log("gufo") == os.path.join(h.LOGDIR, "gufo.log") and h.LOGDIR.endswith("local-ai-harness") and h.LOGDIR != "/tmp/local-ai-harness"
 # a box that was never set up is not assumed to be halogen; a pre-wizard halogen install (NPU extension, no profile) still is
 real_agent, h.AGENT = h.AGENT, tempfile.mkdtemp()

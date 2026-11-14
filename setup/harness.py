@@ -675,6 +675,13 @@ def stop_engine(engine, running):
     return True
 
 
+def free_gb(path):
+    """GB free where path is, or would be created: the nearest existing parent."""
+    while not os.path.isdir(path) and path != os.path.dirname(path):
+        path = os.path.dirname(path)
+    return shutil.disk_usage(path).free // 2**30
+
+
 def halogen_ckpt():
     """The stock checkpoint: its folder also holds what every halogen checkpoint needs (tokenizer, n-gram, npu/)."""
     return subprocess.run(["bash", os.path.join(REPO, "server", "start-halogen.sh"), "--print-stock"], capture_output=True, text=True).stdout.strip()
@@ -797,8 +804,13 @@ def plan_start(engine, running, ask_start=True):
             return None
         plan["stop"] = holder
     if engine == "halogen" and not os.path.isfile(halogen_ckpt()):
-        free = shutil.disk_usage(os.path.expanduser("~")).free // 2**30
-        if not ask_yn(f"No halogen checkpoint on this box. Download it (~124 GB into ~/models, {free} GB free, resumable)?"):
+        base = os.environ.get("HALOGEN_MODELS") or os.path.expanduser("~/models")  # scripts/download-halogen.sh's folder
+        free, need = free_gb(base), PROFILES["recommend"]["halogen_download_gb"] + 11  # the script's margin: 135 for 124
+        if free < need:  # before the question: nobody should agree to a download that cannot finish
+            print(f"halogen needs ~{need} GB for its download and only {free} GB are free where {base} is.\n"
+                  f"  Free some space, or put it on a bigger disk: HALOGEN_MODELS=/path/to/models ./setup.sh (the folder is remembered).")
+            return None
+        if not ask_yn(f"No halogen checkpoint on this box. Download it (~124 GB into {base}, {free} GB free, resumable, checked against the repo afterwards)?"):
             return None
         plan["download"] = True
     m = engine_model(engine)
@@ -1144,21 +1156,28 @@ def pin_value(name, default):
     return kv[name] if kv.get(name) and kv.get(f"BASE_{name}") == default else default
 
 
+def engine_have(engine):
+    """The version of engine that is installed here (profiles.json engines.<e>.update.have), or '' when it has none / cannot be told."""
+    u = PROFILES["engines"][engine].get("update")
+    if not u:
+        return ""
+    kind, *rest = u["have"].split()
+    if kind == "pin":  # version pinned in our launcher: known even while the engine is down
+        # "pin FILE DEFAULT_VAR PIN_NAME": the launcher's tracked DEFAULT_VAR=0.19.1, unless an upgrade stored a newer pin on top of it
+        return pin_value(rest[2], re.search(rf"^{rest[1]}=([0-9.]+)", open(os.path.join(REPO, rest[0])).read(), re.M).group(1))
+    if kind == "dir":  # a git checkout our launcher starts (Strata, osmos): its tag, known while the engine is down
+        src = subprocess.run(["bash", os.path.join(REPO, rest[0]), "--print-dir"], capture_output=True, text=True).stdout.strip()
+        return subprocess.run(["git", "-C", src, "describe", "--tags"], capture_output=True, text=True).stdout.strip()
+    return json.load(http(f"http://127.0.0.1:{PROFILES['engines'][engine]['port']}{kind}"))[rest[0]]  # what the running server reports
+
+
 def engine_update(engine):
     """-> one line if a newer release of engine exists; '' when current, unknown or offline. Never installs."""
     u = PROFILES["engines"][engine].get("update")
     if not u:
         return ""
     try:
-        kind, *rest = u["have"].split()
-        if kind == "pin":  # version pinned in our launcher: known even while the engine is down
-            # "pin FILE DEFAULT_VAR PIN_NAME": the launcher's tracked DEFAULT_VAR=0.19.1, unless an upgrade stored a newer pin on top of it
-            have = pin_value(rest[2], re.search(rf"^{rest[1]}=([0-9.]+)", open(os.path.join(REPO, rest[0])).read(), re.M).group(1))
-        elif kind == "dir":  # a git checkout our launcher starts (Strata): its tag, known while the engine is down
-            src = subprocess.run(["bash", os.path.join(REPO, rest[0]), "--print-dir"], capture_output=True, text=True).stdout.strip()
-            have = subprocess.run(["git", "-C", src, "describe", "--tags"], capture_output=True, text=True).stdout.strip()
-        else:  # what the running server reports
-            have = json.load(http(f"http://127.0.0.1:{PROFILES['engines'][engine]['port']}{kind}"))[rest[0]]
+        have = engine_have(engine)
         src, repo = u["latest"].split(":", 1)
         if src == "gh":
             new = json.load(http(f"https://api.github.com/repos/{repo}/releases/latest"))["tag_name"]
@@ -1503,6 +1522,57 @@ def cmd_status(_):
         print("sidecar: down (starts on demand via ling-tiny.service)")
 
 
+def redact(s):
+    """A report is pasted into a public issue: the home folder becomes ~ and the user name goes."""
+    home = os.path.expanduser("~")
+    s = s.replace(home, "~") if len(home) > 1 else s
+    user = os.environ.get("USER") or os.path.basename(home)
+    return re.sub(rf"\b{re.escape(user)}\b", "<user>", s) if len(user) > 2 else s
+
+
+def report_text(doctor=True):
+    """What a bug report needs, as plain lines: versions, hardware, engine, model, context, measured speed, the doctor's failures.
+    No prompts, no keys, no paths; the home folder and user name are redacted."""
+    import platform
+    p = active() or {}
+    eng = p.get("engine")
+    hw, cap = hardware(), capacity()
+
+    def out(*cmd):
+        try:
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=15).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return ""
+    cpu = next((l.split(":", 1)[1].strip() for l in open("/proc/cpuinfo") if l.startswith("model name")), "") if os.path.exists("/proc/cpuinfo") else platform.processor()
+    try:
+        have = engine_have(eng) if eng else ""
+    except Exception:
+        have = ""
+    port = PROFILES["engines"][eng]["port"] if eng in PROFILES["engines"] else 0
+    tuned = jget(os.path.join(AGENT, "harness-tuned.json"), {}).get(hw_key(eng, p.get("model", "")), {}) if eng else {}
+    up = [e["engine"] for e in detect()["engines"]]
+    L = ["local-ai-harness report (./harness report: no prompts, keys or paths; home folder and user name redacted)", "",
+         f"harness:  {out('git', '-C', REPO, 'describe', '--tags', '--always', '--dirty') or 'unknown (not a git checkout)'}",
+         f"OS:       {platform.platform()} / python {platform.python_version()}",
+         f"CPU:      {cpu or 'unknown'} ({hw['cpus']} threads)",
+         f"RAM:      {hw['ram_gb']} GB",
+         f"GPU:      {cap['gpu_name'] or hw['gpu']}, {cap['vram_gb']:g} GB VRAM, {cap['fast_gb']:g} GB GPU-addressable",
+         f"NPU:      {'yes' if hw['npu'] else 'no'}    disk free: {cap['disk_free_gb']} GB",
+         f"engine:   {eng or 'not set up'}{' ' + have if have else ''} (port {port}, {'up' if eng in up else 'DOWN'}); engines answering: {', '.join(up) or 'none'}",
+         f"model:    {p.get('model', '-')}    context: {(engine_ctx(eng) if eng in up else 0) or 'unknown'}    weights: {weights_pref() if eng in WEIGHTS_ENGINES else '-'}",
+         f"speed:    {tuned.get('prefill_tps', '?')} t/s prefill, {tuned.get('decode_tps', '?')} t/s decode (./harness tune, {tuned.get('when', 'not measured')})",
+         f"pi:       {out('pi', '--version') or 'not found'}"]
+    if doctor:
+        passed, bad = run_doctor()
+        L += [f"doctor:   {'all checks passed' if passed else str(len(bad) or 1) + ' problem(s)'}", *[f"            {b}" for b in bad]]
+    return redact("\n".join(L))
+
+
+def cmd_report(a):
+    """Print a report to paste into a GitHub issue (.github/ISSUE_TEMPLATE/bug_report.yml asks for it)."""
+    print(report_text(not a.no_doctor))
+
+
 def cmd_config(a):
     """Menu of every saved answer; change one, applied right away."""
     if not sys.stdin.isatty():
@@ -1579,7 +1649,7 @@ def main():
     import argparse
     ap = argparse.ArgumentParser(prog="harness")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for n, f in (("detect", cmd_detect), ("setup", cmd_setup), ("use", cmd_use), ("tune", cmd_tune), ("status", cmd_status), ("config", cmd_config), ("update-check", cmd_update_check), ("up", cmd_up), ("recommend", cmd_recommend), ("quant-info", cmd_quant_info), ("ctx-info", cmd_ctx_info), ("model-info", cmd_model_info), ("monitor", cmd_monitor), ("verify", cmd_verify), ("refresh", cmd_refresh)):
+    for n, f in (("detect", cmd_detect), ("setup", cmd_setup), ("use", cmd_use), ("tune", cmd_tune), ("status", cmd_status), ("config", cmd_config), ("update-check", cmd_update_check), ("up", cmd_up), ("recommend", cmd_recommend), ("quant-info", cmd_quant_info), ("ctx-info", cmd_ctx_info), ("model-info", cmd_model_info), ("monitor", cmd_monitor), ("verify", cmd_verify), ("refresh", cmd_refresh), ("report", cmd_report)):
         p = sub.add_parser(n)
         p.set_defaults(fn=f)
         if n in ("setup", "use"):
@@ -1595,6 +1665,8 @@ def main():
             p.add_argument("engine", nargs="?", help="default: the active engine (halogen or strata)")
             p.add_argument("--url", help="server root, e.g. a remote Strata (default: this box)")
             p.add_argument("--once", action="store_true", help="Strata only: print one snapshot and exit")
+        if n == "report":
+            p.add_argument("--no-doctor", action="store_true", help="skip the doctor run (a few seconds, includes a live reply from the engine)")
         if n == "verify":
             p.add_argument("engine", nargs="?", help="default: the active engine")
             p.add_argument("model", nargs="?", help="default: the active model")

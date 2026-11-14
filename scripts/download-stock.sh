@@ -49,4 +49,8 @@ SHA=$(python3 -c "import json,urllib.request as u;print(json.load(u.urlopen('htt
 echo "${SHA:-unknown} ($REV, $(date +%F))" > "$DIR/.unsloth-revision"
 HAVE=$(ls "$DIR"/Qwen3.8-Flash-Next-$Q-0000?-of-0000$SHARDS.gguf 2>/dev/null | wc -l)
 [ "$HAVE" = "$SHARDS" ] && [ -f "$WANT" ] || { echo "  download finished but $HAVE of $SHARDS shards are on disk" >&2; exit 1; }
+# the shards (and the projector when it came) against the repo's own sizes + sha256; HF_VERIFY_HASH=0 = sizes only
+REQ=("$Q/"); [ -f "$ROOT/mmproj-BF16.gguf" ] && REQ+=(mmproj-BF16.gguf)
+hf_verify "$R" "$REV" "$ROOT" --require "${REQ[@]}" \
+  || { echo "  a downloaded file does not match the repo - delete the file(s) named above and re-run" >&2; exit 1; }
 echo "  download complete (unsloth @ ${SHA:0:8})"

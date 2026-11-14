@@ -31,4 +31,7 @@ hf_dl unsloth/Qwen3.8-27B-GGUF "$TARGET" mmproj-BF16.gguf --revision "$REV_TARGE
 for f in "$TARGET" "$DRAFT" mmproj-BF16.gguf; do
   [ -f "$DIR/$f" ] || { echo "  download finished but $f is missing from $DIR" >&2; exit 1; }
 done
+hf_verify unsloth/Qwen3.8-27B-GGUF "$REV_TARGET" "$DIR" --require "$TARGET" mmproj-BF16.gguf \
+  && hf_verify z-lab/Qwen3.8-27B-DFlash2-GGUF "$REV_DRAFT" "$DIR" --require "$DRAFT" \
+  || { echo "  a downloaded file does not match the repo - delete the file(s) named above and re-run" >&2; exit 1; }
 echo "  download complete ($DIR)"
