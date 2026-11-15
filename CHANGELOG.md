@@ -5,17 +5,6 @@
 
 ## 2.2.0 - 2026-11-15
 
-### Changed
-- Every shell question (`setup.sh`, the download and uninstall scripts) goes through `scripts/lib-prompt.sh`: the same `[Y/n]` wording and `(Esc + Enter cancels)`, Ctrl-C prints `cancelled`, and with no terminal it aborts rather than guessing.
-- Questions print a bold headline with the detail dimmed under it, wrapped to the terminal, so `[Y/n]` no longer lands at the end of a long sentence.
-- Yes/no prompts and menus show the same key hints: the default on Enter, and `Esc cancels`.
-- `./harness config` closes on Esc like `done` (it used to print `cancelled`); its rows are shorter so they fit 80 columns.
-- With no terminal a question prints the answer it took, e.g. `Start pi? -> yes (no terminal: default)`, so a log shows what was chosen.
-- Plain menus and yes/no prompts give a hint after an unknown key and show the valid range (`pick 1-3`); shell download and uninstall prompts say `cancelled` on Ctrl-D.
-- The setup summary wraps on narrow terminals with its labels kept aligned, and the saved answers break between items instead of mid-item. The status line is green (ready) or red (NOT ready) and the labels are dimmed; colour only on a terminal, never under `NO_COLOR`.
-- The setup wizard asks about the ling-tiny sidecar on every interactive run, pre-selected with your saved answer, instead of only the first time.
-- Engine names read `engine · model` (osmos · DeepSeek-V4.1-Flash (osmos-evo)) in status, tune, bench and setup; the raw model id is unchanged.
-
 ### Added
 - `./harness bench`: fixed-protocol speed benchmark (cold prefill at 2K/8K/32K, code and prose decode, decode at depth; median of 3, saved to `harness-bench.json`). `./harness tune` is now the quick subset of `bench` (same code path: warm-up, 3 decode samples, one 8K prefill, medians); its decode figure is short code, and old probes are marked for re-run.
 - Setup on a Strix Halo asks which **model** you want first and picks its best engine (`routes` in `config/profiles.json`: Flash-Next halogen > gufo > Strata, Qwen3.8-27B gufo with llama.cpp as fallback, DeepSeek-V4.1-Flash osmos). "Pick an engine instead" keeps the old menu; other hardware is unchanged.
@@ -29,6 +18,9 @@
   - Project agents can no longer be auto-confirmed, pick a `model:` or read files outside the project; children are leaf, time-limited (30 min) and killed as a process group.
 
 ### Changed
+- All shell questions share `scripts/lib-prompt.sh`: one `[Y/n]` style with a bold headline, key hints and `Esc cancels`; Ctrl-C/Ctrl-D print `cancelled`; with no terminal they print the default taken; unknown menu keys give a hint (`pick 1-3`).
+- The setup summary wraps on narrow terminals with a green/red status line (no colour off a terminal or under `NO_COLOR`); `./harness config` closes on Esc.
+- The wizard asks about the ling-tiny sidecar on every interactive run; engine names read `engine · model`.
 - One config-folder rule everywhere: `PI_CODING_AGENT_DIR`, then `PI_HOME/agent`, then `~/.pi/agent`.
 - All config writes are atomic (`setup/jsonio.py`: temp file, rename, permissions kept); one provider-entry builder (`setup/entries.py`).
 - halogen: host check catches an `xrt`/plugin mismatch and missing devices before the ~124 GB download; the upgrade's decode check warms up first and a failed upgrade waits for the rollback.
