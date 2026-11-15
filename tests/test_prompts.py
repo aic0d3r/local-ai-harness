@@ -73,7 +73,26 @@ print("ok: short menus hint on a bad key; Esc closes settings")
 # the question: headline first, detail under it
 assert h.question_text("Run it? ~2x faster commits, holds GPU memory.") == "Run it?\n  ~2x faster commits, holds GPU memory.", h.question_text("x? y")
 assert h.question_text("Continue?") == "Continue?"
+# a trailing question mark is the headline's end, not the whole sentence (this used to be one long wrapped line)
+assert h.head_detail("Download it? ~124 GB into /m, 900 GB free") == ("Download it?", "~124 GB into /m, 900 GB free")
+assert h.head_detail("No question mark here") == ("No question mark here", "")
 print("ok: question split into headline and detail")
+
+# every question in the wizard keeps a one-line headline: gum cuts a header off at the window edge instead of wrapping it
+import ast
+_tree = ast.parse(open(os.path.join(ROOT, "setup", "harness.py")).read())
+_wide = []
+for _n in ast.walk(_tree):
+    if isinstance(_n, ast.Call) and isinstance(_n.func, ast.Name) and _n.func.id in ("choose", "ask_yn", "ask_once"):
+        _i = 0 if _n.func.id != "ask_once" else 1
+        if len(_n.args) > _i:
+            _a = _n.args[_i]
+            if isinstance(_a, ast.Constant) and isinstance(_a.value, str) and "{" not in _a.value:
+                _head = h.head_detail(_a.value)[0]
+                if len(_head) > 62:
+                    _wide.append((_n.lineno, _head))
+assert not _wide, _wide
+print("ok: every question headline fits one line")
 
 # no terminal: the default is taken and the output says which answer it was
 buf = io.StringIO()
@@ -124,6 +143,14 @@ for line in out.splitlines():
     assert len(line) <= 40, (len(line), line)
 assert "(Enter = yes, Esc cancels)" in out, out
 print("ok: a long question wraps inside 40 columns")
+
+# a maximized window must not give very long lines: the wrap stops at 78 columns even in a 200-column terminal
+rc, out = pty_run([sys.executable, "-c", PY_YN, os.path.join(ROOT, "setup"), long_q], 200, keys=(b"\r",),
+                  env_extra={"PI_CODING_AGENT_DIR": "/tmp/prompt-test-agent"})
+assert rc == 0 and "ANSWER True" in out, (rc, out)
+longest = max(len(line) for line in out.splitlines())
+assert longest <= 78, (longest, out)
+print("ok: a wide terminal still wraps at 78 columns")
 
 # shell prompt: Enter takes the default, y answers; Esc+Enter, Ctrl-C and Ctrl-D cancel (exit 130); no terminal aborts
 SH = ["bash", "-c", f"source {os.path.join(ROOT, 'scripts', 'lib-prompt.sh')}; prompt_yn 'download now?' n 'about 4 GB'; echo rc=$?"]

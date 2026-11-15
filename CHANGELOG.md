@@ -18,6 +18,7 @@
   - Project agents can no longer be auto-confirmed, pick a `model:` or read files outside the project; children are leaf, time-limited (30 min) and killed as a process group.
 
 ### Changed
+- Questions are a short headline with the detail on a dimmed line under it, wrapped at 78 columns: a narrow window no longer needs maximizing, and a maximized one does not give very long lines.
 - All shell questions share `scripts/lib-prompt.sh`: one `[Y/n]` style with a bold headline, key hints and `Esc cancels`; Ctrl-C/Ctrl-D print `cancelled`; with no terminal they print the default taken; unknown menu keys give a hint (`pick 1-3`).
 - The setup summary wraps on narrow terminals with a green/red status line (no colour off a terminal or under `NO_COLOR`); `./harness config` closes on Esc.
 - The wizard asks about the ling-tiny sidecar on every interactive run; engine names read `engine · model`.
@@ -32,6 +33,7 @@
 - `scripts/uninstall.sh` knows the multi-engine setup and removes what the wizard wrote.
 
 ### Fixed
+- A long question was cut off mid-word by `gum`, which truncates a header at the window edge instead of wrapping it; a menu whose labels do not fit the window now uses the wrapped numbered list.
 - In a menu of more than 9 options (e.g. `./harness endpoint` on a server that lists 10+ models) a typo silently picked option 1; it now asks again, and Esc cancels.
 - Ctrl-D at a wizard prompt was ignored; it now cancels like Esc. Ctrl-D at the Ling-3.0-tiny download prompt (default Yes) no longer starts the 4.5 GB download.
 - The commit tool no longer tells a cloud-model session to write its own message (`message` is for dictated text only); the refusal asks the user to run `/commit` or dictate the message.

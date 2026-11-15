@@ -199,7 +199,7 @@ def ask_route():
         b = best_engine(r, hw)
         if b:
             labels[f"{r['label']}  ->  {b['engine']}: {b['why']}"] = (k, b)
-    pick = choose("Which model do you want to run? (the best engine for it on this box is chosen)", [*labels, other], False)
+    pick = choose("Which model do you want to run? the best engine for it on this box is chosen", [*labels, other], False)
     if pick == other:
         return None
     k, b = labels[pick]
@@ -251,7 +251,7 @@ def offer_recommendation(eng):
     if jget(PICK, None) == want and engine_model(eng) == rec["model"] and (eng != "gufo" or saved_quant() == rec["quant"]):
         return True
     what = catalog()[rec["model"]]["label"] + (f", {rec['quant']}" if rec["quant"] else "") + (f", context {rec['ctx']}" if rec["ctx"] else "")
-    if not ask_yn(f"Use the recommended settings for this hardware? ({what}; {rec['why']})", True):
+    if not ask_yn(f"Use the recommended settings? {what}; {rec['why']}", True):
         return False
     os.makedirs(AGENT, exist_ok=True)
     open(MODEL_FILE, "w").write(rec["model"] + "\n")
@@ -343,18 +343,28 @@ def key():
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
+def head_detail(question):
+    """'Ask this? the rest' -> ('Ask this?', 'the rest'). The headline is the question and stays short; the detail explains it.
+    gum truncates a header at the terminal width instead of wrapping, so it only ever gets the headline."""
+    i = question.find("?")
+    if i < 0:
+        return question, ""
+    return question[:i + 1], question[i + 1:].strip()
+
+
 def question_text(question):
-    """The question as printed: the headline (up to its first '?') bold, the detail dimmed under it, wrapped to the terminal."""
-    head, sep, rest = question.partition("? ")
+    """The question as printed: the headline bold, the detail dimmed under it, both wrapped."""
+    head, detail = head_detail(question)
     w = term_width()
-    out = [paint("1", line) for line in textwrap.wrap(head + "?" if sep else question, w)]
-    out += [paint("2", line) for line in textwrap.wrap(rest, w, initial_indent="  ", subsequent_indent="  ")]
+    out = [paint("1", line) for line in textwrap.wrap(head, w)]
+    out += [paint("2", line) for line in textwrap.wrap(detail, w, initial_indent="  ", subsequent_indent="  ")]
     return "\n".join(out)
 
 
 def term_width():
-    """Columns to wrap to on a terminal; piped output is never wrapped."""
-    return max(20, shutil.get_terminal_size().columns - 2) if sys.stdout.isatty() else 10**6
+    """Columns to wrap to: the terminal's, capped at 78 so a maximized window does not give very long lines. Piped output
+    is never wrapped."""
+    return min(78, max(20, shutil.get_terminal_size().columns - 2)) if sys.stdout.isatty() else 10**6
 
 
 def no_terminal(question, answer):
@@ -370,14 +380,21 @@ def escape(esc):
     return esc
 
 
+def fits(options):
+    """True when every label fits the terminal: gum cuts a longer one off mid-word instead of wrapping it."""
+    w = shutil.get_terminal_size().columns if sys.stdout.isatty() else 200
+    return all(len(o) + 2 <= w for o in options)  # +2: gum's cursor prefix
+
+
 def choose(question, options, yes, esc=None):
     if len(options) == 1 or yes:
         return options[0]
     if not sys.stdin.isatty():
         no_terminal(question, options[0])
         return options[0]
-    if shutil.which("gum"):
-        r = subprocess.run(["gum", "choose", "--header", question, *options], stdout=subprocess.PIPE, text=True)
+    if shutil.which("gum") and fits(options):
+        print(question_text(question))  # also the fallback: labels too wide for gum wrap here instead of being cut off
+        r = subprocess.run(["gum", "choose", "--header", "", *options], stdout=subprocess.PIPE, text=True)
         out = r.stdout.strip()
         if out:  # gum trims the line it prints: map it back to the exact option (labels can start with a space)
             return next((o for o in options if o.strip() == out), out)
@@ -838,7 +855,7 @@ WEIGHTS = os.path.join(AGENT, "harness-weights")
 WEIGHTS_ENGINES = {"halogen": ("--print-ckpt", 89), "gufo": ("--print-model", 112), "osmos": ("--print-weights", 1)}  # launcher flag, download GB
 WEIGHTS_ASK = (*WEIGHTS_ENGINES, "strata")  # strata: the answer picks which model scripts/install-strata.sh installs and starts
 WEIGHTS_LABELS = {"stock": "stock Qwen3.8-Flash-Next (default)",
-                  "abliterated": "abliterated (refusals removed; orcarouter edit, see docs/ENGINES.md#abliterated-models)"}
+                  "abliterated": "abliterated (refusals removed; docs/ENGINES.md)"}
 
 
 def weights_pref():
@@ -875,7 +892,8 @@ def ask_weights(engine):
     cur = weights_pref()
     labels = weights_labels(engine)
     opts = sorted(labels, key=lambda k: k != cur)
-    pick = {labels[k]: k for k in opts}[choose("Default model weights? (halogen, gufo and Strata load these; abliterated on Strata = gufo's orca-uncensored shards)", [labels[k] for k in opts], False)]
+    pick = {labels[k]: k for k in opts}[choose("Default model weights? halogen, gufo and Strata load these; abliterated "
+                                               "on Strata = gufo's orca-uncensored shards", [labels[k] for k in opts], False)]
     os.makedirs(AGENT, exist_ok=True)
     open(WEIGHTS, "w").write(pick + "\n")
     return pick != cur
@@ -946,7 +964,7 @@ def plan_start(engine, running, ask_start=True):
             return None
     holder = heap_holder(running)
     if holder and holder != engine and engine in BIG:
-        if not ask_yn(f"{holder} holds the GPU memory {engine} needs. Stop {holder} and the ling-tiny sidecar?"):
+        if not ask_yn(f"Stop {holder}? it holds the GPU memory {engine} needs; the ling-tiny sidecar stops too"):
             return None
         plan["stop"] = holder
     if engine == "halogen" and not os.path.isfile(halogen_ckpt()):
@@ -956,7 +974,8 @@ def plan_start(engine, running, ask_start=True):
             print(f"halogen needs ~{need} GB for its download and only {free} GB are free where {base} is.\n"
                   f"  Free some space, or put it on a bigger disk: HALOGEN_MODELS=/path/to/models ./setup.sh (the folder is remembered).")
             return None
-        if not ask_yn(f"No halogen checkpoint on this box. Download it (~124 GB into {base}, {free} GB free, resumable, checked against the repo afterwards)?"):
+        if not ask_yn(f"Download the halogen checkpoint? not on this box yet: ~124 GB into {base}, {free} GB free, "
+                      "resumable, checked against the repo afterwards"):
             return None
         plan["download"] = True
     m = engine_model(engine)
@@ -964,18 +983,23 @@ def plan_start(engine, running, ask_start=True):
     if engine == "strata" and not strata_installed() and own:
         free = shutil.disk_usage(os.path.expanduser("~")).free // 2**30
         e = catalog()[m]
-        if not ask_yn(f"Strata does not have {e['label']} set up. Install it (git clone into ~/coding/Strata if needed; its setup fetches the engine and downloads ~{e['download_gb']} GB, {free} GB free, resumable)?"):
+        if not ask_yn(f"Install Strata for {e['label']}? not installed yet. git clone into ~/coding/Strata if needed; "
+                      f"its setup fetches the engine and downloads ~{e['download_gb']} GB, {free} GB free, resumable"):
             return None
         plan["install"] = "strata"
     elif engine == "strata" and not strata_installed():
         free = shutil.disk_usage(os.path.expanduser("~")).free // 2**30
         what = "uses gufo's orca-uncensored shards in place" if weights_pref() == "abliterated" else "uses the stock UD-Q4_K_XL that gufo shares in place"
-        if not ask_yn(f"Strata is not installed for the {weights_pref()} weights. Install them (git clone into ~/coding/Strata if needed; its setup fetches the engine and {what}, switching answers rebuilds its small pack, no weights download)?"):
+        if not ask_yn(f"Install Strata for the {weights_pref()} weights? not installed yet. git clone into ~/coding/Strata "
+                      f"if needed; its setup fetches the engine and {what}; switching answers rebuilds its small pack, "
+                      "no weights download"):
             return None
         plan["install"] = "strata"
         # abliterated Strata runs gufo's orca-uncensored shards in place: say so now, not when the install fails
         if weights_pref() == "abliterated" and not os.path.isfile(weights_file("gufo")):
-            if not ask_yn(f"The abliterated Strata model is gufo's orca-uncensored GGUF, which is not on this box. Download it (~{WEIGHTS_ENGINES['gufo'][1]} GB, gated: accept the terms on its Hugging Face page and `hf auth login` first; {free} GB free, resumable)?"):
+            if not ask_yn(f"Download gufo's abliterated GGUF? the abliterated Strata model; ~{WEIGHTS_ENGINES['gufo'][1]} GB, "
+                          f"gated: accept the terms on its Hugging Face page and run `hf auth login` first; "
+                          f"{free} GB free, resumable"):
                 return None
             plan["weights"], plan["weights_gb"] = "gufo", WEIGHTS_ENGINES["gufo"][1]
     # gufo and Strata share one stock GGUF (Unsloth's UD-Q4_K_XL, latest Dynamic): fetch it once, whichever comes first.
@@ -983,21 +1007,25 @@ def plan_start(engine, running, ask_start=True):
     q = saved_quant(engine)
     if engine in ("gufo", "strata") and not own and weights_pref() == "stock" and not stock_ready(q):
         free = shutil.disk_usage(os.path.expanduser("~")).free // 2**30
-        if not ask_yn(f"The stock weights (Unsloth {q}, {'shared by gufo and Strata' if q == DEFAULT_QUANT else 'picked for this hardware'}) are not on this box. Download them (~{quant_gb(q)} GB, {free} GB free, resumable)?"):
+        if not ask_yn(f"Download the stock weights? Unsloth {q}, "
+                      f"{'shared by gufo and Strata' if q == DEFAULT_QUANT else 'picked for this hardware'}; "
+                      f"~{quant_gb(q)} GB, {free} GB free, resumable"):
             return None
         plan["stock"] = q
     if engine == "gufo" and m == "qwen38-27b" and not g27_ready():
         free = shutil.disk_usage(os.path.expanduser("~")).free // 2**30
-        if not ask_yn(f"Qwen3.8 27B (UD-Q4_K_XL, DFlash2 draft, vision projector) is not on this box. Download it (~{catalog()[m]['download_gb']} GB, {free} GB free, resumable)?"):
+        if not ask_yn(f"Download Qwen3.8 27B? UD-Q4_K_XL, DFlash2 draft, vision projector; "
+                      f"~{catalog()[m]['download_gb']} GB, {free} GB free, resumable"):
             return None
         plan["g27"] = True
     gb = weights_download_gb(engine) if engine in WEIGHTS_ENGINES and not own and weights_pref() != "stock" else 0
     if gb:
         free = shutil.disk_usage(os.path.expanduser("~")).free // 2**30
-        if not ask_yn(f"The {weights_pref()} {engine} weights (or their MTP head) are not on this box. Download them (~{gb} GB, {free} GB free, resumable)?"):
+        if not ask_yn(f"Download the {weights_pref()} {engine} weights? not on this box yet (or their MTP head); "
+                      f"~{gb} GB, {free} GB free, resumable"):
             return None
         plan["weights"], plan["weights_gb"] = engine, gb
-    if ask_start and not ask_yn(f"Start {engine}? (runs {c['script']} in the background, log {engine_log(engine)})", True):
+    if ask_start and not ask_yn(f"Start {engine}? runs {c['script']} in the background, log {engine_log(engine)}", True):
         return None
     return plan
 
@@ -1094,7 +1122,7 @@ def pick_engine(d, yes, want=None, on_pick=None):
     weights_changed = ask_weights(eng) if engine_model(eng) == DEFAULT_MODEL else False
     # the server keeps what it loaded at start: a new default needs a restart (an upgrade restarts it anyway)
     restart = (weights_changed or engine_model(eng) != before) and eng in running and not upgrading and ask_yn(
-        f"{eng} is running different weights than your new default. Restart it?", True)
+        f"Restart {eng}? it is running different weights than your new default", True)
     if eng in running and not restart:
         return eng, None
     if upgrading:  # every upgrader starts the engine itself: "Start?" would be a question with only one answer
@@ -1144,11 +1172,12 @@ def ask_yn(question, default=False):
         return default
     if shutil.which("gum"):
         # gum choose, not gum confirm: confirm exits 1 for both "No" and Esc, so Esc could not cancel
-        r = subprocess.run(["gum", "choose", "--header", question, "--selected", "Yes" if default else "No", "Yes", "No"],
+        print(question_text(question))  # our headline and detail: gum cuts a --header off, and would put it under them
+        r = subprocess.run(["gum", "choose", "--header", "", "--selected", "Yes" if default else "No", "Yes", "No"],
                            stdout=subprocess.PIPE, text=True)
         out = r.stdout.strip()
         if out in ("Yes", "No"):
-            print(f"{paint('1', question)} {out.lower()}")
+            print(out.lower())
             return out == "Yes"
         if r.returncode in (1, 130):
             cancel()
@@ -1163,7 +1192,6 @@ def ask_yn(question, default=False):
             a = default if k in ("\r", "\n") else k == "y"
             print("yes" if a else "no")
             return a
-        print("\n" + paint("2", "  y or n, Enter for the default, Esc to cancel") + "\n" + prompt, end="", flush=True)
         print("\n" + paint("2", "  y or n, Enter for the default, Esc to cancel") + "\n" + prompt, end="", flush=True)
 
 
@@ -1215,8 +1243,8 @@ def ask_agent(reconfigure):
     f = os.path.join(AGENT, "harness-agent")
     if (os.path.exists(f) and not reconfigure) or not sys.stdin.isatty():
         return
-    on = ask_yn("Wire pi as your coding agent? (No = engine + sidecar only; point opencode or another "
-                "OpenAI-compatible agent at the endpoint)", True)
+    on = ask_yn("Wire pi as your coding agent? No = engine + sidecar only; point opencode or another "
+                "OpenAI-compatible agent at the endpoint", True)
     os.makedirs(AGENT, exist_ok=True)
     open(f, "w").write("pi\n" if on else "none\n")
 
@@ -1274,7 +1302,7 @@ def harness_update_offer():
             return
         print(f"harness is {n} commit(s) behind origin:")
         print(git("log", "--oneline", "-8", "HEAD..@{u}")[1])
-        if not ask_yn("Update now? (git pull --ff-only, then setup restarts)"):
+        if not ask_yn("Update now? git pull --ff-only, then setup restarts"):
             return
         if git("pull", "--ff-only", "--quiet", timeout=60)[0]:
             return print("! pull failed (diverged from origin?): run git pull yourself")
@@ -1359,7 +1387,7 @@ def update_offer(eng):
     upgrade (engines with an upgrader; run later, after all questions); others get a notice with the command."""
     pref = update_pref()
     if not pref and sys.stdin.isatty():
-        pref = "1" if ask_yn("Check for engine updates when you run setup/start? (one short network call; never installs without asking)") else "0"
+        pref = "1" if ask_yn("Check for engine updates on setup/start? one short network call; never installs without asking") else "0"
         os.makedirs(AGENT, exist_ok=True)
         open(UPDATE_PREF, "w").write(pref + "\n")
     if pref != "1" or not sys.stdin.isatty():
@@ -1367,7 +1395,7 @@ def update_offer(eng):
     msg = engine_update(eng)
     if msg:
         notice(msg)
-        return bool(upgrader(eng)) and ask_yn(f"Upgrade {eng}? (restarts the server, rolls back on failure)")
+        return bool(upgrader(eng)) and ask_yn(f"Upgrade {eng} now? restarts the server, rolls back on failure")
     return False
 
 
@@ -1439,7 +1467,7 @@ def cmd_up(_):
         msg = engine_update(eng)
         if msg:
             notice(msg)
-            if upgrader(eng) and ask_yn(f"Upgrade {eng} now? (restarts the server, rolls back on failure)"):
+            if upgrader(eng) and ask_yn(f"Upgrade {eng} now? restarts the server, rolls back on failure"):
                 if subprocess.run(["bash", upgrader(eng)]).returncode:
                     print("! upgrade failed; continuing on the pinned version", file=sys.stderr)
 
@@ -1751,7 +1779,7 @@ def cmd_setup(a):
         ask_sidecar()
     if not sidecar_pref() and not sidecar_default():  # not asked (--yes, no terminal) on a small card: do not reserve 8 GiB of it unasked
         set_sidecar(False)
-    voice = not a.yes and ask_once("voice", "Set up voice (local STT/TTS via Lemonade)?", a.reconfigure)
+    voice = not a.yes and ask_once("voice", "Set up voice? local STT/TTS via Lemonade", a.reconfigure)
     if not a.yes and sys.stdin.isatty():
         steps = [("skip pi wiring (engine + sidecar only)" if no_pi() else f"install/update pi extensions, providers, skills{'' if verbose else f' (details: {SETUP_LOG})'}"),
                  choices_line(eng)] + (
