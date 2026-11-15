@@ -1219,23 +1219,22 @@ LANGS = {".py": "python", ".ts": "typescript", ".tsx": "typescript", ".js": "typ
 
 
 def ask_yn(question, default=False):
-    """Every yes/no in the wizard: gum confirm when installed (same look as choose()), else a plain prompt."""
+    """Every yes/no in the wizard: gum choose Yes/No when installed (same look as choose()), else a plain prompt."""
     if not sys.stdin.isatty():
         no_terminal(question, "yes" if default else "no")
         return default
     if shutil.which("gum"):
         # gum choose, not gum confirm: confirm exits 1 for both "No" and Esc, so Esc could not cancel
         print(question_text(question))  # our headline and detail: gum cuts a --header off, and would put it under them
+        # stdout only: gum draws its menu on stderr, so capturing stderr leaves a blank prompt
         r = subprocess.run(["gum", "choose", "--header", "", "--selected", "Yes" if default else "No", "Yes", "No"],
-                           capture_output=True, text=True)
+                           stdout=subprocess.PIPE, text=True)
         out = r.stdout.strip()
         if out in ("Yes", "No"):
             print(out.lower())
             return out == "Yes"
         if r.returncode in (1, 130):  # Esc / Ctrl-C both cancel here: a yes/no is not a menu, there is no level above
             cancel()
-        if r.stderr:
-            print(r.stderr, end="", file=sys.stderr)
     print(question_text(question))
     prompt = ("[Y/n]" if default else "[y/N]") + " " + paint("2", f"(Enter = {'yes' if default else 'no'}, Esc cancels)") + " "
     print(prompt, end="", flush=True)

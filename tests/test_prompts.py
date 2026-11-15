@@ -1,7 +1,7 @@
 """python3 tests/test_prompts.py - the wizard's and the shell's questions: a typo in a long menu asks again (it used to pick
 option 1), Esc closes the settings menu, a long question wraps inside a 40-column terminal, Ctrl-C/Ctrl-D/Esc cancel the
 shell prompt, and with no terminal the default is taken and said."""
-import builtins, contextlib, fcntl, io, os, pty, re, select, struct, subprocess, sys, termios, time
+import builtins, contextlib, fcntl, io, os, pty, re, select, struct, subprocess, sys, termios, time, types
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, os.path.join(ROOT, "setup"))
@@ -102,6 +102,16 @@ for code, expect in ((1, h.BACK), (130, ("exit", 130))):
     finally:
         h.subprocess.run = real_run
     assert got == expect, (code, got)
+# yes/no goes through gum too
+real_run = h.subprocess.run
+try:
+    with fake(Tty()), contextlib.redirect_stdout(io.StringIO()):
+        h.shutil.which = lambda c, *a, **k: "/usr/bin/gum"
+        h.subprocess.run = lambda *a, **k: gum_kwargs.append(k) or types.SimpleNamespace(returncode=0, stdout="Yes\n")
+        assert h.ask_yn("Download it?") is True
+finally:
+    h.subprocess.run = real_run
+assert len(gum_kwargs) == 3, gum_kwargs
 # gum draws its menu on stderr: capturing it left a blank menu (673095f)
 assert all("stderr" not in k and not k.get("capture_output") for k in gum_kwargs), gum_kwargs
 print("ok: gum Esc (1) goes back, gum Ctrl-C (130) quits, gum's menu reaches the terminal")
