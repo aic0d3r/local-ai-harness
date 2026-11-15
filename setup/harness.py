@@ -912,6 +912,8 @@ def weights_file(engine):
 
 def weights_download_gb(engine):
     """GB scripts/download-abliterated.sh still has to fetch: 0 when complete; gufo also needs the stock MTP head."""
+    if engine == "osmos":  # libosmos's installer (run by start-osmos.sh) reuses its own cache or fetches the 0.6 GB patch itself
+        return 0
     f = weights_file(engine)
     if not os.path.isfile(f):
         return WEIGHTS_ENGINES[engine][1]
@@ -1063,10 +1065,12 @@ def plan_start(engine, running, ask_start=True):
     gb = weights_download_gb(engine) if engine in WEIGHTS_ENGINES and not own and weights_pref() != "stock" else 0
     if gb:
         free = shutil.disk_usage(os.path.expanduser("~")).free // 2**30
-        if not ask_yn(f"Download the {weights_pref()} {engine} weights? not on this box yet (or their MTP head); "
+        if not ask_yn(f"Download the {weights_pref()} {engine} weights? not on this box yet{' (or their MTP head)' * (engine == 'gufo')}; "
                       f"~{gb} GB, {free} GB free, resumable"):
             return None
         plan["weights"], plan["weights_gb"] = engine, gb
+    if engine == "osmos" and weights_pref() == "abliterated" and weights_file(engine) == "stock":
+        print("  osmos switches to the abliterated patch on start: libosmos reuses it if on disk, else fetches it (0.6 GB)")
     if ask_start and not ask_yn(f"Start {engine}? runs {c['script']} in the background, log {engine_log(engine)}", True):
         return None
     return plan

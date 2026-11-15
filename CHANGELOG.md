@@ -35,6 +35,7 @@
 - `scripts/uninstall.sh` knows the multi-engine setup and removes what the wizard wrote.
 
 ### Fixed
+- Abliterated osmos asked to download ~1 GB even with huihui-ai's patch on disk (it checked whether the overlay was on, not the file), and Yes ran a script that rejects osmos, so the start failed either way. libosmos's installer, run by `start-osmos.sh`, reuses the patch or fetches it (0.6 GB); the wizard now just says so.
 - `gum` menus and yes/no prompts showed the question but no options (keys still picked blind): gum draws on stderr, which was being captured.
 - A long question was cut off mid-word by `gum`, which truncates a header at the window edge instead of wrapping it; a menu whose labels do not fit the window now uses the wrapped numbered list.
 - In a menu of more than 9 options (e.g. `./harness endpoint` on a server that lists 10+ models) a typo silently picked option 1; it now asks again, and Esc cancels.

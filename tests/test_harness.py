@@ -286,6 +286,8 @@ open(f"{root}/mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf", "w").close()
 assert h.weights_download_gb("gufo") == 0
 h.weights_file = lambda e: f"{root}/none.gguf"
 assert h.weights_download_gb("gufo") == 112
+# osmos: libosmos's installer reuses or fetches its own patch; the harness used to ask and then run a script that rejects osmos
+assert h.weights_download_gb("osmos") == 0
 h.weights_file = real_wf
 # strata missing: plan_start asks to install it, prepare_start runs install-strata.sh before the start
 saved = {n: getattr(h, n) for n in ("strata_installed", "ask_yn", "heap_holder")}
