@@ -149,8 +149,8 @@ are what `osmos-evo` made redundant, and removing them frees that much (the pack
 `osmos_install.py osmos-evo-a` can rebuild it). The id osmos-api serves is `osmos-osmos-evo`; `osmos-osmos-evo-a`
 still answers as an alias.
 
-**Measuring.** `./harness tune` is a quick probe (one cold prefill, one short code answer, single sample); its numbers are not comparable
-with the battery or other projects'. `./harness bench` is the fixed protocol (`bench-v1`: warm-up, 3 runs, median and spread; cold prefill
+**Measuring.** `./harness tune` is the quick subset of `bench` (same prompts and code path): 3 short-code decodes and one 8K cold prefill,
+medians, `protocol: bench-v1`. It is still short-code decode at near-zero context, so compare it only with `bench` cells, not with the battery or other projects'. `./harness bench` is the fixed protocol (`bench-v1`: warm-up, 3 runs, median and spread; cold prefill
 at 2K/8K/32K, short code and prose decode, code decode at each depth; saved to `harness-bench.json`). Compare only results of the same
 protocol id, and note the power profile (`bench` records the ACPI profile, not watts). Raw `llama-bench` `tg128` or `gufo bench` rows run
 without speculative decoding and read lower than any of these.

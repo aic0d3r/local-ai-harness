@@ -32,7 +32,10 @@ assert h.model_profile("Qwen3-8B")["reasoning"] and h.model_profile("unknown-x")
 assert h.server_ctx(srv.server_port) == 32768
 d = h.detect()
 assert [e["engine"] for e in d["engines"]].count("llamacpp") == 1, d["engines"]
-assert h.tune("llamacpp", "Qwen3-8B")["prefill_tps"] > 0
+t = h.tune("llamacpp", "Qwen3-8B")
+assert t["prefill_tps"] > 0 and t["decode_tps"] > 0 and t["protocol"] == h.BENCH_ID and t["samples"] == 3, t
+q = h.bench("llamacpp", "Qwen3-8B", runs=2, quick=True)  # tune is this quick subset: one prefill cell, decode repeats
+assert set(q["median"]) == {"decode_code", "prefill_8192"} and q["quick"], q
 # bench: fixed protocol, medians per cell, depths over half the window skipped (the mock reports n_ctx 32768)
 b = h.bench("llamacpp", "Qwen3-8B", runs=2, depths=(2048, 65536))
 assert b["protocol"] == "bench-v1" and set(b["median"]) == {"decode_code", "decode_prose", "prefill_2048", "decode_code_at_2048"}, b

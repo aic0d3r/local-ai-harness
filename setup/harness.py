@@ -556,21 +556,21 @@ def stream_once(port, model_id, prompt, max_tokens, timeout=None):
 
 
 def tune(engine, model_id):
-    """A quick probe: one ~3000-word cold prefill and one short greedy code answer at near-zero context, single sample. Not comparable
-    with battery or other projects' numbers; ./harness bench (bench()) is the fixed protocol for that."""
-    port = PROFILES["engines"][engine]["port"]
+    """The quick subset of bench() (same prompts, same code path): 3 short code decodes and one 8K cold prefill, medians. Its
+    decode_tps is short-code decode at near-zero context; its prefill_tps is at the 8K depth. Compare it only with bench's cells."""
     ctx = engine_ctx(engine)
-    words = min(3000, max(200, (ctx or 8192) // 8))  # ~words*1.3 tokens; never more than 1/6 of the window
-    filler = " ".join(f"item{i}" for i in range(words))
-    res = {"engine": engine, "model": model_id, "ctx": ctx, "when": time.strftime("%Y-%m-%d")}
+    res = {"engine": engine, "model": model_id, "ctx": ctx, "when": time.strftime("%Y-%m-%d"), "protocol": BENCH_ID}
     try:
-        ptok, ttft, _ = stream_once(port, model_id, f"[{uuid.uuid4()}] Count the items:\n{filler}", 1)
-        res["prefill_tps"] = round(ptok / ttft) if ptok and ttft else 0
-        _, _, tps = stream_once(port, model_id, "Write a Python function that reverses a linked list.", 128)
-        res["decode_tps"] = round(tps, 1)
+        b = bench(engine, model_id, runs=3, quick=True)
     except Exception as ex:
         res["error"] = str(ex)[:120]
         return res  # keep the shipped profile; a failed probe must never degrade defaults
+    cells = b["median"]
+    res["prefill_tps"] = round(next((v for k, v in cells.items() if k.startswith("prefill_")), 0))
+    res["decode_tps"] = cells["decode_code"]
+    res["samples"], res["spread"] = b["runs"], b["spread"]
+    if cells["decode_code"] and b["spread"]["decode_code"] > 0.15 * cells["decode_code"]:
+        print(f"  noisy run (decode spread {b['spread']['decode_code']} t/s on a median of {cells['decode_code']}): stop other apps and re-run ./harness tune")
     # derive settings from the window (not from the speed): answer room and compaction reserve
     if ctx:
         res["maxTokens"] = int(min(model_profile(model_id)["maxTokens"], max(1024, ctx // 8)))
@@ -604,27 +604,33 @@ def power_profile():
         return ""
 
 
-def bench(engine, model_id, runs=3, depths=(2048, 8192, 32768)):
-    """-> result dict. Warm-up, then per run: a short code and a short prose answer (256 tokens, greedy) at near-zero context, and for each
-    depth a cold prefill (token counts from the server's usage) and a code answer after it (the prefix is cached, so that is decode at
-    depth). Medians over runs. Filler tokens are approximate: the prefill rate divides by the server's real count."""
+def bench(engine, model_id, runs=3, depths=(2048, 8192, 32768), quick=False):
+    """-> result dict. Warm-up (two 128-token code answers), then per run: a short code answer (256 tokens, greedy) at near-zero
+    context, and unless quick a short prose answer, and for each depth a cold prefill (token counts from the server's usage) and a
+    code answer after it (the prefix is cached, so that is decode at depth). quick (tune): one depth (8192, or 2048 on a window under
+    16k) and one cold prefill, decode repeated. Medians over runs. Filler tokens are approximate: prefill divides by the server's count."""
     import statistics
     port, ctx = PROFILES["engines"][engine]["port"], engine_ctx(engine)
-    depths = [d for d in depths if not ctx or d * 2 <= ctx]
-    s = lambda p, n: stream_once(port, model_id, p, n, 900)  # 900 s: a 32k cold prompt on a slow engine
-    s("Say hello.", 16)
+    depths = [d for d in ((8192, 2048) if quick else depths) if not ctx or d * 2 <= ctx][:1 if quick else None]
+    s = lambda p, n: stream_once(port, model_id, p, n, 300 if quick else 900)  # long cold prompts on a slow engine
+    for _ in range(2):
+        s(f"[{uuid.uuid4().hex[:8]}] {BENCH_CODE}", 128)
     cells = {}
     add = lambda k, v: cells.setdefault(k, []).append(v)
-    for _ in range(runs):
+    for i in range(runs):
         n = uuid.uuid4().hex[:8]
         add("decode_code", s(f"[{n}] {BENCH_CODE}", 256)[2])
-        add("decode_prose", s(f"[{n}] {BENCH_PROSE}", 256)[2])
+        if not quick:
+            add("decode_prose", s(f"[{n}] {BENCH_PROSE}", 256)[2])
         for d in depths:
+            if quick and i:
+                break  # quick: one cold prefill, the rest are decode repeats
             base = f"[{n}] Read this and answer the question after it.\n{bench_text(d, f'{n}{d}')}"
             ptok, ttft, _ = s(base, 1)
             add(f"prefill_{d}", ptok / ttft if ptok and ttft else 0)
-            add(f"decode_code_at_{d}", s(f"{base}\n\n{BENCH_CODE}", 256)[2])
-    return {"protocol": BENCH_ID, "engine": engine, "model": model_id, "ctx": ctx, "runs": runs, "power": power_profile(),
+            if not quick:
+                add(f"decode_code_at_{d}", s(f"{base}\n\n{BENCH_CODE}", 256)[2])
+    return {"protocol": BENCH_ID, "engine": engine, "model": model_id, "ctx": ctx, "runs": runs, "quick": quick, "power": power_profile(),
             "when": time.strftime("%Y-%m-%d %H:%M"), "median": {k: round(statistics.median(v), 1) for k, v in cells.items()},
             "spread": {k: round(max(v) - min(v), 1) for k, v in cells.items()}}
 
@@ -687,7 +693,10 @@ def cmd_detect(_):
 def last_speed(engine):
     t = [v for v in jget(os.path.join(AGENT, "harness-tuned.json"), {}).values() if v.get("engine") == engine and v.get("decode_tps")]
     t.sort(key=lambda v: v.get("when", ""))
-    return f"{t[-1]['prefill_tps']}/{t[-1]['decode_tps']} t/s pf/dec(code)" if t else "not measured"
+    if not t:
+        return "not measured"
+    old = "" if t[-1].get("protocol") == BENCH_ID else ", old probe: re-run ./harness tune"
+    return f"{t[-1]['prefill_tps']}/{t[-1]['decode_tps']} t/s pf/dec(code){old}"
 
 
 BIG = ("halogen", "gufo", "strata", "osmos")  # big engines: one GPU memory heap (VRAM on NVIDIA), and gufo/strata also share :8080
