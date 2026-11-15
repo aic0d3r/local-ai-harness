@@ -150,7 +150,7 @@ are what `osmos-evo` made redundant, and removing them frees that much (the pack
 still answers as an alias.
 
 Measured here (osmos-evo, GPU only, stock, drafted, `quiet` 70 W): **~236 t/s prefill at 2K and 426 t/s at 8K,
-36.5 t/s decode**, 1M context, first request after start ~30 s while the expert cache fills. The pack costs about 5%
+36.5 t/s decode**, 1M context (`./harness tune` at 70 W sustained: 494 t/s prefill, 42.4 t/s decode; the tuner's prompts differ from the A/B above), first request after start ~30 s while the expert cache fills. The pack costs about 5%
 of decode against evo-A, as its release notes say. It appears in pi and Paseo as **osmos deepseek** (a model
 profile can name itself: `models.osmos-deepseek`; the id osmos-api serves is `osmos-osmos-evo`). Two things the
 harness handles for it:
