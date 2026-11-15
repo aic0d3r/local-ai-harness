@@ -34,6 +34,7 @@
 - `scripts/uninstall.sh` knows the multi-engine setup and removes what the wizard wrote.
 
 ### Fixed
+- `gum` menus showed the question but no options (keys still picked blind): gum draws on stderr, which was being captured.
 - A long question was cut off mid-word by `gum`, which truncates a header at the window edge instead of wrapping it; a menu whose labels do not fit the window now uses the wrapped numbered list.
 - In a menu of more than 9 options (e.g. `./harness endpoint` on a server that lists 10+ models) a typo silently picked option 1; it now asks again, and Esc cancels.
 - Ctrl-D at a wizard prompt was ignored; it now cancels like Esc. Ctrl-D at the Ling-3.0-tiny download prompt (default Yes) no longer starts the 4.5 GB download.

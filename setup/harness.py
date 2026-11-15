@@ -412,16 +412,15 @@ def choose(question, options, yes, esc=None):
         return options[0]
     if shutil.which("gum") and fits(options):
         print(question_text(question))  # also the fallback: labels too wide for gum wrap here instead of being cut off
-        r = subprocess.run(["gum", "choose", "--header", "", *options], capture_output=True, text=True)
+        # stdout only: gum draws its menu on stderr, so capturing stderr leaves the user a blank screen
+        r = subprocess.run(["gum", "choose", "--header", "", *options], stdout=subprocess.PIPE, text=True)
         out = r.stdout.strip()
         if out:  # gum trims the line it prints: map it back to the exact option (labels can start with a space)
             return next((o for o in options if o.strip() == out), out)
         if r.returncode == 130:  # Ctrl-C: quit everything, even in a submenu (gum exits 1 for a bare Esc)
             cancel()
-        if r.returncode == 1:  # Esc: back one level. gum also prints "nothing selected" here: that is control flow, not an error
+        if r.returncode == 1:  # Esc: back one level
             return escape(esc)
-        if r.stderr:
-            print(r.stderr, end="", file=sys.stderr)  # a real gum failure (no tty, bad flag): say why
     print(question_text(question))
     for i, o in enumerate(options, 1):
         print("\n".join(textwrap.wrap(f"{i}) {o}", term_width(), initial_indent="  ", subsequent_indent="     ")))

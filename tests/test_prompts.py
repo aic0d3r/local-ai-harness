@@ -87,13 +87,14 @@ class FakeGum:
         self.returncode, self.stdout = code, ""
 
 
+gum_kwargs = []
 for code, expect in ((1, h.BACK), (130, ("exit", 130))):
     buf = io.StringIO()
     real_run = h.subprocess.run
     try:
         with fake(Tty()), contextlib.redirect_stdout(buf):
             h.shutil.which = lambda c, *a, **k: "/usr/bin/gum"  # after fake(): it hides gum on entry
-            h.subprocess.run = lambda *a, **k: FakeGum(code)
+            h.subprocess.run = lambda *a, **k: gum_kwargs.append(k) or FakeGum(code)
             try:
                 got = h.choose("Which?", ["a", "b"], False, esc=h.BACK)
             except SystemExit as e:
@@ -101,7 +102,9 @@ for code, expect in ((1, h.BACK), (130, ("exit", 130))):
     finally:
         h.subprocess.run = real_run
     assert got == expect, (code, got)
-print("ok: gum Esc (1) goes back, gum Ctrl-C (130) quits")
+# gum draws its menu on stderr: capturing it left a blank menu (673095f)
+assert all("stderr" not in k and not k.get("capture_output") for k in gum_kwargs), gum_kwargs
+print("ok: gum Esc (1) goes back, gum Ctrl-C (130) quits, gum's menu reaches the terminal")
 
 # the config submenus return BACK instead of exiting, and write nothing when they do
 buf = io.StringIO()
