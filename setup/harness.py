@@ -2061,12 +2061,13 @@ def cmd_config(a):
         if eng and eng != CUSTOM:  # a row stays short (80 columns); the numbers go under the question
             notes.append(f"{eng} speed (./harness tune): {speed_text(eng, p.get('model')) or 'not measured yet'}")
         if own:
-            notes.append(f"{eng} runs {engine_title(eng, p.get('model')).split(' · ', 1)[1]} only; the model row is for gufo and Strata")
+            notes.append(f"{eng} runs {engine_title(eng, p.get('model')).split(' · ', 1)[1]} only; pick gufo or Strata under engine to choose a model")
         if eng == "osmos" and (weights_file("osmos") != "stock") != (weights_pref() == "abliterated"):  # osmos.json = its last start
             notes.append(f"! osmos was last started on the other weights; {weights_pref()} applies on its next start")
         items = {
             f"engine        {engine_title(eng, p['model']) if eng else '-'}": "engine",
-            f"model         {catalog().get(model_pref(), {}).get('label', model_pref()).split(' (')[0].split(',')[0]}  (gufo, Strata)": "model",
+            **({f"model         {catalog().get(model_pref(), {}).get('label', model_pref()).split(' (')[0].split(',')[0]}  (gufo, Strata)": "model"}
+               if eng in ("gufo", "strata") else {}),  # only those two load the model answer
             f"weights       {weights_pref()}  (every engine, next start)": "weights",
             f"agent         {'none (engine only)' if no_pi() else 'pi'}  (extensions, providers, MCP)": "agent",
             f"sidecar       {'on' if sc else 'off'}  (ling-tiny, ~8 GiB GPU memory)": "sidecar",
@@ -2085,10 +2086,6 @@ def cmd_config(a):
             install_extensions(eng, verbose=False)
             finish(eng, mod, bool(jget(os.path.join(AGENT, "harness-tuned.json"), {}).get(hw_key(eng, mod))))
         elif k == "model":
-            eng = p.get("engine", "halogen")
-            if eng not in ("gufo", "strata"):
-                print(f"  {eng} runs {engine_title(eng, p.get('model')).split(' · ', 1)[1]} only; the model answer is for gufo and Strata (pick one under engine first)")
-                continue
             changed = ask_model(eng, back=True)
             if changed is BACK:
                 continue
