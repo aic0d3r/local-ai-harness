@@ -149,6 +149,12 @@ are what `osmos-evo` made redundant, and removing them frees that much (the pack
 `osmos_install.py osmos-evo-a` can rebuild it). The id osmos-api serves is `osmos-osmos-evo`; `osmos-osmos-evo-a`
 still answers as an alias.
 
+**Measuring.** `./harness tune` is a quick probe (one cold prefill, one short code answer, single sample); its numbers are not comparable
+with the battery or other projects'. `./harness bench` is the fixed protocol (`bench-v1`: warm-up, 3 runs, median and spread; cold prefill
+at 2K/8K/32K, short code and prose decode, code decode at each depth; saved to `harness-bench.json`). Compare only results of the same
+protocol id, and note the power profile (`bench` records the ACPI profile, not watts). Raw `llama-bench` `tg128` or `gufo bench` rows run
+without speculative decoding and read lower than any of these.
+
 Measured here (osmos-evo, GPU only, stock, drafted, `quiet` 70 W): **~236 t/s prefill at 2K and 426 t/s at 8K,
 36.5 t/s decode**, 1M context (`./harness tune` at 70 W sustained: 494 t/s prefill, 42.4 t/s decode; the tuner's prompts differ from the A/B above), first request after start ~30 s while the expert cache fills. The pack costs about 5%
 of decode against evo-A, as its release notes say. It appears in pi and Paseo as **osmos deepseek** (a model

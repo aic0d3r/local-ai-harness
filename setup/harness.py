@@ -531,14 +531,14 @@ def hw_key(engine, model_id):
     return hashlib.sha1(f"{engine}|{model_id}|{h['gpu']}|{h['ram_gb']}{w}".encode()).hexdigest()[:12]
 
 
-def stream_once(port, model_id, prompt, max_tokens):
+def stream_once(port, model_id, prompt, max_tokens, timeout=None):
     """-> (prompt_tokens, ttft_s, decode_tps) for one streamed chat completion. Decode counts tokens, not chunks: an
     engine that drafts (osmos, halogen/gufo with a drafter) verifies several tokens per chunk, and counting chunks
     reported a third of the real rate."""
     t0, first, n, ptok, ctok = time.time(), None, 0, 0, 0
     body = {"model": model_id, "stream": True, "max_tokens": max_tokens, "temperature": 0,
             "stream_options": {"include_usage": True}, "messages": [{"role": "user", "content": prompt}]}
-    for line in http(f"http://127.0.0.1:{port}/v1/chat/completions", body, timeout=TUNE_BUDGET_S):
+    for line in http(f"http://127.0.0.1:{port}/v1/chat/completions", body, timeout=timeout or TUNE_BUDGET_S):
         line = line.decode().strip()
         if not line.startswith("data:") or line.endswith("[DONE]"):
             continue
@@ -556,6 +556,8 @@ def stream_once(port, model_id, prompt, max_tokens):
 
 
 def tune(engine, model_id):
+    """A quick probe: one ~3000-word cold prefill and one short greedy code answer at near-zero context, single sample. Not comparable
+    with battery or other projects' numbers; ./harness bench (bench()) is the fixed protocol for that."""
     port = PROFILES["engines"][engine]["port"]
     ctx = engine_ctx(engine)
     words = min(3000, max(200, (ctx or 8192) // 8))  # ~words*1.3 tokens; never more than 1/6 of the window
@@ -569,7 +571,7 @@ def tune(engine, model_id):
     except Exception as ex:
         res["error"] = str(ex)[:120]
         return res  # keep the shipped profile; a failed probe must never degrade defaults
-    # derive settings: answer room scales with decode speed, compaction reserve with the real window
+    # derive settings from the window (not from the speed): answer room and compaction reserve
     if ctx:
         res["maxTokens"] = int(min(model_profile(model_id)["maxTokens"], max(1024, ctx // 8)))
         res["reserveTokens"] = reserve_for(ctx)
@@ -578,6 +580,71 @@ def tune(engine, model_id):
     c[hw_key(engine, model_id)] = res
     jput(cache, c)
     return res
+
+
+# ---------- bench: fixed protocol, comparable across engines ----------
+BENCH_ID = "bench-v1"  # bump when the prompts or the method change: results of different ids are not comparable
+BENCH_WORDS = ("river lamp stone market garden window paper engine silver coast bridge harvest ladder copper forest signal "
+               "morning thread orchard tunnel mirror harbor canvas furnace meadow compass lantern quarry violin pepper glacier").split()
+BENCH_CODE = "Write a Python function that reverses a singly linked list, with a short docstring."
+BENCH_PROSE = "Explain in plain words how a B-tree stays balanced as keys are inserted."
+
+
+def bench_text(tokens, seed):
+    """~tokens tokens of non-repeating filler (seeded: the same text on every engine, never served from a cache by accident)."""
+    import random
+    r = random.Random(seed)
+    return " ".join(r.choice(BENCH_WORDS) + str(r.randrange(100)) for _ in range(int(tokens / 1.8)))
+
+
+def power_profile():
+    try:
+        return open("/sys/firmware/acpi/platform_profile").read().strip()
+    except OSError:
+        return ""
+
+
+def bench(engine, model_id, runs=3, depths=(2048, 8192, 32768)):
+    """-> result dict. Warm-up, then per run: a short code and a short prose answer (256 tokens, greedy) at near-zero context, and for each
+    depth a cold prefill (token counts from the server's usage) and a code answer after it (the prefix is cached, so that is decode at
+    depth). Medians over runs. Filler tokens are approximate: the prefill rate divides by the server's real count."""
+    import statistics
+    port, ctx = PROFILES["engines"][engine]["port"], engine_ctx(engine)
+    depths = [d for d in depths if not ctx or d * 2 <= ctx]
+    s = lambda p, n: stream_once(port, model_id, p, n, 900)  # 900 s: a 32k cold prompt on a slow engine
+    s("Say hello.", 16)
+    cells = {}
+    add = lambda k, v: cells.setdefault(k, []).append(v)
+    for _ in range(runs):
+        n = uuid.uuid4().hex[:8]
+        add("decode_code", s(f"[{n}] {BENCH_CODE}", 256)[2])
+        add("decode_prose", s(f"[{n}] {BENCH_PROSE}", 256)[2])
+        for d in depths:
+            base = f"[{n}] Read this and answer the question after it.\n{bench_text(d, f'{n}{d}')}"
+            ptok, ttft, _ = s(base, 1)
+            add(f"prefill_{d}", ptok / ttft if ptok and ttft else 0)
+            add(f"decode_code_at_{d}", s(f"{base}\n\n{BENCH_CODE}", 256)[2])
+    return {"protocol": BENCH_ID, "engine": engine, "model": model_id, "ctx": ctx, "runs": runs, "power": power_profile(),
+            "when": time.strftime("%Y-%m-%d %H:%M"), "median": {k: round(statistics.median(v), 1) for k, v in cells.items()},
+            "spread": {k: round(max(v) - min(v), 1) for k, v in cells.items()}}
+
+
+def cmd_bench(a):
+    p = active() or sys.exit("no active profile: run ./harness setup")
+    if p["engine"] == CUSTOM:
+        sys.exit("./harness bench measures the engines this harness starts")
+    if not served_models(PROFILES["engines"][p["engine"]]["port"], p["engine"]):
+        sys.exit(f"{p['engine']} is not answering: start it first (./start.sh)")
+    depths = tuple(int(x) for x in a.depths.split(","))
+    print(f"== {BENCH_ID}: {p['engine']}/{p['model']}, {a.runs} runs, depths {list(depths)} (minutes; nothing else should be running) ==")
+    r = bench(p["engine"], p["model"], a.runs, depths)
+    for k, v in r["median"].items():
+        print(f"  {k:22s} {v:8.1f} t/s   (spread {r['spread'][k]})")
+    f = os.path.join(AGENT, "harness-bench.json")
+    c = jget(f, {})
+    c[f"{p['engine']}|{p['model']}|{r['when']}"] = r
+    jput(f, c)
+    print(f"  saved {f}; power profile: {r['power'] or 'unknown'} (watts are not read: note them yourself)")
 
 
 # ---------- commands ----------
@@ -620,7 +687,7 @@ def cmd_detect(_):
 def last_speed(engine):
     t = [v for v in jget(os.path.join(AGENT, "harness-tuned.json"), {}).values() if v.get("engine") == engine and v.get("decode_tps")]
     t.sort(key=lambda v: v.get("when", ""))
-    return f"{t[-1]['prefill_tps']}/{t[-1]['decode_tps']} t/s pf/dec" if t else "not measured"
+    return f"{t[-1]['prefill_tps']}/{t[-1]['decode_tps']} t/s pf/dec(code)" if t else "not measured"
 
 
 BIG = ("halogen", "gufo", "strata", "osmos")  # big engines: one GPU memory heap (VRAM on NVIDIA), and gufo/strata also share :8080
@@ -1509,7 +1576,7 @@ def finish(eng, mod, no_tune, launch=False):
             sys.exit(1)
         return
     prov, mid, ctx = apply(eng, mod, tuned)
-    speed = f"{tuned['prefill_tps']} t/s prefill, {tuned['decode_tps']} t/s decode" if tuned.get("decode_tps") else "not probed (./harness tune)"
+    speed = f"{tuned['prefill_tps']} t/s prefill, {tuned['decode_tps']} t/s decode (short code)" if tuned.get("decode_tps") else "not probed (./harness tune)"
     if no_tune and tuned.get("decode_tps"):
         speed += f" (saved {tuned.get('when', '')}; re-measure: ./harness tune)"
     passed = verified(eng)
@@ -1692,7 +1759,7 @@ def report_text(doctor=True):
          f"NPU:      {'yes' if hw['npu'] else 'no'}    disk free: {cap['disk_free_gb']} GB",
          f"engine:   {eng or 'not set up'}{' ' + have if have else ''} ({where}); local engines answering: {', '.join(up) or 'none'}",
          f"model:    {p.get('model', '-')}    context: {ctx or 'unknown'}    weights: {weights_pref() if eng in WEIGHTS_ENGINES else '-'}",
-         f"speed:    {tuned.get('prefill_tps', '?')} t/s prefill, {tuned.get('decode_tps', '?')} t/s decode (./harness tune, {tuned.get('when', 'not measured')})",
+         f"speed:    {tuned.get('prefill_tps', '?')} t/s prefill, {tuned.get('decode_tps', '?')} t/s decode on short code (./harness tune, a quick probe; ./harness bench for comparable numbers, {tuned.get('when', 'not measured')})",
          f"pi:       {out('pi', '--version') or 'not found'}"]
     if doctor:
         passed, bad = run_doctor()
@@ -1781,7 +1848,7 @@ def main():
     import argparse
     ap = argparse.ArgumentParser(prog="harness")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for n, f in (("detect", cmd_detect), ("setup", cmd_setup), ("use", cmd_use), ("tune", cmd_tune), ("status", cmd_status), ("config", cmd_config), ("update-check", cmd_update_check), ("up", cmd_up), ("recommend", cmd_recommend), ("quant-info", cmd_quant_info), ("ctx-info", cmd_ctx_info), ("model-info", cmd_model_info), ("monitor", cmd_monitor), ("verify", cmd_verify), ("refresh", cmd_refresh), ("report", cmd_report), ("endpoint", cmd_endpoint)):
+    for n, f in (("detect", cmd_detect), ("setup", cmd_setup), ("use", cmd_use), ("tune", cmd_tune), ("bench", cmd_bench), ("status", cmd_status), ("config", cmd_config), ("update-check", cmd_update_check), ("up", cmd_up), ("recommend", cmd_recommend), ("quant-info", cmd_quant_info), ("ctx-info", cmd_ctx_info), ("model-info", cmd_model_info), ("monitor", cmd_monitor), ("verify", cmd_verify), ("refresh", cmd_refresh), ("report", cmd_report), ("endpoint", cmd_endpoint)):
         p = sub.add_parser(n)
         p.set_defaults(fn=f)
         if n in ("setup", "use"):
@@ -1791,6 +1858,9 @@ def main():
             p.add_argument("--verbose", action="store_true", help="show full setup.sh output (default on the first run only)")
         if n == "use":
             p.add_argument("target", help="engine[/model]")
+        if n == "bench":
+            p.add_argument("--runs", type=int, default=3, help="repeats; the median is reported (default 3)")
+            p.add_argument("--depths", default="2048,8192,32768", help="prompt depths in tokens (default 2048,8192,32768; those over half the window are skipped)")
         if n == "recommend":
             p.add_argument("--json", action="store_true")
         if n == "monitor":

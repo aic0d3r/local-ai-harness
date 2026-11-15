@@ -33,6 +33,11 @@ assert h.server_ctx(srv.server_port) == 32768
 d = h.detect()
 assert [e["engine"] for e in d["engines"]].count("llamacpp") == 1, d["engines"]
 assert h.tune("llamacpp", "Qwen3-8B")["prefill_tps"] > 0
+# bench: fixed protocol, medians per cell, depths over half the window skipped (the mock reports n_ctx 32768)
+b = h.bench("llamacpp", "Qwen3-8B", runs=2, depths=(2048, 65536))
+assert b["protocol"] == "bench-v1" and set(b["median"]) == {"decode_code", "decode_prose", "prefill_2048", "decode_code_at_2048"}, b
+assert b["median"]["prefill_2048"] > 0 and b["runs"] == 2
+assert h.bench_text(100, "x") == h.bench_text(100, "x") != h.bench_text(100, "y")  # same text on every engine, new text per seed
 prov, mid, ctx = h.apply("llamacpp", "Qwen3-8B", {"maxTokens": 4096})
 m = json.load(open(f"{AGENT}/models.json"))["providers"]["llamacpp"]["models"][0]
 assert (prov, mid, ctx) == ("llamacpp", "Qwen3-8B", 32768) and m["maxTokens"] == 4096 and "chatTemplateKwargs" in m["compat"]

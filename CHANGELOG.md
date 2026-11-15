@@ -6,6 +6,7 @@
 ## Unreleased
 
 ### Added
+- `./harness bench`: fixed-protocol speed benchmark (cold prefill at 2K/8K/32K, code and prose decode, decode at depth; median of 3, saved to `harness-bench.json`). `./harness tune` stays a quick probe and now says its decode figure is short code.
 - Setup on a Strix Halo asks which **model** you want first and picks its best engine (`routes` in `config/profiles.json`: Flash-Next halogen > gufo > Strata, Qwen3.8-27B gufo with llama.cpp as fallback, DeepSeek-V4.1-Flash osmos). "Pick an engine instead" keeps the old menu; other hardware is unchanged.
 - `osmos` engine (libosmos, `:8091`): DeepSeek-V4.1-Flash at 1M context; thinking `low`/`high`/`max`/`off`. `scripts/upgrade-osmos.sh` updates it with rollback. See [docs/ENGINES.md](docs/ENGINES.md).
 - Custom endpoint: `./setup.sh --endpoint URL [--name --key --model --ctx]` (= `./harness endpoint`) uses any OpenAI-compatible server as the main engine.
