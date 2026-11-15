@@ -3,7 +3,7 @@
 <!-- One block per section per release, in the order Added, Changed, Fixed. Add new entries to the
      existing block instead of opening a second one, so a release never has two "### Fixed" lists. -->
 
-## Unreleased
+## 2.2.0 - 2026-11-15
 
 ### Changed
 - Every shell question (`setup.sh`, the download and uninstall scripts) goes through `scripts/lib-prompt.sh`: the same `[Y/n]` wording and `(Esc + Enter cancels)`, Ctrl-C prints `cancelled`, and with no terminal it aborts rather than guessing.
