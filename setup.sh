@@ -130,8 +130,10 @@ host_checks(){
   else [ -n "$o9" ] && [ "$o9" -lt 200 ] \
     && warn "order-9 pages = $o9 (<200): full-ctx halogen (262k) will wedge; 65k/2-slot is fine. reboot before full-ctx." \
     || ok "order-9 pages: ${o9:-n/a}"; fi
-  # GPU+NPU together are only safe with the fabric clock held; the container holds it while it runs
-  if fclk_held; then ok "gpu fabric clock held (GPU+NPU concurrency safe)"; hint_fixed fclk
+  # GPU+NPU together are only safe with the fabric clock held; the container holds it while it runs.
+  # an install for a GPU-only engine (osmos/gufo/Strata, no voice) runs nothing on the NPU: no hint there
+  if [ "$NO_HALOGEN" = 1 ] && [ "$VOICE" = 0 ] && [ "$DOCTOR" = 0 ]; then :
+  elif fclk_held; then ok "gpu fabric clock held (GPU+NPU concurrency safe)"; hint_fixed fclk
   else hint fclk "gpu fabric clock NOT held - NPU beside GPU can hang or corrupt (halogen NPU docs). one-time install (sudo):" \
     "  sudo install -m 755 $REPO/config/systemd/halogen-fabric-clock /usr/local/sbin/ && sudo install -m 644 $REPO/config/systemd/halogen-fabric-clock.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now halogen-fabric-clock.service"; fi
   # list-timers exits 0 even with "0 timers listed"; is-enabled actually checks
@@ -342,11 +344,11 @@ echo "== 2c. global AGENTS.md =="
 python3 "$REPO/setup/adopt.py" agents
 fi
 
-echo "== 3. ling-tiny sidecar (:8090) =="
+# sidecar off and already down: nothing to do or say (./setup.sh --sidecar turns it on)
+[ "$SIDECAR_ON" = 0 ] && ! tiny_up || echo "== 3. ling-tiny sidecar (:8090) =="
 GGUF=""
 if [ "$SIDECAR_ON" = 0 ]; then
-  ok "sidecar off (opted out: the main model writes commits and summaries; ./setup.sh --sidecar turns it on)"
-  tiny_up && systemctl --user stop ling-tiny.service 2>/dev/null && ok "stopped the running sidecar (frees ~8 GiB GPU memory)"
+  tiny_up && systemctl --user stop ling-tiny.service 2>/dev/null && ok "sidecar off: stopped the running one (frees ~8 GiB GPU memory)"
 elif tiny_up; then
   ok "sidecar is up"
   [ -f "$SC_PREF" ] || warn "sidecar is on by default (~8 GiB GPU memory); opt out with ./setup.sh --no-sidecar"
@@ -485,9 +487,9 @@ SPEAKCFG
   ok "in pi: /talk records + transcribes into the composer (alt+t), /speak reads answers aloud"
 fi
 
-echo "== 4. halogen server (:8731) =="
+[ "$NO_HALOGEN" = 1 ] || echo "== 4. halogen server (:8731) =="
 if [ "$NO_HALOGEN" = 1 ]; then
-  ok "skipped (--no-halogen: pi-only install)"
+  :  # --no-halogen (another engine, or pi-only): no halogen step at all
 elif hal_up; then
   ok "halogen is up"
   cache=$(curl -sf --max-time 5 http://127.0.0.1:8731/health | python3 -c "import json,sys; h=json.load(sys.stdin); pc=h.get('prompt_cache'); v=(pc.get('enabled') if isinstance(pc,dict) else pc) if pc is not None else h.get('cache'); print('on' if v else 'off')" 2>/dev/null || echo unknown)

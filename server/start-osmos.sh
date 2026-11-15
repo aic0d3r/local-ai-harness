@@ -41,6 +41,47 @@ if [ "$want_overlay" = "$have_overlay" ]; then
   exec "$OSMOS_DIR/bin/osmos-api" --config "$CFG" --port "$PORT"
 fi
 
+# a switch with the patch already on disk: set or drop osmos.json's "overlay" (and link the patch where the installer
+# would) instead of the installer, whose derived-shard check hashes the whole pack (~147 GB, minutes) and ignores
+# --trust-size (libosmos 0.7.6 layout._derive). The patch itself is still checked against its pinned size and SHA-256.
+# shortcut: repeats layout.lay's overlay step; drop this once libosmos honors --trust-size for derived shards.
+if python3 - "$CFG" "$OSMOS_DIR/tools/install/packs.json" "$OSMOS_MODELS" "$PACK" "$W" <<'PY'
+import hashlib, json, os, sys
+cfg_path, manifest, models, pack, w = sys.argv[1:]
+cfg = json.load(open(cfg_path))
+if w == "abliterated":
+    m = json.load(open(manifest))
+    e = m["files"][m["packs"][pack]["overlay"]]
+    dst = os.path.join(os.path.dirname(cfg_path), os.path.basename(e["path"]))
+    # where the pack links it, else where the installer's fetcher keeps it (<models>/.hf/<org>--<repo>/<path>)
+    src = next((p for p in (dst, os.path.join(models, ".hf", e["repo"].replace("/", "--"), e["path"]))
+                if os.path.isfile(p) and os.path.getsize(p) == e["bytes"]), None)
+    if not src:
+        sys.exit(1)
+    h = hashlib.sha256()
+    with open(src, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 24), b""):
+            h.update(chunk)
+    if h.hexdigest() != e["sha256"]:
+        sys.exit(1)
+    if os.path.realpath(src) != os.path.realpath(dst):
+        if os.path.lexists(dst):
+            os.remove(dst)
+        os.symlink(os.path.realpath(src), dst)
+    cfg["overlay"] = dst
+else:
+    cfg.pop("overlay", None)
+tmp = cfg_path + ".new"
+with open(tmp, "w", encoding="utf-8") as f:
+    json.dump(cfg, f, indent=2)
+    f.write("\n")
+os.replace(tmp, cfg_path)
+PY
+then
+  echo "osmos: switched to the $W weights (patch already on disk)" >&2
+  exec "$OSMOS_DIR/bin/osmos-api" --config "$CFG" --port "$PORT"
+fi
+
 echo "osmos: switching to the $W weights (the installer fetches the 0.6 GB patch the first time)" >&2
 cd "$OSMOS_DIR" || exit 1
 flags=(--models "$OSMOS_MODELS" --serve)

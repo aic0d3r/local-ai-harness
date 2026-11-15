@@ -1126,12 +1126,30 @@ def start_engine(engine, running, plan=None, wait_s=900):
                 if engine == "strata":
                     print("".join(f"\n  -> {x}" for x in strata_doctor.explain(whole)), end="")
                 return False
-            print(f"\r  waiting for {engine} on :{c['port']} ... {int(time.time() - t0)}s (Ctrl-C to stop waiting)", end="", flush=True)
+            print("\r\033[K" + wait_line(engine, c["port"], int(time.time() - t0), proc.pid), end="", flush=True)
             time.sleep(3)
     except KeyboardInterrupt:
-        pass
-    print(f"\n  {engine} did not answer in time; see {engine_log(engine)}")
+        print(f"\n  {engine} keeps loading in the background (pid {proc.pid}); log: {engine_log(engine)}"
+              f"\n  up once this answers: curl -s localhost:{c['port']}/v1/models"
+              f"\n  then re-run ./setup.sh for what needs it (model pick, speed probe); it reuses the running {engine}")
+        sys.exit(130)  # what is left needs the engine; not_answering's "start it" would start a second one
+    print(f"\n  {engine} did not answer in {wait_s}s; it may still be loading (pid {proc.pid}), see {engine_log(engine)}")
     return False
+
+
+def wait_line(engine, port, secs, pid):
+    """One status line cut to the terminal width (a wrapped line breaks the \\r rewrite): elapsed, disk read so far
+    (a load or a checksum is mostly reads), the log's last line."""
+    try:
+        gb = int(next(l for l in open(f"/proc/{pid}/io") if l.startswith("read_bytes")).split()[1]) / 2**30
+    except (OSError, StopIteration, ValueError):
+        gb = 0  # not Linux, or the process is gone
+    try:
+        last = next((l.strip() for l in reversed(open(engine_log(engine), errors="replace").read().splitlines()) if l.strip()), "")
+    except OSError:
+        last = ""
+    s = f"  waiting for {engine} on :{port} {secs}s" + (f", read {gb:.0f} GB" if gb >= 1 else "") + " (Ctrl-C keeps it loading)"
+    return (s + (f" | {last}" if last else ""))[:shutil.get_terminal_size((100, 20)).columns - 1]
 
 
 def not_answering(eng):
@@ -1158,7 +1176,7 @@ def pick_engine(d, yes, want=None, on_pick=None, esc=None):
             sys.exit("no engine answering on the usual ports. Start one (see docs/ENGINES.md, or `./setup.sh --halogen auto`), then re-run.")
         return next(iter(sorted(running, key=lambda e: e != "halogen"))), None
     if not running:
-        print("No engine is running yet. Pick one: halogen, gufo and Strata can be started (and halogen or Strata installed) from here.")
+        print("No engine is running yet. Pick one: halogen, gufo, Strata and osmos can be started (and halogen or Strata installed) from here.")
     route = ask_route(esc)
     if route is BACK:
         return BACK, None
