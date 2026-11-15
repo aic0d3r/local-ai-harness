@@ -3,7 +3,7 @@ import { expect, mock, test } from "bun:test";
 
 // pi is not installed in the repo: stub it so the pure helpers can load
 mock.module("@earendil-works/pi-coding-agent", () => ({ getAgentDir: () => "/tmp" }));
-const { isDirectCommit, tidyMessage } = await import("../extensions/ling-tiny-commit.ts");
+const { isDirectCommit, tidyMessage, CLOUD_NO_SIDECAR, SIDECAR_DOWN } = await import("../extensions/ling-tiny-commit.ts");
 
 test("isDirectCommit", () => {
 	expect(isDirectCommit("git commit -m x")).toBe(true);
@@ -12,6 +12,13 @@ test("isDirectCommit", () => {
 	expect(isDirectCommit("echo 'git commit'")).toBe(false);
 	expect(isDirectCommit("cat <<EOF\ngit commit\nEOF")).toBe(false);
 	expect(isDirectCommit("git commit --amend --no-edit")).toBe(false);
+});
+
+test("commit refusals hand the message back to the user, never to the calling model", () => {
+	for (const m of [CLOUD_NO_SIDECAR, SIDECAR_DOWN]) {
+		expect(m).not.toContain("Retry");
+		expect(m).toContain("Ask the user");
+	}
 });
 
 test("tidyMessage splits long subject", () => {

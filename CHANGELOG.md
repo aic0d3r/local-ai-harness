@@ -33,6 +33,7 @@
 - `scripts/uninstall.sh` knows the multi-engine setup and removes what the wizard wrote.
 
 ### Fixed
+- The commit tool no longer tells a cloud-model session to write its own message (`message` is for dictated text only); the refusal asks the user to run `/commit` or dictate the message.
 - `./harness tune` counted chunks as tokens (osmos showed 6.0 t/s instead of 40.8); it now uses the server's token count.
 - `halogen-top.sh` was a SyntaxError on Python < 3.12; several `bench/` scripts crashed or touched the real home.
 - `--halogen --voice` took `--voice` as a path; the sidecar model is no longer downloaded without `llama-server`.

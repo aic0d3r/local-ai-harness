@@ -51,6 +51,10 @@ export const tidyMessage = (msg: string): string => {
 
 const SIDECAR = profile().sidecarUrl;
 
+// dead ends that must hand the decision back to the user: never tell the calling model to write the message itself (`message` is for dictated text only)
+export const CLOUD_NO_SIDECAR = "Not committing: this session runs a cloud model, which does not load the local sidecar for commits. Ask the user to run /commit, or to dictate the exact message.";
+export const SIDECAR_DOWN = "commit failed: ling-tiny sidecar is down and could not be started (journalctl --user -u ling-tiny). Ask the user to start it or to dictate the exact message.";
+
 export default function (pi: ExtensionAPI) {
 	if (!sidecarOn()) return; // opted out (./setup.sh --no-sidecar): the main model does this work
 	// nothing-at-boot policy leaves the sidecar down after a reboot: start the unit on demand
@@ -123,9 +127,9 @@ export default function (pi: ExtensionAPI) {
 		if (!fullDiff.trim()) return notify("Nothing to commit: no diff, staged changes, or untracked files.", "warning");
 		// cloud model: never load the local sidecar for a commit; the calling model writes the message
 		if (!message && !isMain(ctx))
-			return notify("Not using the local sidecar with a cloud model. Retry with the `message` parameter to commit with your own message.", "warning");
+			return notify(CLOUD_NO_SIDECAR, "warning");
 		if (!message && !(await ensureSidecar(notify)))
-			return notify("commit failed: ling-tiny sidecar is down and could not be started (journalctl --user -u ling-tiny). Retry with the `message` parameter to commit with your own message.", "error");
+			return notify(SIDECAR_DOWN, "error");
 
 		if (!message) notify(`Generating commit message with ${TINY_MODEL}...`, "info");
 		const prompt = `Write a git commit message for the working-tree changes below.
