@@ -18,6 +18,7 @@
   - Project agents can no longer be auto-confirmed, pick a `model:` or read files outside the project; children are leaf, time-limited (30 min) and killed as a process group.
 
 ### Changed
+- The model-first, engine and model menus keep the arrow-key menu on an 80-column window: rows are short, and the speed claims, what each engine loses and the memory warning print once under the question. These rows were 110-150 columns, so they always fell back to the numbered list.
 - `./harness config` submenus go back one level on Esc (engine, model, weights) instead of quitting the whole menu; Ctrl-C still cancels everything, Esc at the top level closes quietly like `done`, and answers already given are kept.
 - Questions are a short headline with the detail on a dimmed line under it, wrapped at 78 columns: a narrow window no longer needs maximizing, and a maximized one does not give very long lines.
 - All shell questions share `scripts/lib-prompt.sh`: one `[Y/n]` style with a bold headline, key hints and `Esc cancels`; Ctrl-C/Ctrl-D print `cancelled`; with no terminal they print the default taken; unknown menu keys give a hint (`pick 1-3`).

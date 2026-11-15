@@ -199,8 +199,9 @@ def ask_route(esc=None):
     for k, r in routes.items():
         b = best_engine(r, hw)
         if b:
-            labels[f"{r['label']}  ->  {b['engine']}: {b['why']}"] = (k, b)
-    pick = choose("Which model do you want to run? the best engine for it on this box is chosen", [*labels, other], False, esc)
+            labels[f"{r['label']} -> {b['engine']}"] = (k, b)
+    notes = [f"{r['label'].split(' (')[0]} on {b['engine']}: {b['why']}" for k, b in labels.values() for r in [routes[k]]]
+    pick = choose("Which model do you want to run? the best engine for it on this box is chosen", [*labels, other], False, esc, notes)
     if pick is BACK:
         return BACK
     if pick == other:
@@ -272,8 +273,13 @@ def ask_model(engine, back=False):
         return False
     cur = engine_model(engine)
     ids.sort(key=lambda m: m != cur)
-    pick = {cat[m]["label"] + (f"  (~{cat[m]['download_gb']} GB download, ~{cat[m]['ram_gb']} GB RAM)" if "ram_gb" in cat[m] else ""): m for m in ids}
-    choice = choose(f"Which model for {engine}?", list(pick), False, BACK if back else None)
+    pick, notes = {}, []
+    for m in ids:  # the label's (aside) moves to a note, so the row fits a window and gum keeps the arrow menu
+        name, _, aside = cat[m]["label"].partition(" (")
+        pick[name + (f"  ~{cat[m]['download_gb']} GB download, ~{cat[m]['ram_gb']} GB RAM" if "ram_gb" in cat[m] else "")] = m
+        if aside:
+            notes.append(f"{name}: {aside.rstrip(')')}")
+    choice = choose(f"Which model for {engine}?", list(pick), False, BACK if back else None, notes)
     if choice is BACK:
         return BACK
     m = pick[choice]
@@ -370,12 +376,14 @@ def head_detail(question):
     return question[:i + 1], question[i + 1:].strip()
 
 
-def question_text(question):
-    """The question as printed: the headline bold, the detail dimmed under it, both wrapped."""
+def question_text(question, notes=()):
+    """The question as printed: the headline bold, the detail dimmed under it, both wrapped. Each note is its own
+    dimmed paragraph under the detail."""
     head, detail = head_detail(question)
     w = term_width()
     out = [paint("1", line) for line in textwrap.wrap(head, w)]
-    out += [paint("2", line) for line in textwrap.wrap(detail, w, initial_indent="  ", subsequent_indent="  ")]
+    for para in (detail, *notes):
+        out += [paint("2", line) for line in textwrap.wrap(para, w, initial_indent="  ", subsequent_indent="    " if para is not detail else "  ")]
     return "\n".join(out)
 
 
@@ -404,14 +412,16 @@ def fits(options):
     return all(len(o) + 2 <= w for o in options)  # +2: gum's cursor prefix
 
 
-def choose(question, options, yes, esc=None):
+def choose(question, options, yes, esc=None, notes=()):
+    """notes: detail lines printed wrapped under the question. A row's detail goes here, not into its label: gum cuts a
+    label at the window edge, and a label too wide drops the menu to the numbered list."""
     if len(options) == 1 or yes:
         return options[0]
     if not sys.stdin.isatty():
         no_terminal(question, options[0])
         return options[0]
     if shutil.which("gum") and fits(options):
-        print(question_text(question))  # also the fallback: labels too wide for gum wrap here instead of being cut off
+        print(question_text(question, notes))  # also the fallback: labels too wide for gum wrap here instead of being cut off
         # stdout only: gum draws its menu on stderr, so capturing stderr leaves the user a blank screen
         r = subprocess.run(["gum", "choose", "--header", "", *options], stdout=subprocess.PIPE, text=True)
         out = r.stdout.strip()
@@ -421,7 +431,7 @@ def choose(question, options, yes, esc=None):
             cancel()
         if r.returncode == 1:  # Esc: back one level
             return escape(esc)
-    print(question_text(question))
+    print(question_text(question, notes))
     for i, o in enumerate(options, 1):
         print("\n".join(textwrap.wrap(f"{i}) {o}", term_width(), initial_indent="  ", subsequent_indent="     ")))
     back = esc_label(esc)
@@ -780,8 +790,8 @@ def last_speed(engine):
     t.sort(key=lambda v: v.get("when", ""))
     if not t:
         return "not measured"
-    old = "" if t[-1].get("protocol") == BENCH_ID else ", old probe: re-run ./harness tune"
-    return f"{t[-1]['prefill_tps']}/{t[-1]['decode_tps']} t/s pf/dec(code){old}"
+    old = "" if t[-1].get("protocol") == BENCH_ID else " (old)"  # engine_menu explains (old)
+    return f"{t[-1]['prefill_tps']}/{t[-1]['decode_tps']} t/s{old}"
 
 
 BIG = ("halogen", "gufo", "strata", "osmos")  # big engines: one GPU memory heap (VRAM on NVIDIA), and gufo/strata also share :8080
@@ -801,15 +811,22 @@ def engine_menu(running, esc=None):
                                                        not (hw["gpu"] == "nvidia" and e == "strata"),
                                                        "script" not in PROFILES["engines"][e], e))
     holder = heap_holder(running)
-    labels = {}
+    labels, loses, stops, speeds = {}, {}, [], []
     for e in order:
-        c = PROFILES["engines"][e]
         mods = running[e]["models"] if e in running else []
         state = f"running: {mods[0] if mods else '-'}" if e in running else "not running"
-        lose = f"loses: {c.get('loses', '?')}"
-        warn = f" | ! stops {holder} first (shared GPU memory)" if e in BIG and holder and holder != e and e not in running else ""
-        labels[f"{'*' if e == cur else ' '}{'o' if e in running else '-'} {e:9s}{' (recommended)' if e == rec else ''} {state} | {last_speed(e)} | {lose}{warn}"] = e
-    choice = choose("Which engine? (* = current, o = running)", list(labels), False, esc)
+        loses.setdefault(PROFILES["engines"][e].get("loses", "?"), []).append(e)
+        warn = e in BIG and holder and holder != e and e not in running
+        stops += [e] * bool(warn)
+        speeds.append(last_speed(e))
+        labels[f"{'*' if e == cur else ' '}{'o' if e in running else '-'} {e:9s}{' (recommended)' if e == rec else ''} {state} | {speeds[-1]}{' !' if warn else ''}"] = e
+    # what does not fit a row (gum cuts a long one off) is said once under the question
+    notes = [f"{', '.join(es)} {'loses' if len(es) == 1 else 'lose'}: {v}" for v, es in loses.items()]
+    if any(s != "not measured" for s in speeds):
+        notes.append("t/s = prefill/decode on code, from ./harness tune" + ("; (old) = an older probe, re-run it" if any(s.endswith("(old)") for s in speeds) else ""))
+    if stops:
+        notes.append(f"! = stops {holder} first: they share GPU memory")
+    choice = choose("Which engine? (* = current, o = running)", list(labels), False, esc, notes)
     return BACK if choice is BACK else labels[choice]
 
 

@@ -258,17 +258,20 @@ assert all(e["engine"] in h.PROFILES["engines"] for r in R.values() if isinstanc
 saved = {n: getattr(h, n) for n in ("capacity", "hardware", "choose")}
 h.capacity, h.hardware = (lambda: {"gpu_name": "Strix Halo"}), (lambda: plain)
 real_stdin, h.sys.stdin = h.sys.stdin, types.SimpleNamespace(isatty=lambda: True)
-first = lambda q, o, y, esc=None: next(x for x in o if "27B" in x)
+routes_seen = []
+first = lambda q, o, y, esc=None, notes=(): routes_seen.extend(o) or next(x for x in o if "27B" in x)
 h.choose = first
 assert h.ask_route() == ("gufo", "qwen38-27b") and h.model_pref() == "qwen38-27b"
-h.choose = lambda q, o, y, esc=None: next(x for x in o if "Flash-Next" in x)
+h.choose = lambda q, o, y, esc=None, notes=(): next(x for x in o if "Flash-Next" in x)
 assert h.ask_route() == ("gufo", "flash-next") and h.model_pref() == "flash-next"
 open(h.MODEL_FILE, "w").write("flash-next-iq3_s\n")
 assert h.ask_route() == ("gufo", "flash-next") and h.model_pref() == "flash-next-iq3_s"
-h.choose = lambda q, o, y, esc=None: next(x for x in o if "DeepSeek" in x)
+h.choose = lambda q, o, y, esc=None, notes=(): next(x for x in o if "DeepSeek" in x)
 assert h.ask_route() == ("osmos", None) and h.model_pref() == "flash-next-iq3_s"
-h.choose = lambda q, o, y, esc=None: o[-1]
+h.choose = lambda q, o, y, esc=None, notes=(): o[-1]
 assert h.ask_route() is None
+# gum cuts a label at the window edge and a too-wide one drops the menu to numbers: rows fit 80 columns, detail goes in notes
+assert all(len(o) + 2 <= 80 for o in routes_seen), [o for o in routes_seen if len(o) + 2 > 80]
 h.capacity = lambda: {"gpu_name": "NVIDIA RTX 4090"}
 assert h.ask_route() is None  # other hardware keeps the engine menu
 h.sys.stdin = real_stdin
@@ -328,8 +331,9 @@ assert h.heap_holder({"strata": 1}) == "strata" and "tabbyapi" not in h.PROFILES
 real_hw, real_choose = h.hardware, h.choose
 h.hardware = lambda: {"cpus": 8, "ram_gb": 64, "gpu": "nvidia", "npu": False}
 seen = []
-h.choose = lambda q, opts, yes, esc=None: seen.extend(opts) or opts[0]
+h.choose = lambda q, opts, yes, esc=None, notes=(): seen.extend(opts) or opts[0]
 h.engine_menu({})
+assert all(len(o) + 2 <= 80 for o in seen), [o for o in seen if len(o) + 2 > 80]
 names = [o.split()[1] if o[2:3] != " " else o.split()[1] for o in seen]
 assert names.index("strata") < names.index("gufo"), names
 h.hardware, h.choose = real_hw, real_choose
