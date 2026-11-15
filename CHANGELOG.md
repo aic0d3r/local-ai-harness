@@ -18,6 +18,7 @@
   - Project agents can no longer be auto-confirmed, pick a `model:` or read files outside the project; children are leaf, time-limited (30 min) and killed as a process group.
 
 ### Changed
+- `./harness config` submenus go back one level on Esc (engine, model, weights) instead of quitting the whole menu; Ctrl-C still cancels everything, Esc at the top level closes quietly like `done`, and answers already given are kept.
 - Questions are a short headline with the detail on a dimmed line under it, wrapped at 78 columns: a narrow window no longer needs maximizing, and a maximized one does not give very long lines.
 - All shell questions share `scripts/lib-prompt.sh`: one `[Y/n]` style with a bold headline, key hints and `Esc cancels`; Ctrl-C/Ctrl-D print `cancelled`; with no terminal they print the default taken; unknown menu keys give a hint (`pick 1-3`).
 - The setup summary wraps on narrow terminals with a green/red status line (no colour off a terminal or under `NO_COLOR`); `./harness config` closes on Esc.

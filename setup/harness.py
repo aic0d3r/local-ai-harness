@@ -188,9 +188,10 @@ def best_engine(route, hw):
     return next((e for e in route["engines"] if ok(e)), None)
 
 
-def ask_route():
+def ask_route(esc=None):
     """Strix Halo: ask which MODEL to run and pick its best engine (profiles.json \"routes\"). Saves the model answer.
-    -> (engine, model) or None when the box is not a Strix Halo, there is no terminal, or the user wants to pick the engine."""
+    -> (engine, model), None when the box is not a Strix Halo / there is no terminal / the user wants the engine instead,
+    or BACK when Esc was pressed in a submenu."""
     if not sys.stdin.isatty() or "Strix Halo" not in capacity().get("gpu_name", ""):
         return None
     hw, routes = hardware(), {k: v for k, v in PROFILES["routes"].items() if not k.startswith("_")}
@@ -199,7 +200,9 @@ def ask_route():
         b = best_engine(r, hw)
         if b:
             labels[f"{r['label']}  ->  {b['engine']}: {b['why']}"] = (k, b)
-    pick = choose("Which model do you want to run? the best engine for it on this box is chosen", [*labels, other], False)
+    pick = choose("Which model do you want to run? the best engine for it on this box is chosen", [*labels, other], False, esc)
+    if pick is BACK:
+        return BACK
     if pick == other:
         return None
     k, b = labels[pick]
@@ -261,8 +264,8 @@ def offer_recommendation(eng):
     return True
 
 
-def ask_model(engine):
-    """Which model the engine loads, when it can load more than one; current answer first. -> True if it changed."""
+def ask_model(engine, back=False):
+    """Which model the engine loads, when it can load more than one; current answer first. -> True if it changed, or BACK."""
     cat = catalog()
     ids = [m for m in cat if engine in cat[m]["engines"]]
     if len(ids) < 2 or not sys.stdin.isatty():
@@ -270,7 +273,10 @@ def ask_model(engine):
     cur = engine_model(engine)
     ids.sort(key=lambda m: m != cur)
     pick = {cat[m]["label"] + (f"  (~{cat[m]['download_gb']} GB download, ~{cat[m]['ram_gb']} GB RAM)" if "ram_gb" in cat[m] else ""): m for m in ids}
-    m = pick[choose(f"Which model for {engine}?", list(pick), False)]
+    choice = choose(f"Which model for {engine}?", list(pick), False, BACK if back else None)
+    if choice is BACK:
+        return BACK
+    m = pick[choice]
     os.makedirs(AGENT, exist_ok=True)
     open(MODEL_FILE, "w").write(m + "\n")
     return m != cur
@@ -323,9 +329,19 @@ def detect():
 
 # ---------- ask ----------
 def cancel():
-    """Esc or Ctrl-C at any prompt: leave cleanly, no traceback."""
+    """Ctrl-C at any prompt, or a plain message when nothing else can be done: leave cleanly, no traceback."""
     print("\ncancelled")
     sys.exit(130)
+
+
+BACK = object()  # Esc in a submenu: return to the menu above instead of quitting everything
+
+
+def esc_label(esc):
+    """What Esc does here, as the prompt says it."""
+    if esc is None:
+        return "Esc cancels"
+    return "Esc = back" if esc is BACK else f"Esc = {esc}"
 
 
 def key():
@@ -334,9 +350,11 @@ def key():
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     try:
-        tty.setcbreak(fd)  # keeps ISIG: Ctrl-C still raises KeyboardInterrupt
+        tty.setcbreak(fd)  # keeps ISIG: Ctrl-C raises KeyboardInterrupt
         data = os.read(fd, 8)  # arrow keys arrive as one read ("\x1b[A"), bare Esc as "\x1b"
-        if not data or b"\x04" in data:  # Ctrl-D (or the terminal went away) cancels like Esc; it used to be ignored
+        # Ctrl-D (or the terminal went away) and Ctrl-C cancel. Ctrl-C normally arrives as a signal, but not every setup
+        # delivers it as one (a pty without a controlling terminal hands it over as a byte): treat both the same.
+        if not data or b"\x04" in data or b"\x03" in data:
             cancel()
         return data.decode(errors="ignore")
     finally:
@@ -394,16 +412,20 @@ def choose(question, options, yes, esc=None):
         return options[0]
     if shutil.which("gum") and fits(options):
         print(question_text(question))  # also the fallback: labels too wide for gum wrap here instead of being cut off
-        r = subprocess.run(["gum", "choose", "--header", "", *options], stdout=subprocess.PIPE, text=True)
+        r = subprocess.run(["gum", "choose", "--header", "", *options], capture_output=True, text=True)
         out = r.stdout.strip()
         if out:  # gum trims the line it prints: map it back to the exact option (labels can start with a space)
             return next((o for o in options if o.strip() == out), out)
-        if r.returncode in (1, 130):  # Esc / Ctrl-C
+        if r.returncode == 130:  # Ctrl-C: quit everything, even in a submenu (gum exits 1 for a bare Esc)
+            cancel()
+        if r.returncode == 1:  # Esc: back one level. gum also prints "nothing selected" here: that is control flow, not an error
             return escape(esc)
+        if r.stderr:
+            print(r.stderr, end="", file=sys.stderr)  # a real gum failure (no tty, bad flag): say why
     print(question_text(question))
     for i, o in enumerate(options, 1):
         print("\n".join(textwrap.wrap(f"{i}) {o}", term_width(), initial_indent="  ", subsequent_indent="     ")))
-    back = "Esc cancels" if esc is None else f"Esc = {esc}"
+    back = esc_label(esc)
     if len(options) <= 9:  # one keypress picks
         prompt = f"pick 1-{len(options)} " + paint("2", f"(Enter = 1, {back})") + ": "
         print(prompt, end="", flush=True)
@@ -771,8 +793,8 @@ def heap_holder(running):
     return next((e for e in BIG if e in running), None)
 
 
-def engine_menu(running):
-    """One screen: state, model, last speed, what you lose, memory conflicts. -> engine name."""
+def engine_menu(running, esc=None):
+    """One screen: state, model, last speed, what you lose, memory conflicts. -> engine name, or BACK."""
     cur = (active() or {}).get("engine")
     hw = hardware()  # fresh box: the recommended engine, halogen where it can run, then the NVIDIA engines on an NVIDIA box, then engines we can start for you
     rec = recommend(hw, capacity())["engine"]
@@ -788,7 +810,8 @@ def engine_menu(running):
         lose = f"loses: {c.get('loses', '?')}"
         warn = f" | ! stops {holder} first (shared GPU memory)" if e in BIG and holder and holder != e and e not in running else ""
         labels[f"{'*' if e == cur else ' '}{'o' if e in running else '-'} {e:9s}{' (recommended)' if e == rec else ''} {state} | {last_speed(e)} | {lose}{warn}"] = e
-    return labels[choose("Which engine? (* = current, o = running)", list(labels), False)]
+    choice = choose("Which engine? (* = current, o = running)", list(labels), False, esc)
+    return BACK if choice is BACK else labels[choice]
 
 
 def stop_process(port):
@@ -885,15 +908,18 @@ def weights_labels(engine):
     return PROFILES["engines"].get(engine, {}).get("weights_labels") or WEIGHTS_LABELS
 
 
-def ask_weights(engine):
-    """Which weights the engine loads by default; current answer first. -> True if the answer changed."""
+def ask_weights(engine, back=False):
+    """Which weights the engine loads by default; current answer first. -> True if the answer changed, or BACK."""
     if engine not in WEIGHTS_ASK or not sys.stdin.isatty():
         return False
     cur = weights_pref()
     labels = weights_labels(engine)
     opts = sorted(labels, key=lambda k: k != cur)
-    pick = {labels[k]: k for k in opts}[choose("Default model weights? halogen, gufo and Strata load these; abliterated "
-                                               "on Strata = gufo's orca-uncensored shards", [labels[k] for k in opts], False)]
+    choice = choose("Default model weights? halogen, gufo and Strata load these; abliterated "
+                    "on Strata = gufo's orca-uncensored shards", [labels[k] for k in opts], False, BACK if back else None)
+    if choice is BACK:
+        return BACK
+    pick = {labels[k]: k for k in opts}[choice]
     os.makedirs(AGENT, exist_ok=True)
     open(WEIGHTS, "w").write(pick + "\n")
     return pick != cur
@@ -1093,9 +1119,10 @@ def not_answering(eng):
     return f"{eng} is not answering on :{e['port']} - {e.get('start', 'start it first')}"
 
 
-def pick_engine(d, yes, want=None, on_pick=None):
+def pick_engine(d, yes, want=None, on_pick=None, esc=None):
     """Questions only: -> (engine, start plan or None if it is already up). Nothing starts here.
-    on_pick(engine) runs right after the choice, before any start/stop/download question (the update check)."""
+    on_pick(engine) runs right after the choice, before any start/stop/download question (the update check).
+    With esc=BACK every menu inside returns (BACK, None) instead of quitting, so ./harness config can go back."""
     running = {x["engine"]: x for x in d["engines"]}
     if want:
         eng = want.partition("/")[0]
@@ -1112,14 +1139,21 @@ def pick_engine(d, yes, want=None, on_pick=None):
         return next(iter(sorted(running, key=lambda e: e != "halogen"))), None
     if not running:
         print("No engine is running yet. Pick one: halogen, gufo and Strata can be started (and halogen or Strata installed) from here.")
-    route = ask_route()
-    eng = route[0] if route else engine_menu(running)
+    route = ask_route(esc)
+    if route is BACK:
+        return BACK, None
+    eng = route[0] if route else engine_menu(running, esc)
+    if eng is BACK:
+        return BACK, None
     before = engine_model(eng)
     if not (route and route[1] and route[1] != DEFAULT_MODEL) and not offer_recommendation(eng):  # a model picked by name is already answered
-        ask_model(eng)
+        if ask_model(eng, back=esc is BACK) is BACK:
+            return BACK, None
     upgrading = on_pick(eng) if on_pick else False
     # weights stock/abliterated only mean something for Flash-Next
-    weights_changed = ask_weights(eng) if engine_model(eng) == DEFAULT_MODEL else False
+    weights_changed = ask_weights(eng, back=esc is BACK) if engine_model(eng) == DEFAULT_MODEL else False
+    if weights_changed is BACK:
+        return BACK, None
     # the server keeps what it loaded at start: a new default needs a restart (an upgrade restarts it anyway)
     restart = (weights_changed or engine_model(eng) != before) and eng in running and not upgrading and ask_yn(
         f"Restart {eng}? it is running different weights than your new default", True)
@@ -1133,8 +1167,8 @@ def pick_engine(d, yes, want=None, on_pick=None):
     return eng, plan
 
 
-def bring_up(d, eng, plan, yes, mod=""):
-    """Run the start plan (if any), then pick the model. -> (engine, model)."""
+def bring_up(d, eng, plan, yes, mod="", esc=None):
+    """Run the start plan (if any), then pick the model. -> (engine, model), or (BACK, None)."""
     if plan:
         if not start_engine(eng, {x["engine"]: x for x in d["engines"]}, plan):
             sys.exit(not_answering(eng))
@@ -1149,12 +1183,15 @@ def bring_up(d, eng, plan, yes, mod=""):
     models = running[eng]["models"]
     if not models:
         sys.exit(f"{eng} lists no models")
-    return eng, mod or choose("Which model?", models, yes)
+    m = mod or choose("Which model?", models, yes, esc)
+    return (BACK, None) if m is BACK else (eng, m)
 
 
-def pick_target(d, yes, want=None):
-    eng, plan = pick_engine(d, yes, want)
-    return bring_up(d, eng, plan, yes, (want or "").partition("/")[2])
+def pick_target(d, yes, want=None, esc=None):
+    eng, plan = pick_engine(d, yes, want, esc=esc)
+    if eng is BACK:
+        return BACK, None
+    return bring_up(d, eng, plan, yes, (want or "").partition("/")[2], esc)
 
 
 # ---------- extras (asked once, answers saved) ----------
@@ -1174,13 +1211,15 @@ def ask_yn(question, default=False):
         # gum choose, not gum confirm: confirm exits 1 for both "No" and Esc, so Esc could not cancel
         print(question_text(question))  # our headline and detail: gum cuts a --header off, and would put it under them
         r = subprocess.run(["gum", "choose", "--header", "", "--selected", "Yes" if default else "No", "Yes", "No"],
-                           stdout=subprocess.PIPE, text=True)
+                           capture_output=True, text=True)
         out = r.stdout.strip()
         if out in ("Yes", "No"):
             print(out.lower())
             return out == "Yes"
-        if r.returncode in (1, 130):
+        if r.returncode in (1, 130):  # Esc / Ctrl-C both cancel here: a yes/no is not a menu, there is no level above
             cancel()
+        if r.stderr:
+            print(r.stderr, end="", file=sys.stderr)
     print(question_text(question))
     prompt = ("[Y/n]" if default else "[y/N]") + " " + paint("2", f"(Enter = {'yes' if default else 'no'}, Esc cancels)") + " "
     print(prompt, end="", flush=True)
@@ -1931,22 +1970,29 @@ def cmd_config(a):
             f"update check  {'on' if upd == '1' else 'off'}  (newer engine release; never installs)": "update",
             f"sudo hints    {'hidden' if os.path.exists(hints) else 'shown'}  (fabric clock, vm-compact)": "hints",
             "done": "done"}
-        k = items[choose("Change which setting?", list(items), False, esc="done")]  # Esc closes the menu, like done
+        k = items[choose("Change which setting?", list(items), False, esc="done")]  # Esc at the top closes quietly, like done
         if k == "done":
             return
         if k == "engine":
-            eng, mod = pick_target(detect(), False)
+            eng, mod = pick_target(detect(), False, esc=BACK)
+            if eng is BACK:
+                continue  # Esc in a submenu: back to "Change which setting?", nothing changed
             install_extensions(eng, verbose=False)
             finish(eng, mod, bool(jget(os.path.join(AGENT, "harness-tuned.json"), {}).get(hw_key(eng, mod))))
         elif k == "model":
             eng = p.get("engine", "halogen")
             if eng not in ("gufo", "strata"):
                 print(f"  {eng} always runs Flash-Next; the model answer applies to gufo and Strata (switch engine first)")
-            elif ask_model(eng):
+                continue
+            changed = ask_model(eng, back=True)
+            if changed is BACK:
+                continue
+            if changed:
                 print(f"  saved; ./harness use {eng} (or ./setup.sh) installs and starts it")
         elif k == "weights":
             eng = p.get("engine", "halogen")
-            if not ask_weights(eng if eng in WEIGHTS_ASK else "halogen") or eng not in WEIGHTS_ASK:
+            changed = ask_weights(eng if eng in WEIGHTS_ASK else "halogen", back=True)
+            if changed is BACK or not changed or eng not in WEIGHTS_ASK:
                 continue
             running = {x["engine"]: x for x in detect()["engines"]}
             if ask_yn(f"Restart {eng} on the {weights_pref()} weights now?", True):

@@ -70,6 +70,49 @@ r, _ = run_menu(["a", "b", "c"], keys=["\x1b"])
 assert r == ("exit", 130), r
 print("ok: short menus hint on a bad key; Esc closes settings")
 
+# Esc in a submenu goes back one level (returns BACK) instead of quitting; the top level still closes quietly
+r, out = run_menu(["a", "b"], esc=h.BACK, keys=["\x1b"])
+assert r is h.BACK, r
+assert "Esc = back" in out, out
+r, out = run_menu(["a", "b"], esc="done", keys=["\x1b"])
+assert r == "done" and "Esc = done" in out, (r, out)
+# a submenu that is not in back mode still cancels (the wizard is unchanged)
+r, _ = run_menu(["a", "b"], keys=["\x1b"])
+assert r == ("exit", 130), r
+print("ok: Esc = back in submenus, Esc = done at the top, cancels elsewhere")
+
+# gum exits 1 for Esc and 130 for Ctrl-C: 1 goes back, 130 still quits everything
+class FakeGum:
+    def __init__(self, code):
+        self.returncode, self.stdout = code, ""
+
+
+for code, expect in ((1, h.BACK), (130, ("exit", 130))):
+    buf = io.StringIO()
+    real_run = h.subprocess.run
+    try:
+        with fake(Tty()), contextlib.redirect_stdout(buf):
+            h.shutil.which = lambda c, *a, **k: "/usr/bin/gum"  # after fake(): it hides gum on entry
+            h.subprocess.run = lambda *a, **k: FakeGum(code)
+            try:
+                got = h.choose("Which?", ["a", "b"], False, esc=h.BACK)
+            except SystemExit as e:
+                got = ("exit", e.code)
+    finally:
+        h.subprocess.run = real_run
+    assert got == expect, (code, got)
+print("ok: gum Esc (1) goes back, gum Ctrl-C (130) quits")
+
+# the config submenus return BACK instead of exiting, and write nothing when they do
+buf = io.StringIO()
+with fake(Tty(), keys=["\x1b"]), contextlib.redirect_stdout(buf):
+    assert h.ask_model("strata", back=True) is h.BACK, "ask_model did not go back"
+assert "Esc = back" in buf.getvalue(), buf.getvalue()
+buf = io.StringIO()
+with fake(Tty(), keys=["\x1b"]), contextlib.redirect_stdout(buf):
+    assert h.ask_weights("halogen", back=True) is h.BACK, "ask_weights did not go back"
+print("ok: model and weights submenus go back")
+
 # the question: headline first, detail under it
 assert h.question_text("Run it? ~2x faster commits, holds GPU memory.") == "Run it?\n  ~2x faster commits, holds GPU memory.", h.question_text("x? y")
 assert h.question_text("Continue?") == "Continue?"
@@ -127,8 +170,13 @@ def pty_run(argv, cols, keys=(), env_extra=None):
         elif p.poll() is not None:
             break
     rc = p.poll()
-    if rc is None:
-        p.kill(); rc = "hung"
+    if rc is None:  # printed already but not reaped yet: give the exit a moment, do not call that a hang
+        try:
+            rc = p.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            p.wait()
+            rc = "hung"
     return rc, ANSI.sub("", out.decode(errors="replace")).replace("\r", "")
 
 

@@ -229,15 +229,15 @@ for n, f in saved.items(): setattr(h, n, f)
 assert calls == ["update_offer", "plan_start", "install launch=False", "prepare", "upgrade", "start plan=True", "probe=True"], calls
 # upgrade chosen: pick_engine must not ask "Start <engine>?" (declining it used to exit setup); without one it does
 asked, saved = [], {n: getattr(h, n) for n in ("engine_menu", "plan_start", "ask_weights", "ask_yn", "ask_route")}
-h.engine_menu = lambda r: "halogen"
-h.ask_route = lambda: None  # the model-first menu is tested below
-h.ask_weights = lambda e: False
+h.engine_menu = lambda r, esc=None: "halogen"
+h.ask_route = lambda esc=None: None  # the model-first menu is tested below
+h.ask_weights = lambda e, back=False: False
 h.plan_start = lambda e, r, ask_start=True: asked.append(ask_start) or {"stop": None, "download": False}
 real_stdin, h.sys.stdin = h.sys.stdin, types.SimpleNamespace(isatty=lambda: True)
 for want in (True, False):
     h.pick_engine({"engines": []}, False, on_pick=lambda e: want)
 # new weights default while halogen runs: restart = a start plan that stops halogen first; declined = keep it running
-h.ask_weights, h.ask_yn = (lambda e: True), (lambda q, d=False: True)
+h.ask_weights, h.ask_yn = (lambda e, back=False: True), (lambda q, d=False: True)
 hal = {"engines": [{"engine": "halogen", "port": 8731, "models": ["m"]}]}
 assert h.pick_engine(hal, False)[1]["stop"] == "halogen" and asked[-1] is False
 h.ask_yn = lambda q, d=False: False
@@ -258,16 +258,16 @@ assert all(e["engine"] in h.PROFILES["engines"] for r in R.values() if isinstanc
 saved = {n: getattr(h, n) for n in ("capacity", "hardware", "choose")}
 h.capacity, h.hardware = (lambda: {"gpu_name": "Strix Halo"}), (lambda: plain)
 real_stdin, h.sys.stdin = h.sys.stdin, types.SimpleNamespace(isatty=lambda: True)
-first = lambda q, o, y: next(x for x in o if "27B" in x)
+first = lambda q, o, y, esc=None: next(x for x in o if "27B" in x)
 h.choose = first
 assert h.ask_route() == ("gufo", "qwen38-27b") and h.model_pref() == "qwen38-27b"
-h.choose = lambda q, o, y: next(x for x in o if "Flash-Next" in x)
+h.choose = lambda q, o, y, esc=None: next(x for x in o if "Flash-Next" in x)
 assert h.ask_route() == ("gufo", "flash-next") and h.model_pref() == "flash-next"
 open(h.MODEL_FILE, "w").write("flash-next-iq3_s\n")
 assert h.ask_route() == ("gufo", "flash-next") and h.model_pref() == "flash-next-iq3_s"
-h.choose = lambda q, o, y: next(x for x in o if "DeepSeek" in x)
+h.choose = lambda q, o, y, esc=None: next(x for x in o if "DeepSeek" in x)
 assert h.ask_route() == ("osmos", None) and h.model_pref() == "flash-next-iq3_s"
-h.choose = lambda q, o, y: o[-1]
+h.choose = lambda q, o, y, esc=None: o[-1]
 assert h.ask_route() is None
 h.capacity = lambda: {"gpu_name": "NVIDIA RTX 4090"}
 assert h.ask_route() is None  # other hardware keeps the engine menu
@@ -328,7 +328,7 @@ assert h.heap_holder({"strata": 1}) == "strata" and "tabbyapi" not in h.PROFILES
 real_hw, real_choose = h.hardware, h.choose
 h.hardware = lambda: {"cpus": 8, "ram_gb": 64, "gpu": "nvidia", "npu": False}
 seen = []
-h.choose = lambda q, opts, yes: seen.extend(opts) or opts[0]
+h.choose = lambda q, opts, yes, esc=None: seen.extend(opts) or opts[0]
 h.engine_menu({})
 names = [o.split()[1] if o[2:3] != " " else o.split()[1] for o in seen]
 assert names.index("strata") < names.index("gufo"), names
