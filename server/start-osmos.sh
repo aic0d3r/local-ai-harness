@@ -34,11 +34,24 @@ esac
 [ -x "$OSMOS_DIR/tools/install/osmos_install.py" ] || { echo "libosmos not found at $OSMOS_DIR (set OSMOS_DIR)" >&2; exit 1; }
 [ -f "$CFG" ] || { echo "pack not installed: $CFG (run the installer once: tools/install/osmos_install.py $PACK --models $OSMOS_MODELS --serve)" >&2; exit 1; }
 
+# the remembered GPU budget (server/osmos-budget.py): sizing is ~200 s of a ~207 s start, a known budget builds once.
+# A watcher saves what a sizing start finds; it follows this pid, which exec keeps.
+BUDGET="$(dirname "$0")/osmos-budget.py"
+watch_budget() {
+  local room; room=$(python3 "$BUDGET" room "$CFG" 2>/dev/null) || return 0
+  setsid python3 "$BUDGET" watch $$ "$CFG" "$OSMOS_DIR" "$room" >/dev/null 2>&1 </dev/null &
+}
+serve() {
+  local run; run=$(python3 "$BUDGET" pick "$CFG" "$OSMOS_DIR") || run=$CFG  # a broken helper must not stop a start
+  watch_budget
+  exec "$OSMOS_DIR/bin/osmos-api" --config "$run" --port "$PORT"
+}
+
 # already on the requested weights, and already laid out: nothing to rewrite
 want_overlay=$([ "$W" = abliterated ] && echo yes || echo no)
 have_overlay=$([ "$(print_weights)" != stock ] && echo yes || echo no)
 if [ "$want_overlay" = "$have_overlay" ]; then
-  exec "$OSMOS_DIR/bin/osmos-api" --config "$CFG" --port "$PORT"
+  serve
 fi
 
 # a switch with the patch already on disk: set or drop osmos.json's "overlay" (and link the patch where the installer
@@ -79,7 +92,7 @@ os.replace(tmp, cfg_path)
 PY
 then
   echo "osmos: switched to the $W weights (patch already on disk)" >&2
-  exec "$OSMOS_DIR/bin/osmos-api" --config "$CFG" --port "$PORT"
+  serve
 fi
 
 echo "osmos: switching to the $W weights (the installer fetches the 0.6 GB patch the first time)" >&2
@@ -87,4 +100,5 @@ cd "$OSMOS_DIR" || exit 1
 flags=(--models "$OSMOS_MODELS" --serve)
 [ "$W" = abliterated ] && flags+=(--abliterated)
 # --have the models tree so the disk preflight counts what is already on disk instead of the whole pack
+watch_budget  # the installer execs osmos-api in this pid at budget auto: its sizing is remembered too
 exec python3 tools/install/osmos_install.py "$PACK" "${flags[@]}" --trust-size --have "$OSMOS_MODELS"

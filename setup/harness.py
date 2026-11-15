@@ -2026,6 +2026,25 @@ def cmd_report(a):
     print(report_text(not a.no_doctor))
 
 
+OSMOS_BUDGET_MODE = os.path.join(AGENT, "harness-osmos-budget")  # remember (default) | auto; server/osmos-budget.py reads it
+
+
+def osmos_budget_mode():
+    try:
+        return open(OSMOS_BUDGET_MODE).read().strip() or "remember"
+    except OSError:
+        return "remember"
+
+
+def osmos_budget_row():
+    """The config row: the mode, and the newest remembered budget (server/osmos-budget.py keeps one per config)."""
+    if osmos_budget_mode() != "remember":
+        return "osmos memory  size every start  (~3 min; adapts to what else runs)"
+    saved = sorted(jget(os.path.join(LOGDIR, "osmos-budget.json"), {}).values(), key=lambda v: v.get("when", ""))
+    size = f" ({saved[-1]['budget_gib']:g} GiB)" if saved else ""
+    return f"osmos memory  remember last size{size}  (skips ~3 min sizing)"
+
+
 def cmd_config(a):
     """Menu of every saved answer; change one, applied right away."""
     if not sys.stdin.isatty():
@@ -2054,6 +2073,7 @@ def cmd_config(a):
             f"voice         {'on' if voice else 'off'}  (Lemonade STT/TTS)": "voice",
             f"update check  {'on' if upd == '1' else 'off'}  (newer engine release; never installs)": "update",
             f"sudo hints    {'hidden' if os.path.exists(hints) else 'shown'}  (fabric clock, vm-compact)": "hints",
+            **({osmos_budget_row(): "osmos-budget"} if eng == "osmos" else {}),
             "done": "done"}
         k = items[choose("Change which setting?", list(items), False, esc="done", notes=notes)]  # Esc at the top closes quietly, like done
         if k == "done":
@@ -2106,6 +2126,12 @@ def cmd_config(a):
                 print("  voice off (nothing uninstalled; /speak and /talk stay available)")
             else:
                 install_extensions((active() or {}).get("engine", "halogen"), ["--voice"], verbose=False)
+        elif k == "osmos-budget":
+            os.makedirs(AGENT, exist_ok=True)
+            remember = osmos_budget_mode() == "remember"
+            open(OSMOS_BUDGET_MODE, "w").write("auto\n" if remember else "remember\n")
+            print("  osmos sizes its memory on every start (~3 min, adapts to what else runs)" if remember else
+                  "  osmos reuses the last sized memory when as much is free (one build; sizes again when less is)")
         elif k == "update":
             os.makedirs(AGENT, exist_ok=True)
             open(UPDATE_PREF, "w").write("0\n" if upd == "1" else "1\n")
