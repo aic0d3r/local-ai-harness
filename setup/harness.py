@@ -195,14 +195,13 @@ def ask_route(esc=None):
     if not sys.stdin.isatty() or "Strix Halo" not in capacity().get("gpu_name", ""):
         return None
     hw, routes = hardware(), {k: v for k, v in PROFILES["routes"].items() if not k.startswith("_")}
-    labels, other = {}, "Pick an engine instead"
-    for k, r in routes.items():
-        b = best_engine(r, hw)
-        if b:
-            labels[f"{r['label']} -> {b['engine']}"] = (k, b)
-    notes = [f"{r['label'].split(' (')[0]} on {b['engine']}: {b['why']}" + (f"; measured here: {s}" if s else "")
-             for k, b in labels.values() for r in [routes[k]] for s in [speed_text(b["engine"], r["model"])]]
-    pick = choose("Which model do you want to run? the best engine for it on this box is chosen", [*labels, other], False, esc, notes)
+    other = "Pick an engine instead"
+    rows = [(k, b, route_speed(b, r["model"])) for k, r in routes.items() for b in [best_engine(r, hw)] if b]
+    w = [max(len(c) for c in col) for col in zip(*[(routes[k]["label"].split(" (")[0], routes[k].get("short", ""), b["engine"]) for k, b, _ in rows])]
+    labels = {f"{routes[k]['label'].split(' (')[0]:<{w[0]}}  {routes[k].get('short', ''):<{w[1]}}  {b['engine']:<{w[2]}}  {s}"
+              + ("  (recommended)" if i == 0 else ""): (k, b) for i, (k, b, s) in enumerate(rows)}  # routes are in preference order
+    pick = choose("Which model do you want to run? each runs on its fastest engine here; t/s = decode speed, ~ = published, "
+                  "not yet measured on this box", [*labels, other], False, esc)
     if pick is BACK:
         return BACK
     if pick == other:
@@ -213,6 +212,16 @@ def ask_route(esc=None):
         os.makedirs(AGENT, exist_ok=True)
         open(MODEL_FILE, "w").write(model + "\n")
     return b["engine"], model
+
+
+def route_speed(b, model):
+    """Decode speed for a model menu row: this box's ./harness tune result, stock weights first, else the published one with ~."""
+    got = speeds(b["engine"], model)
+    v = got.get("stock") or next(iter(got.values()), None)
+    if v:
+        return f"{v['decode_tps']:g} t/s"
+    m = re.search(r"~?[\d.]+(?:-[\d.]+)? t/s", b["why"])
+    return "~" + m.group().lstrip("~") if m else ""
 
 
 def describe(rec, cap):
@@ -1881,7 +1890,8 @@ def cmd_setup(a):
     verbose = a.verbose or active() is None  # first run shows everything; later runs only what needs you
     print(f"hardware: {h['ram_gb']} GB RAM, gpu={h['gpu']}, npu={h['npu']}; engines up: {[x['engine'] for x in d['engines']] or 'none'}")
     cap = capacity()
-    print("\n".join(describe(recommend(h, cap), cap)[1:]))
+    if a.yes or not sys.stdin.isatty() or "Strix Halo" not in cap.get("gpu_name", ""):  # Strix Halo: the model menu's first row is the recommendation
+        print("\n".join(describe(recommend(h, cap), cap)[1:]))
     # 1. every question first ...
     if not a.yes:
         ask_agent(a.reconfigure)

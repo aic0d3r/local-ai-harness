@@ -50,7 +50,7 @@
   "routes": {
     "_doc": "Strix Halo only: which engine runs which model best, first usable one wins (the wizard asks the model first). needs=npu: an NPU and halogen_min_ram_gb of RAM. model = catalog id the launchers read (null: the engine has one model). why = the numbers behind the order; 'measured' = on this box (docs/ENGINES.md), 'reported' = someone else's run, not yet reproduced here.",
     "flash-next": {
-      "label": "Qwen3.8-Flash-Next (125B MoE, 262k context)",
+      "label": "Qwen3.8-Flash-Next (125B MoE, 262k context)", "short": "125B MoE, 262k",
       "model": "flash-next",
       "engines": [
         {"engine": "halogen", "needs": "npu", "why": "65 t/s decode, ~1,500 t/s prefill, keeps the NPU guard/triage/dedup tools (measured)"},
@@ -59,7 +59,7 @@
       ]
     },
     "qwen38-27b": {
-      "label": "Qwen3.8-27B (dense, vision)",
+      "label": "Qwen3.8-27B (dense, vision)", "short": "dense, vision",
       "model": "qwen38-27b",
       "engines": [
         {"engine": "gufo", "why": "~49 t/s on code with its DFlash2 draft, ~570 t/s prefill at 32k (reported, Talus's same-desktop run)"},
@@ -67,7 +67,7 @@
       ]
     },
     "deepseek": {
-      "label": "DeepSeek-V4.1-Flash (1M context, streams from the SSD)",
+      "label": "DeepSeek-V4.1-Flash (1M context, streams from the SSD)", "short": "1M ctx, SSD",
       "model": null,
       "engines": [
         {"engine": "osmos", "why": "36-42 t/s decode, 430-490 t/s prefill, 1M context (measured at 70 W, osmos-evo)"}
