@@ -31,9 +31,9 @@ The full walkthrough of `./setup.sh`, the `./harness` commands and `./start.sh`.
    prints a short summary and offers to start pi in the current directory. The probe is one short prompt (a few thousand
    tokens), so its speeds are for sizing limits only. They are not comparable to the engine benchmark tables in
    [BENCHMARKS.md](BENCHMARKS.md#engines-on-strix-halo), which use the `halogen-cmp.py` battery and 2k-119k depth prompts.
-5. **Extras, asked once and remembered** (`./harness config` changes one; `./harness setup --reconfigure` asks all
+5. **Extras, remembered between runs** (`./harness config` changes one; `./harness setup --reconfigure` asks all
    again):
-   - whether to run the **ling-tiny sidecar** (default yes where the GPU has 24 GB or more, no on smaller cards; it holds ~8 GiB of GPU memory, and "no" means the main
+   - whether to run the **ling-tiny sidecar**, asked on every wizard run with your saved answer pre-selected (default yes where the GPU has 24 GB or more, no on smaller cards; it holds ~8 GiB of GPU memory, and "no" means the main
      model writes commits and summaries, with compaction blocking on it; non-interactive: `./setup.sh --no-sidecar` /
      `--sidecar`);
    - the engine update check (any engine with a known release source: halogen, gufo, Strata, llama.cpp, vLLM, Ollama).

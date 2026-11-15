@@ -6,6 +6,7 @@
 ## Unreleased
 
 ### Changed
+- The setup wizard asks about the ling-tiny sidecar on every interactive run, pre-selected with your saved answer, instead of only the first time.
 - Engine names read `engine · model` (osmos · DeepSeek-V4.1-Flash (osmos-evo)) in status, tune, bench and setup; the raw model id is unchanged.
 
 ### Added

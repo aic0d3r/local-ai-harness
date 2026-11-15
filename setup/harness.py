@@ -1137,13 +1137,15 @@ def set_sidecar(on):
     open(os.path.join(AGENT, "harness-sidecar"), "w").write("1\n" if on else "0\n")
 
 
-def ask_sidecar(reconfigure):
-    """Ask once whether to run the ling-tiny sidecar (default: yes where the GPU has room); setup.sh reads the saved answer."""
-    if (sidecar_pref() and not reconfigure) or not sys.stdin.isatty():
+def ask_sidecar():
+    """Ask on every interactive wizard run whether to run the ling-tiny sidecar, pre-filled with the saved answer (else the
+    GPU-size default); setup.sh reads the saved answer. Without a terminal the saved answer stands."""
+    if not sys.stdin.isatty():
         return
     dl = "" if glob.glob(os.path.expanduser("~/.models/ling3.0-tiny/*.gguf")) + glob.glob(os.path.join(REPO, "models/ling3.0-tiny/*.gguf")) else ", first run downloads 4.5 GB"
-    default, fast = sidecar_default(), capacity()["fast_gb"]
-    room = f" Your GPU has {fast:g} GB, so the default is No." if not default else ""
+    saved = sidecar_pref()
+    default, fast = (saved == "1") if saved else sidecar_default(), capacity()["fast_gb"]
+    room = f" Your GPU has {fast:g} GB, so the default is No." if not default and not saved else ""
     set_sidecar(ask_yn(f"Run the ling-tiny sidecar? ~2x faster commits/compaction, holds ~8 GiB GPU memory{dl}.{room} "
                        "(No = the main model writes them)", default))
 
@@ -1654,7 +1656,7 @@ def cmd_setup(a):
     eng, plan = pick_engine(d, a.yes, on_pick=None if a.yes else lambda e: up.append(update_offer(e)) or up[0])
     upgrade = bool(up and up[0])
     if not a.yes:
-        ask_sidecar(a.reconfigure)
+        ask_sidecar()
     if not sidecar_pref() and not sidecar_default():  # not asked (--yes, no terminal) on a small card: do not reserve 8 GiB of it unasked
         set_sidecar(False)
     voice = not a.yes and ask_once("voice", "Set up voice (local STT/TTS via Lemonade)?", a.reconfigure)

@@ -109,7 +109,7 @@ assert "- typescript\nencoding" in open(f"{proj}/.serena/project.yml").read()
 assert h.ask_once("voice", "?", False) is False
 # sidecar opt-out answer: not asked without a terminal; read back from the file setup.sh and the extensions share
 assert h.sidecar_pref() == ""
-h.ask_sidecar(False)
+h.ask_sidecar()
 assert h.sidecar_pref() == ""
 open(f"{AGENT}/harness-sidecar", "w").write("0\n")
 assert h.sidecar_pref() == "0"
