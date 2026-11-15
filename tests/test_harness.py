@@ -34,7 +34,7 @@ d = h.detect()
 assert [e["engine"] for e in d["engines"]].count("llamacpp") == 1, d["engines"]
 t = h.tune("llamacpp", "Qwen3-8B")
 assert t["prefill_tps"] > 0 and t["decode_tps"] > 0 and t["protocol"] == h.BENCH_ID and t["samples"] == 3, t
-assert h.engine_title("osmos", "osmos-osmos-evo") == "osmos · DeepSeek-V4.1-Flash (osmos-evo)" and h.engine_title("llamacpp", "Qwen3-8B") == "llamacpp · Qwen3-8B" and h.engine_title("halogen", "flash-next") == "halogen · Qwen3.8-Flash-Next, Unsloth UD-Q4_K_XL"
+assert h.engine_title("osmos", "osmos-osmos-evo") == "osmos · DeepSeek-V4.1-Flash (osmos-evo)" and h.engine_title("llamacpp", "Qwen3-8B") == "llamacpp · Qwen3-8B" and h.engine_title("halogen", "flash-next") == "halogen · Qwen3.8-Flash-Next (halogen .hgn)"
 assert h.engine_title("gufo", None) == "gufo · no model" and "/" not in h.engine_title("strata", "flash-next-iq3_s")
 q = h.bench("llamacpp", "Qwen3-8B", runs=2, quick=True)  # tune is this quick subset: one prefill cell, decode repeats
 assert set(q["median"]) == {"decode_code", "prefill_8192"} and q["quick"], q
@@ -194,6 +194,15 @@ open(f"{AGENT}/harness-sidecar", "w").write("0\n")
 assert "sidecar off" in h.choices_line()
 # weights: stock until answered; the launchers resolve the saved answer to the file they load; tuning is keyed per weights
 assert h.weights_pref() == "stock" and h.ask_weights("halogen") is False and "weights stock" in h.choices_line()
+# tune results: stock and abliterated apart, old ones (no "weights" field) told apart by their key; another model left out
+r = lambda d, p, **kw: {"engine": "osmos", "model": "osmos-osmos-evo", "when": "2026-11-15", "protocol": h.BENCH_ID, "decode_tps": d, "prefill_tps": p, **kw}  # noqa: E731
+h.jput(os.path.join(AGENT, "harness-tuned.json"), {h.hw_key("osmos", "osmos-osmos-evo", "stock"): r(33.5, 469),
+                                                  h.hw_key("osmos", "osmos-osmos-evo", "abliterated"): r(34.3, 475),
+                                                  "x": {**r(36.0, 405), "engine": "gufo", "model": "qwen3.8-27b", "weights": "stock"}})
+assert set(h.speeds("osmos")) == {"stock", "abliterated"}, h.speeds("osmos")
+assert "stock 33.5 t/s" in h.speed_text("osmos") and "abliterated 34.3 t/s" in h.speed_text("osmos")
+assert h.speed_text("gufo", "flash-next") == "" and "36.0" in h.speed_text("gufo", "qwen38-27b")
+os.remove(os.path.join(AGENT, "harness-tuned.json"))
 k_stock = h.hw_key("gufo", "m")
 open(h.WEIGHTS, "w").write("abliterated\n")
 assert h.weights_file("gufo").endswith("orca-uncensored/Qwen3.8-Flash-Next-Uncensored-Gufo-00001-of-00005.gguf")

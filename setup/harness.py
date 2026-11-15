@@ -200,7 +200,8 @@ def ask_route(esc=None):
         b = best_engine(r, hw)
         if b:
             labels[f"{r['label']} -> {b['engine']}"] = (k, b)
-    notes = [f"{r['label'].split(' (')[0]} on {b['engine']}: {b['why']}" for k, b in labels.values() for r in [routes[k]]]
+    notes = [f"{r['label'].split(' (')[0]} on {b['engine']}: {b['why']}" + (f"; measured here: {s}" if s else "")
+             for k, b in labels.values() for r in [routes[k]] for s in [speed_text(b["engine"], r["model"])]]
     pick = choose("Which model do you want to run? the best engine for it on this box is chosen", [*labels, other], False, esc, notes)
     if pick is BACK:
         return BACK
@@ -615,10 +616,11 @@ def install_extensions(engine, extra=(), verbose=True, show_ok=True, launch=True
 
 
 # ---------- tune ----------
-def hw_key(engine, model_id):
+def hw_key(engine, model_id, weights=None, model=None):
+    """weights/model: the key a result had under other answers (speeds() reads old results back); default the saved ones."""
     h = hardware()
-    m = engine_model(engine)
-    w = "|abliterated" if engine in WEIGHTS_ENGINES and m == DEFAULT_MODEL and weights_pref() == "abliterated" else ""  # stock keeps its old key
+    m = model or engine_model(engine)
+    w = "|abliterated" if engine in WEIGHTS_ENGINES and m == DEFAULT_MODEL and (weights or weights_pref()) == "abliterated" else ""  # stock keeps its old key
     if m != DEFAULT_MODEL:
         w = "|" + m  # another model is another speed
     elif engine == "gufo" and not w and saved_quant() != DEFAULT_QUANT:
@@ -654,7 +656,8 @@ def tune(engine, model_id):
     """The quick subset of bench() (same prompts, same code path): 3 short code decodes and one 8K cold prefill, medians. Its
     decode_tps is short-code decode at near-zero context; its prefill_tps is at the 8K depth. Compare it only with bench's cells."""
     ctx = engine_ctx(engine)
-    res = {"engine": engine, "model": model_id, "ctx": ctx, "when": time.strftime("%Y-%m-%d"), "protocol": BENCH_ID}
+    res = {"engine": engine, "model": model_id, "ctx": ctx, "when": time.strftime("%Y-%m-%d"), "protocol": BENCH_ID,
+           **({"weights": weights_pref()} if engine in WEIGHTS_ASK else {})}
     try:
         b = bench(engine, model_id, runs=3, quick=True)
     except Exception as ex:
@@ -783,6 +786,35 @@ def cmd_quant_info(a):
 
 def cmd_detect(_):
     print(json.dumps(detect(), indent=1))
+
+
+def catalog_id(served):
+    """The catalog id a served model id is (qwen3.8-27b -> qwen38-27b), longest match; DEFAULT_MODEL if none matches."""
+    norm = lambda s: re.sub(r"[^a-z0-9]", "", (s or "").lower())  # noqa: E731
+    return max((k for k in catalog() if norm(k) in norm(served)), key=len, default=DEFAULT_MODEL)
+
+
+def speeds(engine, model=None):
+    """{weights: newest ./harness tune result} for engine, stock and abliterated apart ("?" when an old result's key cannot
+    tell). model: a served or catalog id; only results of that model."""
+    out = {}
+    for k, v in sorted(jget(os.path.join(AGENT, "harness-tuned.json"), {}).items(), key=lambda kv: kv[1].get("when", "")):
+        if v.get("engine") != engine or not v.get("decode_tps") or (model and catalog_id(v.get("model")) != catalog_id(model)):
+            continue
+        w = v.get("weights")
+        if not w:  # results before "weights" was saved: the weights are only in the key
+            keys = {x: hw_key(engine, v.get("model"), x, catalog_id(v.get("model"))) for x in ("stock", "abliterated")}
+            w = next((x for x, kx in keys.items() if kx == k), "?") if keys["stock"] != keys["abliterated"] else "?"
+        out[w] = v
+    if len(out) > 1:
+        out.pop("?", None)  # an unlabelled old result beside labelled ones only confuses
+    return out
+
+
+def speed_text(engine, model=None):
+    """'stock 34.3 t/s decode, 469 prefill (2026-11-15); abliterated ...', or '' when nothing was measured."""
+    return "; ".join(f"{'' if w == '?' else w + ' '}{v['decode_tps']} t/s decode, {v.get('prefill_tps', '?')} prefill "
+                     f"({v.get('when', '?')}{'' if v.get('protocol') == BENCH_ID else ', old probe'})" for w, v in speeds(engine, model).items())
 
 
 def last_speed(engine):
@@ -933,8 +965,12 @@ def ask_weights(engine, back=False):
     cur = weights_pref()
     labels = weights_labels(engine)
     opts = sorted(labels, key=lambda k: k != cur)
-    choice = choose("Default model weights? halogen, gufo and Strata load these; abliterated "
-                    "on Strata = gufo's orca-uncensored shards", [labels[k] for k in opts], False, BACK if back else None)
+    measured = speeds(engine, engine_model(engine) if engine in ("gufo", "strata") else None)
+    notes = [f"measured here: {w} {v['decode_tps']} t/s decode, {v.get('prefill_tps', '?')} prefill ({v.get('when', '?')})"
+             for w, v in measured.items() if w != "?"]
+    choice = choose(f"Which weights should {engine} load? one answer for every engine, used on its next start"
+                    + ("; abliterated on Strata = gufo's orca-uncensored shards" if engine == "strata" else ""),
+                    [labels[k] for k in opts], False, BACK if back else None, notes)
     if choice is BACK:
         return BACK
     pick = {labels[k]: k for k in opts}[choice]
@@ -1788,6 +1824,10 @@ def finish(eng, mod, no_tune, launch=False):
     speed = f"{tuned['prefill_tps']} t/s prefill, {tuned['decode_tps']} t/s decode (short code)" if tuned.get("decode_tps") else "not probed (./harness tune)"
     if no_tune and tuned.get("decode_tps"):
         speed += f" (saved {tuned.get('when', '')}; re-measure: ./harness tune)"
+    if eng in WEIGHTS_ASK:  # the other weights' last result beside this one, so the two compare at a glance
+        other = {w: v for w, v in speeds(eng, mod).items() if w not in ("?", weights_pref())}
+        speed = f"{weights_pref()}: {speed}" + "".join(f"; {w}: {v['prefill_tps']} t/s prefill, {v['decode_tps']} t/s decode "
+                                                       f"({v.get('when', '?')})" for w, v in other.items())
     passed = verified(eng)
     width = shutil.get_terminal_size().columns if sys.stdout.isatty() else None  # narrow windows wrap; piped output stays one line
     items = choices_items(eng)
@@ -1919,8 +1959,7 @@ def cmd_status(_):
     port = PROFILES["engines"][p["engine"]]["port"]
     up = bool(served_models(port, p["engine"]))
     print(f"engine {engine_title(p['engine'], p['model'])} :{port} {'UP' if up else 'DOWN'}  npu {p['npu']}")
-    t = jget(os.path.join(AGENT, "harness-tuned.json"), {}).get(hw_key(p["engine"], p["model"]))
-    print("tuning:", t or "none yet (./harness tune)")
+    print("speed:", speed_text(p["engine"], p["model"]) or "not measured yet (./harness tune)")
     if sidecar_pref() == "0":
         return print("sidecar: off (opted out; ./harness config turns it on)")
     try:
@@ -1997,17 +2036,26 @@ def cmd_config(a):
         upd = update_pref()
         sc = sidecar_pref() != "0"
         voice = bool(jget(EXTRAS, {}).get("voice"))
+        eng = p.get("engine")
+        own = eng and eng not in ("gufo", "strata") and eng != CUSTOM  # serves its own model: the model answer is not its
+        notes = []
+        if eng and eng != CUSTOM:  # a row stays short (80 columns); the numbers go under the question
+            notes.append(f"{eng} speed (./harness tune): {speed_text(eng, p.get('model')) or 'not measured yet'}")
+        if own:
+            notes.append(f"{eng} runs {engine_title(eng, p.get('model')).split(' · ', 1)[1]} only; the model row is for gufo and Strata")
+        if eng == "osmos" and (weights_file("osmos") != "stock") != (weights_pref() == "abliterated"):  # osmos.json = its last start
+            notes.append(f"! osmos was last started on the other weights; {weights_pref()} applies on its next start")
         items = {
-            f"engine        {engine_title(p['engine'], p['model']) if p.get('engine') else '-'}": "engine",
-            f"model         {model_pref()}  (gufo, Strata)": "model",
-            f"weights       {weights_pref()}  (default for halogen and gufo)": "weights",
+            f"engine        {engine_title(eng, p['model']) if eng else '-'}": "engine",
+            f"model         {catalog().get(model_pref(), {}).get('label', model_pref()).split(' (')[0].split(',')[0]}  (gufo, Strata)": "model",
+            f"weights       {weights_pref()}  (every engine, next start)": "weights",
             f"agent         {'none (engine only)' if no_pi() else 'pi'}  (extensions, providers, MCP)": "agent",
             f"sidecar       {'on' if sc else 'off'}  (ling-tiny, ~8 GiB GPU memory)": "sidecar",
             f"voice         {'on' if voice else 'off'}  (Lemonade STT/TTS)": "voice",
             f"update check  {'on' if upd == '1' else 'off'}  (newer engine release; never installs)": "update",
             f"sudo hints    {'hidden' if os.path.exists(hints) else 'shown'}  (fabric clock, vm-compact)": "hints",
             "done": "done"}
-        k = items[choose("Change which setting?", list(items), False, esc="done")]  # Esc at the top closes quietly, like done
+        k = items[choose("Change which setting?", list(items), False, esc="done", notes=notes)]  # Esc at the top closes quietly, like done
         if k == "done":
             return
         if k == "engine":
@@ -2019,7 +2067,7 @@ def cmd_config(a):
         elif k == "model":
             eng = p.get("engine", "halogen")
             if eng not in ("gufo", "strata"):
-                print(f"  {eng} always runs Flash-Next; the model answer applies to gufo and Strata (switch engine first)")
+                print(f"  {eng} runs {engine_title(eng, p.get('model')).split(' · ', 1)[1]} only; the model answer is for gufo and Strata (pick one under engine first)")
                 continue
             changed = ask_model(eng, back=True)
             if changed is BACK:
