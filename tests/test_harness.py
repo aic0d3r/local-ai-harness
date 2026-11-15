@@ -193,8 +193,9 @@ h.capacity = real_cap
 for n, f in saved.items(): setattr(h, n, f)
 assert calls == ["update_offer", "plan_start", "install launch=False", "prepare", "upgrade", "start plan=True", "probe=True"], calls
 # upgrade chosen: pick_engine must not ask "Start <engine>?" (declining it used to exit setup); without one it does
-asked, saved = [], {n: getattr(h, n) for n in ("engine_menu", "plan_start", "ask_weights", "ask_yn")}
+asked, saved = [], {n: getattr(h, n) for n in ("engine_menu", "plan_start", "ask_weights", "ask_yn", "ask_route")}
 h.engine_menu = lambda r: "halogen"
+h.ask_route = lambda: None  # the model-first menu is tested below
 h.ask_weights = lambda e: False
 h.plan_start = lambda e, r, ask_start=True: asked.append(ask_start) or {"stop": None, "download": False}
 real_stdin, h.sys.stdin = h.sys.stdin, types.SimpleNamespace(isatty=lambda: True)
@@ -210,6 +211,34 @@ asked.pop()
 h.sys.stdin = real_stdin
 for n, f in saved.items(): setattr(h, n, f)
 assert asked == [False, True], asked
+
+# model-first routes: the best engine this box can run, first usable wins
+R = h.PROFILES["routes"]
+npu, plain = {"npu": True, "ram_gb": 121}, {"npu": False, "ram_gb": 121}
+assert h.best_engine(R["flash-next"], npu)["engine"] == "halogen" and h.best_engine(R["flash-next"], plain)["engine"] == "gufo"
+assert h.best_engine(R["flash-next"], {"npu": True, "ram_gb": 64})["engine"] == "gufo"  # halogen needs halogen_min_ram_gb
+assert h.best_engine(R["qwen38-27b"], npu)["engine"] == "gufo" and h.best_engine(R["deepseek"], plain)["engine"] == "osmos"
+assert all(e["engine"] in h.PROFILES["engines"] for r in R.values() if isinstance(r, dict) for e in r.get("engines", []))
+# ask_route saves the model answer, keeps a saved quant of the same family, and offers "pick an engine" as the way out
+saved = {n: getattr(h, n) for n in ("capacity", "hardware", "choose")}
+h.capacity, h.hardware = (lambda: {"gpu_name": "Strix Halo"}), (lambda: plain)
+real_stdin, h.sys.stdin = h.sys.stdin, types.SimpleNamespace(isatty=lambda: True)
+first = lambda q, o, y: next(x for x in o if "27B" in x)
+h.choose = first
+assert h.ask_route() == ("gufo", "qwen38-27b") and h.model_pref() == "qwen38-27b"
+h.choose = lambda q, o, y: next(x for x in o if "Flash-Next" in x)
+assert h.ask_route() == ("gufo", "flash-next") and h.model_pref() == "flash-next"
+open(h.MODEL_FILE, "w").write("flash-next-iq3_s\n")
+assert h.ask_route() == ("gufo", "flash-next") and h.model_pref() == "flash-next-iq3_s"
+h.choose = lambda q, o, y: next(x for x in o if "DeepSeek" in x)
+assert h.ask_route() == ("osmos", None) and h.model_pref() == "flash-next-iq3_s"
+h.choose = lambda q, o, y: o[-1]
+assert h.ask_route() is None
+h.capacity = lambda: {"gpu_name": "NVIDIA RTX 4090"}
+assert h.ask_route() is None  # other hardware keeps the engine menu
+h.sys.stdin = real_stdin
+for n, f in saved.items(): setattr(h, n, f)
+os.remove(h.MODEL_FILE)
 
 # gufo abliterated: weights present but no shared MTP head -> the sidecar download is still owed
 root = tempfile.mkdtemp(); os.makedirs(f"{root}/orca"); open(f"{root}/orca/w.gguf", "w").close()

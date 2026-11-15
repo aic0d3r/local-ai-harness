@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# osmos (libosmos) serving the osmos-evo-a pack on osmos-api :8091. Weights: stock, or abliterated = huihui-ai's
+# osmos (libosmos) serving the osmos-evo pack on osmos-api :8091. Weights: stock, or abliterated = huihui-ai's
 # UD-IQ1_M patch as an overlay (0.6 GB, the pack's own files untouched; docs/ENGINES.md#abliterated-models).
 # osmos holds ~91 GiB of the GPU heap: one big engine at a time, stop halogen/gufo first (the wizard does).
 # The pack is laid out by libosmos's own installer, which is also what fetches, verifies and (un)sets the overlay, so
@@ -8,7 +8,7 @@
 set -u
 OSMOS_DIR=${OSMOS_DIR:-$([ -d "$HOME/LLMBench/engines/libosmos" ] && echo "$HOME/LLMBench/engines/libosmos" || echo "$HOME/coding/libosmos")}
 OSMOS_MODELS=${OSMOS_MODELS:-$([ -d "$HOME/LLMBench/models" ] && echo "$HOME/LLMBench/models" || echo "$HOME/models")}
-PACK=${OSMOS_PACK:-osmos-evo-a}
+PACK=${OSMOS_PACK:-osmos-evo}  # the release's default pack since 0.7.6; osmos-evo-a (its base) still answers under its old id
 PORT=${OSMOS_PORT:-8091}
 CFG=$OSMOS_MODELS/$PACK/osmos.json
 # the wizard's saved answer (stock|abliterated); OSMOS_WEIGHTS overrides it. --print-weights only reports.

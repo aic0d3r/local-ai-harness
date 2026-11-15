@@ -14,6 +14,12 @@ llama.cpp).
 | **halogen** (recommended) | NPU+GPU engine, Qwen3.8 Flash-Next (125B) from a local checkpoint, no network needed to run | just works, **262k ctx** x 4 slots |
 | **llama.cpp (Vulkan)** | Nathan's builds, full control, DFlash2/MTP spec decode, vision, local GGUFs, no network needed to run, **256k ctx** max | tuning and the **27B** runs — see [the llama.cpp path](LLAMACPP.md) |
 
+**Which engine for which model (Strix Halo).** Setup asks the model first and takes the first usable engine of its route
+(`routes` in `config/profiles.json`, each with the numbers behind the order and whether they were measured here or only reported):
+Flash-Next: halogen (NPU + 110 GB RAM) > gufo > Strata; Qwen3.8-27B: gufo (DFlash2 draft) > llama.cpp; DeepSeek-V4.1-Flash: osmos.
+The 27B order rests on another project's same-desktop run (Talus v0.1.3: gufo 49 t/s on code, llama.cpp 45), not on a run here;
+re-measure with `./harness tune` before moving it.
+
 ## Strata: the pick for NVIDIA and AMD desktop GPUs
 
 [Strata](https://github.com/Niko1221/Strata) (free, open source) runs the same Qwen3.8-Flash-Next
@@ -127,18 +133,26 @@ cd Strata && ROCM_PATH=/nonexistent ./setup.sh --yes --family unsloth --model UD
 ## osmos: DeepSeek-V4.1-Flash from the SSD, 1M context (Strix Halo)
 
 [libosmos](https://github.com/mrsirg97-rgb/libosmos) streams DeepSeek-V4.1-Flash (~768B) experts from the SSD on a
-Ryzen AI MAX+ 395. Its installer builds the engine and lays a pack down (`osmos_install.py osmos-evo-a --serve`), and
+Ryzen AI MAX+ 395. Its installer builds the engine and lays a pack down (`osmos_install.py osmos-evo --serve`), and
 `osmos-api` serves `:8091`. This repo wires pi to it like any other engine:
 
 ```bash
 cd ~/engines/libosmos                       # the libosmos checkout
-python3 tools/install/osmos_install.py osmos-evo-a --models /path/to/models --serve   # ~381 GB fetched, ext4 needs ~522 GB
+python3 tools/install/osmos_install.py osmos-evo --models /path/to/models --serve   # ~381 GB fetched, ext4 needs ~522 GB
 ./harness use osmos                         # in this repo: provider, model, context, no sampling params
 ```
 
-Measured here (osmos-evo-a, GPU only, drafted): **452 t/s prefill, 40.8 t/s decode** (`./harness tune`), 1M context,
-first request after start ~30 s while the expert cache fills. It appears in pi and Paseo as **osmos deepseek** (a model
-profile can name itself: `models.osmos-deepseek`; the id osmos-api serves is `osmos-osmos-evo-a`). Two things the
+`osmos-evo` is the release's default pack since 0.7.6 (evo-A plus the evo-A2 delta: gate and up of layers 10-19 at
+IQ2_XXS). An install that already has evo-A fetches only the 23.4 GB patch and derives the new shards from it, which
+cost ~71 GB more on ext4. Shards 1 and 4 are the evo-A base, shared with this pack; evo-A's own shards 2 and 3 (~92 GB)
+are what `osmos-evo` made redundant, and removing them frees that much (the pack sources stay in `.hf`, so
+`osmos_install.py osmos-evo-a` can rebuild it). The id osmos-api serves is `osmos-osmos-evo`; `osmos-osmos-evo-a`
+still answers as an alias.
+
+Measured here (osmos-evo, GPU only, stock, drafted, `quiet` 70 W): **~236 t/s prefill at 2K and 426 t/s at 8K,
+36.5 t/s decode**, 1M context, first request after start ~30 s while the expert cache fills. The pack costs about 5%
+of decode against evo-A, as its release notes say. It appears in pi and Paseo as **osmos deepseek** (a model
+profile can name itself: `models.osmos-deepseek`; the id osmos-api serves is `osmos-osmos-evo`). Two things the
 harness handles for it:
 
 - **It decodes greedily and rejects sampling**: `temperature 0`, `top_p 1` or a 400 (`sampling is not built`).

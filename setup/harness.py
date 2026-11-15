@@ -182,6 +182,34 @@ def recommend(hw, cap):
     return none(f"no supported GPU path on this box (gpu={hw['gpu']}); run Strata natively there and point pi at it: ./setup.sh --strata <url>")
 
 
+def best_engine(route, hw):
+    """First engine of a profiles.json route this box can run: -> {engine, why, ...} or None."""
+    ok = lambda e: e.get("needs") != "npu" or (hw["npu"] and hw["ram_gb"] >= PROFILES["recommend"]["halogen_min_ram_gb"])
+    return next((e for e in route["engines"] if ok(e)), None)
+
+
+def ask_route():
+    """Strix Halo: ask which MODEL to run and pick its best engine (profiles.json \"routes\"). Saves the model answer.
+    -> (engine, model) or None when the box is not a Strix Halo, there is no terminal, or the user wants to pick the engine."""
+    if not sys.stdin.isatty() or "Strix Halo" not in capacity().get("gpu_name", ""):
+        return None
+    hw, routes = hardware(), {k: v for k, v in PROFILES["routes"].items() if not k.startswith("_")}
+    labels, other = {}, "Pick an engine instead"
+    for k, r in routes.items():
+        b = best_engine(r, hw)
+        if b:
+            labels[f"{r['label']}  ->  {b['engine']}: {b['why']}"] = (k, b)
+    pick = choose("Which model do you want to run? (the best engine for it on this box is chosen)", [*labels, other], False)
+    if pick == other:
+        return None
+    k, b = labels[pick]
+    model = routes[k]["model"]
+    if model and not model_pref().startswith(model):  # keeps a saved quant of the same family (flash-next-iq3_s)
+        os.makedirs(AGENT, exist_ok=True)
+        open(MODEL_FILE, "w").write(model + "\n")
+    return b["engine"], model
+
+
 def describe(rec, cap):
     gpu = f"{cap['gpu_name'] or 'no GPU'}, {cap['fast_gb']:g} GB GPU-addressable, {cap['disk_free_gb']} GB disk free"
     if not rec["engine"]:
@@ -933,9 +961,10 @@ def pick_engine(d, yes, want=None, on_pick=None):
         return next(iter(sorted(running, key=lambda e: e != "halogen"))), None
     if not running:
         print("No engine is running yet. Pick one: halogen, gufo and Strata can be started (and halogen or Strata installed) from here.")
-    eng = engine_menu(running)
+    route = ask_route()
+    eng = route[0] if route else engine_menu(running)
     before = engine_model(eng)
-    if not offer_recommendation(eng):
+    if not (route and route[1] and route[1] != DEFAULT_MODEL) and not offer_recommendation(eng):  # a model picked by name is already answered
         ask_model(eng)
     upgrading = on_pick(eng) if on_pick else False
     # weights stock/abliterated only mean something for Flash-Next

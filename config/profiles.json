@@ -30,12 +30,12 @@
       "managed": false,
       "ctx": 1048576,
       "loses": "NPU tools (guard, triage, dedup)",
-      "model_label": "DeepSeek-V4.1-Flash (osmos-evo-A)",
+      "model_label": "DeepSeek-V4.1-Flash (osmos-evo)",
       "note": "osmos-api (libosmos), used for DeepSeek-V4.1-Flash only (its packs, 1M context); the Qwen models run on halogen, gufo or Strata. It does not report its context window, so `ctx` is the pack's max_context in osmos.json - edit both together",
       "script": "server/start-osmos.sh",
       "ready": "/health",
       "weights_labels": {
-        "stock": "stock osmos-evo-A (UD-IQ1_M + the evo-A delta, default)",
+        "stock": "stock osmos-evo (UD-IQ1_M + the 0.7.6 evo-A2 delta, the release's default)",
         "abliterated": "abliterated (huihui-ai's UD-IQ1_M patch as an overlay, +0.6 GB, refusals removed)"
       },
       "start": "server/start-osmos.sh [stock|abliterated] (OSMOS_DIR, OSMOS_MODELS, OSMOS_PACK)",
@@ -46,6 +46,33 @@
       }
     },
     "lmstudio": { "port": 1234,  "probe": "/v1/models",  "provider": "lmstudio","npu": false, "managed": false, "loses": "NPU tools (guard, triage, dedup)" }
+  },
+  "routes": {
+    "_doc": "Strix Halo only: which engine runs which model best, first usable one wins (the wizard asks the model first). needs=npu: an NPU and halogen_min_ram_gb of RAM. model = catalog id the launchers read (null: the engine has one model). why = the numbers behind the order; 'measured' = on this box (docs/ENGINES.md), 'reported' = someone else's run, not yet reproduced here.",
+    "flash-next": {
+      "label": "Qwen3.8-Flash-Next (125B MoE, 262k context)",
+      "model": "flash-next",
+      "engines": [
+        {"engine": "halogen", "needs": "npu", "why": "65 t/s decode, ~1,500 t/s prefill, keeps the NPU guard/triage/dedup tools (measured)"},
+        {"engine": "gufo", "why": "40 t/s decode, ~1,265 t/s prefill, any stock quant (measured)"},
+        {"engine": "strata", "why": "43 t/s decode, ~990 t/s prefill, open source (measured)"}
+      ]
+    },
+    "qwen38-27b": {
+      "label": "Qwen3.8-27B (dense, vision)",
+      "model": "qwen38-27b",
+      "engines": [
+        {"engine": "gufo", "why": "~49 t/s on code with its DFlash2 draft, ~570 t/s prefill at 32k (reported, Talus's same-desktop run)"},
+        {"engine": "llamacpp", "why": "fallback: ~45 t/s on code, prefill about half of gufo's (reported); Vulkan builds can be slower"}
+      ]
+    },
+    "deepseek": {
+      "label": "DeepSeek-V4.1-Flash (1M context, streams from the SSD)",
+      "model": null,
+      "engines": [
+        {"engine": "osmos", "why": "40.8 t/s decode, 452 t/s prefill, 1M context (measured)"}
+      ]
+    }
   },
   "recommend": {
     "_doc": "Hardware -> engine/quant/context table behind ./harness recommend. gib = size of the shards on unsloth/Qwen3.8-Flash-Next-GGUF (best first); only gufo reads the quant (halogen and Strata ship one fixed weight set here). Anything not measured on a Strix Halo 124 GB box is marked untested.",
