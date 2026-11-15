@@ -173,6 +173,17 @@ assert h.upgrader("osmos") and h.upgrader("osmos").endswith("upgrade-osmos.sh")
 open(h.MODEL_FILE, "w").write("qwen38-27b\n")
 assert "DeepSeek-V4.1-Flash" in h.choices_line("osmos") and "qwen38-27b" not in h.choices_line("osmos")
 assert "model qwen38-27b" in h.choices_line("gufo") and "model qwen38-27b" in h.choices_line()
+assert "weights" not in h.choices_line("gufo") and "weights" in h.choices_line("halogen")  # the 27B has no abliterated build
+# ready screen's memory line: gufo's own load log; another model's load says nothing
+log = os.path.join(AGENT, "gufo-test.log")
+open(log, "w").write("x [cache] schema=c event=configured sessions=2 capacity_bytes=21991874560\n"
+                      "x [loader] event=load_completed model=qwen3.8-27b-q8 sessions=2 context_tokens=262144 gpu_device_used_mib=82787 gpu_device_total_mib=126976\n")
+real_log, h.engine_log = h.engine_log, lambda e: log
+m = h.gufo_memory("qwen3.8-27b-q8")
+assert m.startswith("80.8 of 124.0 GiB") and "prompt cache 20.5" in m and "2 sessions x 262144 context" in m, m
+assert h.gufo_memory("qwen3.8-27b") == ""
+h.engine_log = real_log
+os.remove(log)
 os.remove(h.MODEL_FILE)
 # ./harness report: the lines a bug report needs, and nothing private (home folder and user name are redacted)
 real_home, real_user = os.environ.get("HOME"), os.environ.get("USER")
@@ -441,7 +452,7 @@ open(h.MODEL_FILE, "w").write("qwen36-q4\n")
 plan = h.plan_start("strata", {})
 assert plan["install"] == "strata" and not plan.get("stock") and not plan.get("weights") and "Qwen3.6-35B-A3B" in asked[0] and "~24 GB" in asked[0], (plan, asked)
 ran = []
-h.subprocess.run = lambda a, **k: ran.append(os.path.basename(a[1])) or types.SimpleNamespace(returncode=0)
+h.subprocess.run = lambda a, **k: ran.append(os.path.basename(a[1])) or types.SimpleNamespace(returncode=0, stdout="30")
 assert h.prepare_start(plan, {}) and ran == ["install-strata.sh"], ran
 open(h.MODEL_FILE, "w").write("qwen38-27b\n")
 h.g27_ready = lambda m="qwen38-27b": False
@@ -451,7 +462,8 @@ ran = []
 assert h.prepare_start(plan, {}) and ran == ["download-qwen38-27b.sh"], ran
 open(h.MODEL_FILE, "w").write("qwen38-27b-q8\n")
 plan = h.plan_start("gufo", {})
-assert plan["g27"] == "qwen38-27b-q8" and "UD-Q8_K_XL" in asked[-2] and "~34 GB" in asked[-2], (plan, asked)
+# the question says what is still missing (the script's --print-gb), not the fresh-install size
+assert plan["g27"] == "qwen38-27b-q8" and "UD-Q8_K_XL" in asked[-2] and "~30 GB of 34" in asked[-2] and plan["g27_gb"] == 30, (plan, asked)
 envs = []
 h.subprocess.run = lambda a, **k: envs.append(k.get("env", {}).get("GUFO_FAMILY")) or types.SimpleNamespace(returncode=0)
 assert h.prepare_start(plan, {}) and envs == ["qwen38-27b-q8"], envs

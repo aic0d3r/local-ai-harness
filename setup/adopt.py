@@ -263,7 +263,7 @@ def packages():
         if spec in have:
             ok(f"{label} package present")
         elif key in have:  # an older, unpinned install: `pi update` would move it to whatever is published
-            warn(f"{label} is installed without the reviewed pin - run: pi install {spec}")
+            warn(f"{label} is not on the reviewed version; to pin it run:\n      pi install {spec}")  # own line: the spec is too long to wrap mid-version
         elif subprocess.run([pi, "install", spec], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
             ok(f"{label} installed (pi package)")
         else:

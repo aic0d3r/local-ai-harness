@@ -709,8 +709,6 @@ def tune(engine, model_id):
     res["prefill_tps"] = round(next((v for k, v in cells.items() if k.startswith("prefill_")), 0))
     res["decode_tps"] = cells["decode_code"]
     res["samples"], res["spread"] = b["runs"], b["spread"]
-    if cells["decode_code"] and b["spread"]["decode_code"] > 0.15 * cells["decode_code"]:
-        print(f"  noisy run (decode spread {b['spread']['decode_code']} t/s on a median of {cells['decode_code']}): stop other apps and re-run ./harness tune")
     # derive settings from the window (not from the speed): answer room and compaction reserve
     if ctx:
         res["maxTokens"] = int(min(model_profile(model_id)["maxTokens"], max(1024, ctx // 8)))
@@ -1142,10 +1140,14 @@ def plan_start(engine, running, ask_start=True):
         plan["stock"] = q
     if engine == "gufo" and is_27b(m) and not g27_ready(m):
         free = shutil.disk_usage(os.path.expanduser("~")).free // 2**30
-        if not ask_yn(f"Download Qwen3.8 27B? {'UD-Q8_K_XL' if m.endswith('-q8') else 'UD-Q4_K_XL'}, DFlash2 draft, vision projector; "
-                      f"~{catalog()[m]['download_gb']} GB, {free} GB free, resumable"):
+        # Q4 and Q8 share the draft and projector: the script counts only the missing files
+        r = subprocess.run(["bash", os.path.join(REPO, "scripts", "download-qwen38-27b.sh"), "--print-gb"], capture_output=True, text=True,
+                           env=dict(os.environ, GUFO_FAMILY=m)).stdout.strip()
+        gb = int(r) if r.isdigit() else catalog()[m]["download_gb"]
+        if not ask_yn(f"Download Qwen3.8 27B {'UD-Q8_K_XL' if m.endswith('-q8') else 'UD-Q4_K_XL'}? "
+                      f"~{gb} GB of {catalog()[m]['download_gb']} still to fetch (target, DFlash2 draft, vision projector), {free} GB free, resumable"):
             return None
-        plan["g27"] = m
+        plan["g27"], plan["g27_gb"] = m, gb
     gb = weights_download_gb(engine) if engine in WEIGHTS_ENGINES and not own and weights_pref() != "stock" else 0
     if gb:
         free = shutil.disk_usage(os.path.expanduser("~")).free // 2**30
@@ -1171,6 +1173,7 @@ def prepare_start(plan, running):
     if wd and subprocess.run(["bash", os.path.join(REPO, "scripts", "download-abliterated.sh"), wd, "--yes"]).returncode:
         return False  # before the install: abliterated Strata installs on top of gufo's shards
     g27 = plan.pop("g27", False)
+    plan.pop("g27_gb", None)
     if g27 and subprocess.run(["bash", os.path.join(REPO, "scripts", "download-qwen38-27b.sh"), "--yes"], env=dict(os.environ, GUFO_FAMILY=g27)).returncode:
         return False
     sq = plan.pop("stock", False)
@@ -1202,7 +1205,7 @@ def start_engine(engine, running, plan=None, wait_s=900):
     try:
         while time.time() - t0 < wait_s:
             if served_models(c["port"], engine) and not (ready and not answers_ready(c["port"], ready)):
-                print(f"\n  {engine} is up")
+                print(f"\r\033[K  {engine} is up after {int(time.time() - t0)}s")  # replaces the waiting line and its log excerpt
                 return True
             if proc.poll() is not None:  # launchers exec the server: an exited launcher means the start failed
                 whole = open(engine_log(engine)).read()
@@ -1235,6 +1238,33 @@ def wait_line(engine, port, secs, pid):
         last = ""
     s = f"  waiting for {engine} on :{port} {secs}s" + (f", read {gb:.0f} GB" if gb >= 1 else "") + " (Ctrl-C keeps it loading)"
     return (s + (f" | {last}" if last else ""))[:shutil.get_terminal_size((100, 20)).columns - 1]
+
+
+def gufo_memory(served):
+    """'82.8 of 124.0 GiB GPU memory in use: model files 33.4, prompt cache 20.5, 2 sessions x 262144 context', from gufo's
+    last load in its log ('' when the log has none). gufo reserves every session's context at load, so a big number at
+    idle is expected, not a second model."""
+    try:
+        lines = open(engine_log("gufo"), errors="replace").read().splitlines()
+    except OSError:
+        return ""
+    kv = lambda line: dict(p.split("=", 1) for p in line.split() if "=" in p)  # noqa: E731
+    done = next((kv(l) for l in reversed(lines) if "event=load_completed" in l), None)
+    if not done or "gpu_device_used_mib" not in done or done.get("model") != served:  # a log of another load says nothing
+        return ""
+    cache = next((kv(l) for l in reversed(lines) if "[cache]" in l and "event=configured" in l), {})
+    used, total = int(done["gpu_device_used_mib"]) / 1024, int(done["gpu_device_total_mib"]) / 1024
+    try:  # the files the launcher loads (target, draft, projector), next to each other on disk
+        first = subprocess.run(["bash", os.path.join(REPO, PROFILES["engines"]["gufo"]["script"]), "--print-model"],
+                               capture_output=True, text=True, env=dict(os.environ, GUFO_FAMILY=catalog_id(served))).stdout.strip()
+        files = sum(os.path.getsize(os.path.join(os.path.dirname(first), f)) for f in os.listdir(os.path.dirname(first))
+                    if f.endswith(".gguf") and (f.startswith(os.path.basename(first).split("-00001-of-")[0]) or "DFlash" in f or "mtp-" in f or f.startswith("mmproj"))) / 2**30
+    except (OSError, KeyError):
+        files = 0
+    parts = ([f"model files {files:.1f}"] if files else []) + (
+        [f"prompt cache {int(cache['capacity_bytes']) / 2**30:.1f}"] if cache.get("capacity_bytes") else []) + (
+        [f"{done['sessions']} sessions x {done.get('context_tokens', '?')} context"] if done.get("sessions") else [])
+    return f"{used:.1f} of {total:.1f} GiB GPU memory in use" + (f": {', '.join(parts)}" if parts else "")
 
 
 def not_answering(eng):
@@ -1667,7 +1697,9 @@ def choices_items(eng=None):
     """Every saved answer as its own item. An engine that serves one model only (osmos: DeepSeek-V4.1-Flash) names it, so the
     saved preference for the Qwen engines is not shown as what osmos runs."""
     model = PROFILES["engines"].get(eng or "", {}).get("model_label") or model_pref()
-    return [f"model {model}", f"weights {weights_pref()}", f"sidecar {'off' if sidecar_pref() == '0' else 'on'}",
+    # the weights answer means nothing to a gufo/Strata model without an abliterated build (the 27B)
+    weights = [] if eng in ("gufo", "strata") and engine_model(eng) != DEFAULT_MODEL else [f"weights {weights_pref()}"]
+    return [f"model {model}", *weights, f"sidecar {'off' if sidecar_pref() == '0' else 'on'}",
             f"voice {'on' if jget(EXTRAS, {}).get('voice') else 'off'}", f"update check {'on' if update_pref() == '1' else 'off'}"]
 
 
@@ -1864,10 +1896,14 @@ def finish(eng, mod, no_tune, launch=False):
     if not no_tune:
         print(f"== probing {engine_title(eng, mod)} (prefill + decode, <2 min) ==")
         tuned = tune(eng, mod)
-        print("  ", {k: v for k, v in tuned.items() if k in ("ctx", "prefill_tps", "decode_tps", "error")})
         if "error" in tuned:
-            print("  probe failed - keeping shipped defaults")
+            print(f"  probe failed ({tuned['error']}) - keeping shipped defaults")
             tuned = {}
+        else:
+            print(f"  {tuned['prefill_tps']} t/s prefill (8K prompt), {tuned['decode_tps']} t/s decode (short code), median of {tuned['samples']}")
+            sp = tuned["spread"]["decode_code"]
+            if tuned["decode_tps"] and sp > 0.15 * tuned["decode_tps"]:
+                print(f"  ! decode varied by {sp} t/s between runs: if other apps were busy, close them and re-run ./harness tune")
     if no_pi():
         e = PROFILES["engines"][eng]
         passed = verified(eng)
@@ -1882,7 +1918,7 @@ def finish(eng, mod, no_tune, launch=False):
     speed = f"{tuned['prefill_tps']} t/s prefill, {tuned['decode_tps']} t/s decode (short code)" if tuned.get("decode_tps") else "not probed (./harness tune)"
     if no_tune and tuned.get("decode_tps"):
         speed += f" (saved {tuned.get('when', '')}; re-measure: ./harness tune)"
-    if eng in WEIGHTS_ASK:  # the other weights' last result beside this one, so the two compare at a glance
+    if eng in WEIGHTS_ASK and catalog_id(mod) == DEFAULT_MODEL:  # the other weights' last result beside this one; only Flash-Next has two
         other = {w: v for w, v in speeds(eng, mod).items() if w not in ("?", weights_pref())}
         speed = f"{weights_pref()}: {speed}" + "".join(f"; {w}: {v['prefill_tps']} t/s prefill, {v['decode_tps']} t/s decode "
                                                        f"({v.get('when', '?')})" for w, v in other.items())
@@ -1894,6 +1930,9 @@ def finish(eng, mod, no_tune, launch=False):
     print(summary_row("engine", [engine_title(eng, mod), f"(pi: {prov}/{mid})"], width))
     print(summary_row("context", str(ctx), width))
     print(summary_row("speed", speed, width))
+    mem = gufo_memory(mod) if eng == "gufo" else ""
+    if mem:
+        print(summary_row("memory", mem, width))
     print(summary_row("start", "./start.sh ~/your-project", width))
     if eng in ("halogen", "strata"):
         print(summary_row("monitor", "./harness monitor (live speed, memory and requests; Ctrl-C to quit)", width))
@@ -1962,7 +2001,7 @@ def cmd_setup(a):
             ["download halogen (~124 GB, resumable)"] if plan and plan["download"] else []) + (
             [f"install Strata with {catalog()[engine_model('strata')]['label']} (its setup downloads ~{catalog()[engine_model('strata')]['download_gb']} GB, resumable)" if engine_model("strata") != DEFAULT_MODEL else
              f"install Strata for the {weights_pref()} weights (" + ("orca-uncensored in place" if weights_pref() == "abliterated" else "shared stock UD-Q4_K_XL in place") + ")"] if plan and plan.get("install") == "strata" else []) + (
-            [f"download {catalog()[plan['g27']]['label'].split(' (')[0]} (~{catalog()[plan['g27']]['download_gb']} GB, resumable)"] if plan and plan.get("g27") else []) + (
+            [f"download {catalog()[plan['g27']]['label'].split(' (')[0]} (~{plan.get('g27_gb', catalog()[plan['g27']]['download_gb'])} GB, resumable)"] if plan and plan.get("g27") else []) + (
             [f"download the stock {plan['stock']} (~{quant_gb(plan['stock'])} GB, resumable)"] if plan and plan.get("stock") else []) + (
             [f"download the abliterated {eng} weights (~{plan.get('weights_gb')} GB, resumable)"] if plan and plan.get("weights") else []) + (
             [f"upgrade {eng} (restart, rolls back on failure)"] if upgrade else []) + (
