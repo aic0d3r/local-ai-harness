@@ -114,6 +114,31 @@ assert h.sidecar_pref() == ""
 open(f"{AGENT}/harness-sidecar", "w").write("0\n")
 assert h.sidecar_pref() == "0"
 os.remove(f"{AGENT}/harness-sidecar")
+# wizard summary on a narrow window: rows wrap at words within the width, continuations keep the label column, and choices only break after a ' ·'
+items = ["model qwen3.8-flash-next", "weights stock", "sidecar on", "voice off", "update check on"]
+row = h.summary_row("choices", [f"{it} ·" for it in items[:-1]] + [items[-1], "(change: ./harness config)"], 52).split("\n")
+assert len(row) > 1 and all(len(l) <= 52 for l in row), row
+assert all(l.startswith(" " * 11) and not l[11:].startswith("·") for l in row[1:]), row
+assert " ".join(" ".join(row).split()) == "choices model qwen3.8-flash-next · weights stock · sidecar on · voice off · update check on (change: ./harness config)"
+assert h.summary_row("speed", "1808 t/s prefill, 66.1 t/s decode (short code)") == "  speed    1808 t/s prefill, 66.1 t/s decode (short code)"
+# colour: only on a terminal, off under NO_COLOR; the dimmed label does not change the wrap width
+import io, re
+class _Tty(io.StringIO):
+    def isatty(self): return True
+real_out = sys.stdout
+sys.stdout = _Tty()
+try:
+    assert h.paint("1;32", "ok") == "\033[1;32mok\033[0m"
+    os.environ["NO_COLOR"] = "1"
+    assert h.paint("1;32", "ok") == "ok"
+    del os.environ["NO_COLOR"]
+    tty_row = h.summary_row("choices", [f"{it} ·" for it in items[:-1]] + [items[-1], "(change: ./harness config)"], 52)
+    assert tty_row.startswith("  \033[2mchoices  \033[0mmodel"), tty_row
+    plain = re.sub(r"\033\[[0-9;]*m", "", tty_row).split("\n")
+    assert all(len(l) <= 52 for l in plain), plain
+finally:
+    sys.stdout = real_out
+assert "\033[" not in h.summary_row("choices", items, 52)  # piped (this run) stays plain
 # engine menu: running first, labels map back to engine names; engines without a launcher print how to start
 run = {"strata": {"engine": "strata", "port": 1, "models": ["m"]}}
 assert h.engine_menu(run) == "llamacpp"  # no tty: first entry, which is the saved current engine

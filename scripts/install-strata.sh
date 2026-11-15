@@ -41,7 +41,7 @@ else
 fi
 echo "  Strata ($([ "$OWN" = 1 ] && echo "$MODEL_ID" || echo "$WEIGHTS weights")): $([ -n "$HAVE" ] && echo "in $HAVE, " || echo "clone into $DIR, ")then its setup fetches the engine and $WHAT${AVAIL:+ (free: ${AVAIL} GB)}"
 if [ "${1:-}" != --yes ]; then
-  read -r -p "  install now? [y/N] " A
+  read -r -p "  install now? [y/N] " A || { echo; echo cancelled; exit 130; }
   case "$A" in [yY]*) ;; *) echo "  aborted" >&2; exit 1 ;; esac
 fi
 if [ ! -f "$DIR/setup.sh" ]; then

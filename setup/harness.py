@@ -335,7 +335,10 @@ def key():
     old = termios.tcgetattr(fd)
     try:
         tty.setcbreak(fd)  # keeps ISIG: Ctrl-C still raises KeyboardInterrupt
-        return os.read(fd, 8).decode(errors="ignore")  # arrow keys arrive as one read ("\x1b[A"), bare Esc as "\x1b"
+        data = os.read(fd, 8)  # arrow keys arrive as one read ("\x1b[A"), bare Esc as "\x1b"
+        if not data or b"\x04" in data:  # Ctrl-D (or the terminal went away) cancels like Esc; it used to be ignored
+            cancel()
+        return data.decode(errors="ignore")
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
@@ -350,11 +353,12 @@ def choose(question, options, yes):
             return next((o for o in options if o.strip() == out), out)
         if r.returncode in (1, 130):  # Esc / Ctrl-C
             cancel()
-    print(question)
+    print(paint("1", question))
     for i, o in enumerate(options, 1):
         print(f"  {i}) {o}")
     if len(options) <= 9:  # one keypress picks; Esc cancels
-        print("number [1] (Esc cancels): ", end="", flush=True)
+        prompt = f"pick 1-{len(options)} " + paint("2", "(Enter = 1, Esc cancels)") + ": "
+        print(prompt, end="", flush=True)
         while True:
             k = key()
             if k == "\x1b":
@@ -363,7 +367,9 @@ def choose(question, options, yes):
                 i = int(k) if k.isdigit() else 1
                 print(i)
                 return options[i - 1]
-    a = input("number [1]: ").strip() or "1"
+            # other keys used to vanish silently: say what works, then ask again
+            print("\n" + paint("2", f"  type 1-{len(options)}, Enter for 1, or Esc to cancel") + "\n" + prompt, end="", flush=True)
+    a = input(f"pick 1-{len(options)} (Enter = 1): ").strip() or "1"
     return options[int(a) - 1] if a.isdigit() and 0 < int(a) <= len(options) else options[0]
 
 
@@ -501,7 +507,7 @@ def install_extensions(engine, extra=(), verbose=True, show_ok=True, launch=True
         if sec and not issues and not show_ok:
             print("\r\033[K", end="", flush=True)
         elif sec:
-            mark = "\033[31m✗\033[0m" if any("✗" in i for i in issues) else "\033[33m!\033[0m" if issues else "\033[32m✓\033[0m"
+            mark = paint("31", "✗") if any("✗" in i for i in issues) else paint("33", "!") if issues else paint("32", "✓")
             print(f"\r\033[K  {mark} {sec}" + "".join(f"\n    {i.strip()}" for i in issues))
 
     with open(SETUP_LOG, "w") as log:
@@ -1100,11 +1106,12 @@ def ask_yn(question, default=False):
                            stdout=subprocess.PIPE, text=True)
         out = r.stdout.strip()
         if out in ("Yes", "No"):
-            print(f"{question} {out.lower()}")
+            print(f"{paint('1', question)} {out.lower()}")
             return out == "Yes"
         if r.returncode in (1, 130):
             cancel()
-    print(f"{question} {'[Y/n]' if default else '[y/N]'} ", end="", flush=True)
+    prompt = f"{paint('1', question)} {paint('2', '[Y/n]' if default else '[y/N]')} "
+    print(prompt, end="", flush=True)
     while True:
         k = key().lower()
         if k == "\x1b":
@@ -1113,6 +1120,7 @@ def ask_yn(question, default=False):
             a = default if k in ("\r", "\n") else k == "y"
             print("yes" if a else "no")
             return a
+        print("\n" + paint("2", "  y or n, Enter for the default, Esc to cancel") + "\n" + prompt, end="", flush=True)
 
 
 def sidecar_pref():
@@ -1402,7 +1410,7 @@ def cmd_update_check(a):
 
 def notice(msg):
     """Update notices in bold yellow on a terminal, plain when piped (start.sh colours its own copy)."""
-    print(f"\033[1;33m{msg}\033[0m" if sys.stdout.isatty() else msg)
+    print(paint("1;33", msg))
 
 
 def engine_title(eng, mod):
@@ -1413,12 +1421,46 @@ def engine_title(eng, mod):
     return f"{eng} · {name or 'no model'}"
 
 
-def choices_line(eng=None):
-    """One line with every saved answer, for summaries and the config menu. An engine that serves one model only (osmos:
-    DeepSeek-V4.1-Flash) names it, so the saved preference for the Qwen engines is not shown as what osmos runs."""
+def choices_items(eng=None):
+    """Every saved answer as its own item. An engine that serves one model only (osmos: DeepSeek-V4.1-Flash) names it, so the
+    saved preference for the Qwen engines is not shown as what osmos runs."""
     model = PROFILES["engines"].get(eng or "", {}).get("model_label") or model_pref()
-    return (f"model {model} · weights {weights_pref()} · sidecar {'off' if sidecar_pref() == '0' else 'on'} · voice {'on' if jget(EXTRAS, {}).get('voice') else 'off'}"
-            f" · update check {'on' if update_pref() == '1' else 'off'}")
+    return [f"model {model}", f"weights {weights_pref()}", f"sidecar {'off' if sidecar_pref() == '0' else 'on'}",
+            f"voice {'on' if jget(EXTRAS, {}).get('voice') else 'off'}", f"update check {'on' if update_pref() == '1' else 'off'}"]
+
+
+def choices_line(eng=None):
+    """One line with every saved answer, for the config menu and the wizard's steps list."""
+    return " · ".join(choices_items(eng))
+
+
+def paint(code, text):
+    """ANSI colour for a terminal only; NO_COLOR (no-color.org) and piped output get plain text."""
+    if not sys.stdout.isatty() or os.environ.get("NO_COLOR"):
+        return text
+    return f"\033[{code}m{text}\033[0m"
+
+
+def summary_row(label, text, width=None):
+    """One labelled row of the wizard summary. With a width it wraps at word boundaries (a list passes its own break points)
+    and every continuation keeps the label column; without one (piped output) it stays one line. The label is dimmed after
+    wrapping, so the escape codes never count toward the width."""
+    lead = f"  {label:<9}"
+    units = text if isinstance(text, list) else text.split()
+    if width is None:
+        return lead + " ".join(units)
+    lines, line = [], None
+    for u in units:
+        if line is None:
+            line = lead + u
+        elif len(line) + 1 + len(u) > width:
+            lines.append(line)
+            line = " " * len(lead) + u
+        else:
+            line += " " + u
+    lines = lines + [line or lead]
+    lines[0] = "  " + paint("2", f"{label:<9}") + lines[0][len(lead):]
+    return "\n".join(lines)
 
 
 SETUP_LOG = os.path.join(AGENT, "setup.log")
@@ -1599,12 +1641,18 @@ def finish(eng, mod, no_tune, launch=False):
     if no_tune and tuned.get("decode_tps"):
         speed += f" (saved {tuned.get('when', '')}; re-measure: ./harness tune)"
     passed = verified(eng)
-    print(f"\n== {'ready' if passed else 'NOT ready'} ==\n  engine   {engine_title(eng, mod)}  (pi: {prov}/{mid})\n  context  {ctx}\n  speed    {speed}")
-    print("  start    ./start.sh ~/your-project")
+    width = shutil.get_terminal_size().columns if sys.stdout.isatty() else None  # narrow windows wrap; piped output stays one line
+    items = choices_items(eng)
+    head = f"== {'ready' if passed else 'NOT ready'} =="
+    print("\n" + paint("1;32" if passed else "1;31", head))
+    print(summary_row("engine", [engine_title(eng, mod), f"(pi: {prov}/{mid})"], width))
+    print(summary_row("context", str(ctx), width))
+    print(summary_row("speed", speed, width))
+    print(summary_row("start", "./start.sh ~/your-project", width))
     if eng in ("halogen", "strata"):
-        print("  monitor  ./harness monitor   (live speed, memory and requests; Ctrl-C to quit)")
-    print(f"  choices  {choices_line(eng)}   (change: ./harness config)")
-    print("  check    ./setup.sh --doctor   (status: ./harness status)")
+        print(summary_row("monitor", "./harness monitor (live speed, memory and requests; Ctrl-C to quit)", width))
+    print(summary_row("choices", [f"{it} ·" for it in items[:-1]] + [items[-1], "(change: ./harness config)"], width))
+    print(summary_row("check", "./setup.sh --doctor (status: ./harness status)", width))
     if not passed:
         sys.exit(1)
     if launch:

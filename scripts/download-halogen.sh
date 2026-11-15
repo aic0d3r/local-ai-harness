@@ -17,7 +17,7 @@ if [ "${AVAIL:-999}" -lt "$NEED" ]; then
   echo "  only ${AVAIL} GB free where that is - free up at least $NEED GB, or put it on a bigger disk: HALOGEN_MODELS=/path/to/models $0" >&2; exit 1
 fi
 if [ "${1:-}" != --yes ]; then
-  read -r -p "  download now? [y/N] " A
+  read -r -p "  download now? [y/N] " A || { echo; echo cancelled; exit 130; }
   case "$A" in [yY]*) ;; *) echo "  aborted - download the files (see README 'Minimum download') or pass a checkpoint: ./setup.sh --halogen /path/to/checkpoint.hgn" >&2; exit 1 ;; esac
 fi
 HF_BIN="$(command -v hf || command -v huggingface-cli || true)"

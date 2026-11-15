@@ -20,7 +20,7 @@ AVAIL=$(df -BG --output=avail "$DIR" 2>/dev/null | tail -1 | tr -dc '0-9')
 REV="${UNSLOTH_REV:-d96201194f103c906994f283f504209dc8d2a10c}"
 echo "  required download: ~$GB GB into $DIR (unsloth/Qwen3.8-Flash-Next-GGUF @ $REV)${AVAIL:+ (free: ${AVAIL} GB)}"
 if [ "${1:-}" != --yes ]; then
-  read -r -p "  download now? [y/N] " A
+  read -r -p "  download now? [y/N] " A || { echo; echo cancelled; exit 130; }
   case "$A" in [yY]*) ;; *) echo "  aborted" >&2; exit 1 ;; esac
 fi
 HAVE_GB=$(du -sBG "$DIR" 2>/dev/null | cut -f1 | tr -dc 0-9)  # a resume only needs the part still missing

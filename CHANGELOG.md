@@ -6,6 +6,8 @@
 ## Unreleased
 
 ### Changed
+- Plain menus and yes/no prompts give a hint after an unknown key and show the valid range (`pick 1-3`); shell download and uninstall prompts say `cancelled` on Ctrl-D.
+- The setup summary wraps on narrow terminals with its labels kept aligned, and the saved answers break between items instead of mid-item. The status line is green (ready) or red (NOT ready) and the labels are dimmed; colour only on a terminal, never under `NO_COLOR`.
 - The setup wizard asks about the ling-tiny sidecar on every interactive run, pre-selected with your saved answer, instead of only the first time.
 - Engine names read `engine · model` (osmos · DeepSeek-V4.1-Flash (osmos-evo)) in status, tune, bench and setup; the raw model id is unchanged.
 
@@ -33,6 +35,7 @@
 - `scripts/uninstall.sh` knows the multi-engine setup and removes what the wizard wrote.
 
 ### Fixed
+- Ctrl-D at a wizard prompt was ignored; it now cancels like Esc. Ctrl-D at the Ling-3.0-tiny download prompt (default Yes) no longer starts the 4.5 GB download.
 - The commit tool no longer tells a cloud-model session to write its own message (`message` is for dictated text only); the refusal asks the user to run `/commit` or dictate the message.
 - `./harness tune` counted chunks as tokens (osmos showed 6.0 t/s instead of 40.8); it now uses the server's token count.
 - `halogen-top.sh` was a SyntaxError on Python < 3.12; several `bench/` scripts crashed or touched the real home.

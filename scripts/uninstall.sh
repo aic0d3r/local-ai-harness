@@ -22,7 +22,7 @@ echo "  - ling-tiny systemd unit"
 echo "  - NOT touched: mcp.json, the sidecar GGUF, the halogen container,"
 echo "    your checkpoint files, the vm-compact.timer (sudo; command printed)"
 if [ "$ASSUME_YES" -ne 1 ]; then
-  read -r -p "type 'uninstall' to continue: " A
+  read -r -p "type 'uninstall' to continue: " A || { echo; echo cancelled; exit 130; }
   [ "$A" = "uninstall" ] || { echo "aborted"; exit 1; }
 fi
 

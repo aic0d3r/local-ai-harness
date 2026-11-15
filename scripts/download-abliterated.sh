@@ -29,7 +29,7 @@ mkdir -p "$DIR"
 AVAIL=$(df -BG --output=avail "$DIR" 2>/dev/null | tail -1 | tr -dc '0-9')
 echo "  required download: ~$GB GB into $DIR${AVAIL:+ (free: ${AVAIL} GB)}"
 if [ "${2:-}" != --yes ]; then
-  read -r -p "  download now? [y/N] " A
+  read -r -p "  download now? [y/N] " A || { echo; echo cancelled; exit 130; }
   case "$A" in [yY]*) ;; *) echo "  aborted" >&2; exit 1 ;; esac
 fi
 # a resume only needs the part still missing; $DIR also holds the stock files, so count just hf partials

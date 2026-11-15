@@ -83,10 +83,12 @@ SIDECAR_ON=1; [ "$(cat "$SC_PREF" 2>/dev/null)" = 0 ] && SIDECAR_ON=0
 # sidecar batch size shared with /tune and start-ling-tiny.sh; without this the
 # unit and first-boot spawn ran llama.cpp's 512 default, 8x below the measured 4096
 UB_TINY=$(tr -dc '0-9' 2>/dev/null < "$AGENT_DIR/harness-ubatch"); UB_TINY=${UB_TINY:-4096}
-ok(){ printf '  \033[32m✓\033[0m %s\n' "$1"; }
-warn(){ printf '  \033[33m!\033[0m %s\n' "$1"; }
+# colour only on a terminal, never under NO_COLOR (no-color.org); the same rule as setup/harness.py paint()
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then C_OK=$'\033[32m' C_WARN=$'\033[33m' C_FAIL=$'\033[31m' C_OFF=$'\033[0m'; else C_OK='' C_WARN='' C_FAIL='' C_OFF=''; fi
+ok(){ printf '  %s✓%s %s\n' "$C_OK" "$C_OFF" "$1"; }
+warn(){ printf '  %s!%s %s\n' "$C_WARN" "$C_OFF" "$1"; }
 FAILS=0  # every fail() counts; --doctor exits 1 when any happened
-fail(){ FAILS=$((FAILS+1)); printf '  \033[31m✗\033[0m %s\n' "$1"; }
+fail(){ FAILS=$((FAILS+1)); printf '  %s✗%s %s\n' "$C_FAIL" "$C_OFF" "$1"; }
 tiny_up(){ curl -sf -m 3 "localhost:$TINY_PORT/health" >/dev/null 2>&1; }
 hal_up(){  curl -sf -m 3 "localhost:$HAL_PORT/health"  >/dev/null 2>&1; }
 eng_up(){ curl -sf -m 3 "$ENG_URL/v1/models" >/dev/null 2>&1; }
@@ -264,7 +266,7 @@ fi
 UPD_PREF="$AGENT_DIR/harness-update-check"
 # -s: an empty file is not an answer (an older harness-update extension left empty files here)
 if [ "$NO_HALOGEN" = 0 ] && [ ! -s "$UPD_PREF" ] && [ -t 0 ]; then
-  read -r -p "Check for engine updates each time start.sh runs? (one short network call; never installs without asking) [y/N] " A
+  read -r -p "Check for engine updates each time start.sh runs? (one short network call; never installs without asking) [y/N] " A || { echo; echo cancelled; exit 130; }
   mkdir -p "$(dirname "$UPD_PREF")"; case "$A" in [yY]*) echo 1 ;; *) echo 0 ;; esac > "$UPD_PREF"
 fi
 
@@ -364,7 +366,7 @@ else
   fi
   # a terminal gets asked; no terminal with a saved answer (the wizard already asked) downloads
   if [ -z "${GGUF:-}" ] && [ -t 0 ]; then
-    read -r -p "  download Ling-3.0-tiny (~4.5 GB) for the sidecar? (n = skip; ./setup.sh --no-sidecar turns it off) [Y/n] " A
+    read -r -p "  download Ling-3.0-tiny (~4.5 GB) for the sidecar? (n = skip; ./setup.sh --no-sidecar turns it off) [Y/n] " A || { echo; echo cancelled; exit 130; }  # Ctrl-D must not read as Yes
     case "$A" in [nN]*) GGUF=skip ;; esac
   fi
   if [ "${GGUF:-}" = skip ]; then

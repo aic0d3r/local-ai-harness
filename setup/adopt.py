@@ -26,7 +26,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 def _say(color, mark, text):
-    c, r = (f"\033[{color}m", "\033[0m") if sys.stdout.isatty() else ("", "")
+    c, r = (f"\033[{color}m", "\033[0m") if sys.stdout.isatty() and not os.environ.get("NO_COLOR") else ("", "")
     print(f"  {c}{mark}{r} {text}")
 
 

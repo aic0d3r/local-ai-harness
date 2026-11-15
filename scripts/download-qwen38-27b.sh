@@ -14,7 +14,7 @@ mkdir -p "$DIR"
 AVAIL=$(df -BG --output=avail "$DIR" 2>/dev/null | tail -1 | tr -dc '0-9')
 echo "  required download: ~$GB GB into $DIR (unsloth/Qwen3.8-27B-GGUF @ ${REV_TARGET:0:8}, z-lab/Qwen3.8-27B-DFlash2-GGUF @ ${REV_DRAFT:0:8})${AVAIL:+ (free: ${AVAIL} GB)}"
 if [ "${1:-}" != --yes ]; then
-  read -r -p "  download now? [y/N] " A
+  read -r -p "  download now? [y/N] " A || { echo; echo cancelled; exit 130; }
   case "$A" in [yY]*) ;; *) echo "  aborted" >&2; exit 1 ;; esac
 fi
 [ "${AVAIL:-999}" -lt $((GB + 5)) ] && { echo "  only ${AVAIL} GB free - free up at least $((GB + 5)) GB first" >&2; exit 1; }
