@@ -226,13 +226,20 @@ for you). The list is `config/profiles.json` (`catalog`):
 
 | id | engines | what | plan for (Strata's docs) |
 |---|---|---|---|
-| `flash-next` (default) | gufo, Strata | Unsloth UD-Q4_K_XL, stock or abliterated | 104 GiB download |
+| `flash-next` (default) | gufo, Strata | UD-Q4_K_XL: stock = Unsloth's, abliterated = brainnxdomain's Uncensored-Gufo build (same tensor layout; unofficial on Strata) | 104 GiB download; Strata: ~88 GB RAM + VRAM for every expert |
 | `flash-next-iq3_s` / `-iq3_xxs` / `-iq2_xs` / `-q2_0` | Strata | ISTA-DASLab packs of the same model | 60 / 53 / 46 / 44 GB RAM, 84 / 76 / 68 / 66 GB download |
 | `qwen36-q4` / `-q6` / `-q8` | Strata | Qwen3.6-35B-A3B (small MoE, Unsloth GGUFs with MTP) | 32 / 44 / 52 GB RAM, 24 / 34 / 39 GB download |
 | `qwen38-27b` | gufo | Qwen3.8 27B dense, UD-Q4_K_XL + DFlash2 draft, vision | 20 GB download |
+| `qwen38-27b-q8` | gufo | same, UD-Q8_K_XL target (gufo's other qualified 27B file; its benchmarks: ~16 t/s mixed decode with DFlash2 vs ~27 for Q4) | 34 GB download, shares the draft and projector |
 
 Strata installs the non-default rows through its own `setup.sh --family F --model SIZE` (`scripts/install-strata.sh`,
-which downloads their files); gufo's 27B comes from `scripts/download-qwen38-27b.sh` at the revisions gufo's docs pin.
+which downloads their files); gufo's 27B comes from `scripts/download-qwen38-27b.sh` at the revisions gufo's docs pin
+(`unsloth/Qwen3.8-27B-GGUF@4ca72078`, `z-lab/Qwen3.8-27B-DFlash2-GGUF@2d9571f8`; the sha256s match gufo's
+`model-identities.json`). Picking the 27B in the model menu asks Q4 or Q8.
+
+Not offered, though upstream has them: Strata's Coder IQ1_M, Swift 1.5, Unsloth UD-IQ4_XS/Q5/Q6/Q8, Gyro and NVFP4
+packs of Flash-Next. gufo qualifies Flash-Next on UD-Q4_K_XL only: the smaller quants `./harness recommend` can pick
+for gufo are untested.
 The stock/abliterated answer applies to `flash-next` only: no abliterated build of the others exists here.
 
 **Recommendation off Strix Halo.** gufo targets Strix Halo (gfx1151) only, so every other AMD or NVIDIA box is
@@ -358,7 +365,7 @@ mmproj.
 | halogen (default pick) | `Quat3rnion/halogen-qwen3.8-flash-next-v2-abliterated`, file `qwen38-flash-next-v2-abliterated.hgn` at rev `e7783c5822dfda2785a0f5b435abf54df89fe8ee` (r2: PPL 3.134 vs stock 3.144, stock speed; the newer `main` file is not inference-validated) | Weights choice `abliterated`. The file goes beside the stock `.hgn` (~89 GB). Tokenizer, vision, n-gram table and npu/ come from the stock folder. `HALOGEN_CHECKPOINT=<path>` still loads any other file. |
 | halogen (one file for all engines) | the shared GGUF | `HALOGEN_CHECKPOINT=/path/…-00001-of-00005.gguf`. Needs `qwen38-flash-next-mtp.hgn` in the stock folder. The launcher forces 1 slot (halogen #172: K-quant GGUFs return empty replies on overlapping requests). Expect ~28% slower decode than `.hgn` and ~80 GiB resident. |
 | gufo | the shared GGUF | Weights choice `abliterated`. The file goes into `ENGINE_DIR/orca-uncensored/` (~112 GB, gated: accept the terms on the model page, then `hf auth login`). It uses the stock shared-Q8 MTP head (`ENGINE_DIR/mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf`); the download fetches it and `mmproj-BF16.gguf` from unsloth if missing, then hardlinks the projector in for vision. `GUFO_MODEL=<subdir>/<shard1>` names any other file. |
-| Strata | the shared GGUF, unofficial | `scripts/install-strata.sh` passes gufo's `orca-uncensored/` folder as `--gguf-dir --family unsloth --model UD-Q4_K_XL`. Strata 0.2.x accepts a complete own GGUF with the published layout (it warns, never refuses; no SHA-256 for unknown names). Not run here yet. Older Strata needed `tools/iq_pack.py --compat-bf16` and a hand-written config (issue #2783). |
+| Strata | the shared GGUF, unofficial | `scripts/install-strata.sh` passes gufo's `orca-uncensored/` folder as `--gguf-dir --family unsloth --model UD-Q4_K_XL`. Strata 0.2.x accepts a complete own GGUF with the published layout (it warns, never refuses; no SHA-256 for unknown names). Ran here on Strata 0.2.12 (the matrix above); Strata's docs do not list this file (its ORCA pages cover only OrcaRouter's IQ3_XXS and Q4_K_S, set up by hand). Older Strata needed `tools/iq_pack.py --compat-bf16` and a hand-written config (issue #2783). |
 
 r2 was built against the stock n-gram table at peonist rev `5cc17cea`. If your table is from
 another revision, check that the stock `qwen38-flash-next-ngram.hgn` sha matches before you trust

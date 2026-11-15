@@ -54,7 +54,7 @@
       "model": "flash-next",
       "engines": [
         {"engine": "halogen", "needs": "npu", "why": "65 t/s decode, ~1,500 t/s prefill, keeps the NPU guard/triage/dedup tools (measured)"},
-        {"engine": "gufo", "why": "40 t/s decode, ~1,265 t/s prefill, any stock quant (measured)"},
+        {"engine": "gufo", "why": "40 t/s decode, ~1,265 t/s prefill on UD-Q4_K_XL, the only quant gufo qualifies (measured); the smaller quants the hardware pick can choose are untested"},
         {"engine": "strata", "why": "43 t/s decode, ~990 t/s prefill, open source (measured)"}
       ]
     },
@@ -62,7 +62,7 @@
       "label": "Qwen3.8-27B (dense, vision)", "short": "dense, vision",
       "model": "qwen38-27b",
       "engines": [
-        {"engine": "gufo", "why": "~49 t/s on code with its DFlash2 draft, ~570 t/s prefill at 32k (reported, Talus's same-desktop run)"},
+        {"engine": "gufo", "why": "~49 t/s on code with its DFlash2 draft, ~570 t/s prefill at 32k on UD-Q4_K_XL (reported, Talus's same-desktop run); UD-Q8_K_XL decodes ~16 t/s mixed vs ~27 for Q4 in gufo's own benchmarks"},
         {"engine": "llamacpp", "why": "fallback: ~45 t/s on code, prefill about half of gufo's (reported); Vulkan builds can be slower"}
       ]
     },
@@ -84,11 +84,11 @@
     ],
     "extras_gb": 4,
     "ctx_tiers": [ { "spare_gb": 14, "ctx": 262144 }, { "spare_gb": 11, "ctx": 131072 }, { "spare_gb": 8, "ctx": 65536 } ],
-    "halogen_min_ram_gb": 110, "strata_min_gb": 72, "strata_listed_vram_gb": 12, "strata_order": ["flash-next-iq3_s", "flash-next-iq3_xxs", "flash-next-iq2_xs", "flash-next-q2_0", "qwen36-q4"], "halogen_download_gb": 124
+    "halogen_min_ram_gb": 110, "strata_min_gb": 88, "strata_listed_vram_gb": 12, "strata_order": ["flash-next-iq3_s", "flash-next-iq3_xxs", "flash-next-iq2_xs", "flash-next-q2_0", "qwen36-q4"], "halogen_download_gb": 124
   },
   "catalog": {
     "_doc": "Models the wizard can set up, one saved answer (harness-model). engines = who can load it; halogen always serves its own Flash-Next checkpoint and ignores the answer. strata = [family, size] for Strata's `setup.sh --family F --model SIZE` (it downloads the files itself); run = the start script that setup writes; ram_gb = RAM Strata's docs say to plan for (experts + ~10 GB); download_gb = what setup fetches. Sizes are Strata's MODELS.md / DETAILS.md and the Hugging Face repos; none of the non-default rows has run here.",
-    "flash-next": { "label": "Qwen3.8-Flash-Next, Unsloth UD-Q4_K_XL (stock or abliterated)", "engines": ["gufo", "strata"] },
+    "flash-next": { "label": "Qwen3.8-Flash-Next, UD-Q4_K_XL (stock: Unsloth's; abliterated: brainnxdomain's Uncensored-Gufo build, unofficial on Strata)", "engines": ["gufo", "strata"] },
     "flash-next-iq3_s":   { "label": "Qwen3.8-Flash-Next, ISTA IQ3_S (matches the full model on Strata's tests)", "engines": ["strata"], "strata": ["qwen", "IQ3_S"],   "run": "run-iq3_s.sh",   "ram_gb": 60, "download_gb": 84 },
     "flash-next-iq3_xxs": { "label": "Qwen3.8-Flash-Next, ISTA IQ3_XXS", "engines": ["strata"], "strata": ["qwen", "IQ3_XXS"], "run": "run-iq3_xxs.sh", "ram_gb": 53, "download_gb": 76 },
     "flash-next-iq2_xs":  { "label": "Qwen3.8-Flash-Next, ISTA IQ2_XS", "engines": ["strata"], "strata": ["qwen", "IQ2_XS"],  "run": "run-iq2_xs.sh",  "ram_gb": 46, "download_gb": 68 },
@@ -96,7 +96,8 @@
     "qwen36-q4": { "label": "Qwen3.6-35B-A3B, UD-Q4_K_XL (small MoE, runs on 32 GB RAM)", "engines": ["strata"], "strata": ["qwen36", "UD-Q4_K_XL"], "run": "run-qwen36-ud-q4_k_xl.sh", "ram_gb": 32, "download_gb": 24 },
     "qwen36-q6": { "label": "Qwen3.6-35B-A3B, UD-Q6_K_XL", "engines": ["strata"], "strata": ["qwen36", "UD-Q6_K_XL"], "run": "run-qwen36-ud-q6_k_xl.sh", "ram_gb": 44, "download_gb": 34 },
     "qwen36-q8": { "label": "Qwen3.6-35B-A3B, Q8_0", "engines": ["strata"], "strata": ["qwen36", "Q8_0"], "run": "run-qwen36-q8_0.sh", "ram_gb": 52, "download_gb": 39 },
-    "qwen38-27b": { "label": "Qwen3.8 27B dense, UD-Q4_K_XL + DFlash2 draft (gufo, Strix Halo)", "engines": ["gufo"], "download_gb": 20 }
+    "qwen38-27b": { "label": "Qwen3.8 27B dense, UD-Q4_K_XL + DFlash2 draft (gufo, Strix Halo; 16.4 GiB target, the faster one)", "engines": ["gufo"], "download_gb": 20 },
+    "qwen38-27b-q8": { "label": "Qwen3.8 27B dense, UD-Q8_K_XL + DFlash2 draft (gufo, Strix Halo; 29.3 GiB target, closer to the full model, ~40% slower decode in gufo's benchmarks)", "engines": ["gufo"], "download_gb": 34 }
   },
   "models": {
     "default": {

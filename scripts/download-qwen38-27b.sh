@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
-# Fetch what gufo needs for Qwen3.8 27B: Unsloth's UD-Q4_K_XL GGUF (16.35 GiB), the vision projector (0.87 GiB) and the
-# DFlash2 draft (1.06 GiB), at the revisions gufo's docs/models page names. Resumable; asks first unless --yes; exits 1 on
-# abort/failure. Not gated.
+# Fetch what gufo needs for Qwen3.8 27B: Unsloth's UD-Q4_K_XL (16.35 GiB) or UD-Q8_K_XL (29.30 GiB) GGUF, the vision
+# projector (0.87 GiB) and the DFlash2 draft (1.06 GiB), at the revisions gufo's docs/models page names (the sha256s match
+# gufo's model-identities.json). Resumable; asks first unless --yes; exits 1 on abort/failure. Not gated.
 #   scripts/download-qwen38-27b.sh [--yes]     folder: GUFO_27B_DIR, else <ENGINE_DIR's parent>/qwen38-27b
+# quant: GUFO_FAMILY (qwen38-27b = Q4, qwen38-27b-q8 = Q8), else the saved model answer when it is a 27B, else Q4
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 . "$REPO/scripts/lib-hf.sh"
 . "$REPO/scripts/lib-prompt.sh"
-DIR=$(dirname "$(GUFO_FAMILY=qwen38-27b bash "$REPO/server/start-gufo-flashnext.sh" --print-model)")
-TARGET=Qwen3.8-27B-UD-Q4_K_XL.gguf; DRAFT=Qwen3.8-27B-DFlash2-Q4_K_M.gguf; GB=20
+FAM="${GUFO_FAMILY:-$(cat "${PI_CODING_AGENT_DIR:-${PI_HOME:-$HOME/.pi}/agent}/harness-model" 2>/dev/null)}"
+case "$FAM" in qwen38-27b|qwen38-27b-q8) ;; *) FAM=qwen38-27b ;; esac
+FIRST=$(GUFO_FAMILY=$FAM bash "$REPO/server/start-gufo-flashnext.sh" --print-model)
+DIR=$(dirname "$FIRST"); TARGET=$(basename "$FIRST"); DRAFT=Qwen3.8-27B-DFlash2-Q4_K_M.gguf
+GB=$(python3 "$REPO/setup/harness.py" model-info "$FAM" download_gb 2>/dev/null || echo 34)
 REV_TARGET=4ca720788d1e01f1bff70c033e0d0028fd02e502; REV_DRAFT=2d9571f8ce46e151f61c6499c99dee6079e1d610
 if [ -f "$DIR/$TARGET" ] && [ -f "$DIR/$DRAFT" ] && [ -f "$DIR/mmproj-BF16.gguf" ]; then echo "  already there: $DIR"; exit 0; fi
 mkdir -p "$DIR"

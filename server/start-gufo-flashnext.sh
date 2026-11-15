@@ -6,25 +6,28 @@
 set -u
 # default ~/models/qwen38-flash-next; a box that already keeps the files under ~/LLMBench/models (the author's layout) keeps using them
 ENGINE_DIR=${ENGINE_DIR:-$([ -d "$HOME/LLMBench/models/qwen38-flash-next" ] && echo "$HOME/LLMBench/models/qwen38-flash-next" || echo "$HOME/models/qwen38-flash-next")}
-# model family: GUFO_FAMILY, else the wizard's saved model answer (harness-model; qwen38-27b is the only other one gufo
-# loads). --print-model ignores the saved answer: its callers (download scripts, Strata install) ask about Flash-Next.
+# model family: GUFO_FAMILY, else the wizard's saved model answer (harness-model; qwen38-27b and qwen38-27b-q8 are the
+# only other ones gufo loads). --print-model ignores the saved answer: its callers (download scripts, Strata install) ask about Flash-Next.
 FAMILY="${GUFO_FAMILY:-}"
 [ -z "$FAMILY" ] && [ "${1:-}" != --print-model ] && FAMILY=$(cat "${PI_CODING_AGENT_DIR:-${PI_HOME:-$HOME/.pi}/agent}/harness-model" 2>/dev/null)
-if [ "$FAMILY" = qwen38-27b ]; then
-  # dense 27B + the DFlash2 draft (gufo's docs/models page); files from scripts/download-qwen38-27b.sh
+if [ "$FAMILY" = qwen38-27b ] || [ "$FAMILY" = qwen38-27b-q8 ]; then
+  # dense 27B (UD-Q4_K_XL or UD-Q8_K_XL, the two targets gufo's docs/models page names) + the DFlash2 draft and projector
+  # both share; files from scripts/download-qwen38-27b.sh. The served name differs so tune results keep them apart.
   MDIR="${GUFO_27B_DIR:-$(dirname "$ENGINE_DIR")/qwen38-27b}"
-  MODEL_REL=Qwen3.8-27B-UD-Q4_K_XL.gguf; DRAFT=Qwen3.8-27B-DFlash2-Q4_K_M.gguf  # DRAFT: keep in step with G27_DRAFT in setup/harness.py
+  Q=Q4; [ "$FAMILY" = qwen38-27b-q8 ] && Q=Q8
+  MODEL_REL=Qwen3.8-27B-UD-${Q}_K_XL.gguf; DRAFT=Qwen3.8-27B-DFlash2-Q4_K_M.gguf  # DRAFT: keep in step with G27_DRAFT in setup/harness.py
   [ "${1:-}" = --print-model ] && { echo "$MDIR/$MODEL_REL"; exit 0; }
   for f in "$MODEL_REL" "$DRAFT"; do
     [ -f "$MDIR/$f" ] || { echo "gufo 27B file missing: $MDIR/$f - get it: scripts/download-qwen38-27b.sh" >&2; exit 1; }
   done
-  NAME=qwen3.8-27b; SPEC=(--speculative dflash2 --dflash-model "/models/$DRAFT")
+  NAME=qwen3.8-27b; [ "$Q" = Q8 ] && NAME=qwen3.8-27b-q8; SPEC=(--speculative dflash2 --dflash-model "/models/$DRAFT")
 else
 # default target: the wizard's saved answer (stock|abliterated); GUFO_WEIGHTS overrides it, GUFO_MODEL
 # (relative to ENGINE_DIR, first shard) names any other file. docs/ENGINES.md#abliterated-models
 WEIGHTS="${GUFO_WEIGHTS:-$(cat "${PI_CODING_AGENT_DIR:-${PI_HOME:-$HOME/.pi}/agent}/harness-weights" 2>/dev/null)}"
 # stock quant: GUFO_QUANT, else the wizard's saved hardware pick (harness-quant), else UD-Q4_K_XL. Shard counts are
-# Unsloth's (tests/test_harness.py checks them against config/profiles.json). Strata only knows UD-Q4_K_XL.
+# Unsloth's (tests/test_harness.py checks them against config/profiles.json). gufo only qualifies UD-Q4_K_XL (the
+# others are untested here); this harness wires Strata to UD-Q4_K_XL only, though Strata itself runs more Unsloth quants.
 QUANT="${GUFO_QUANT:-$(cat "${PI_CODING_AGENT_DIR:-${PI_HOME:-$HOME/.pi}/agent}/harness-quant" 2>/dev/null)}"
 QUANT=${QUANT:-UD-Q4_K_XL}
 case "$QUANT" in
@@ -54,7 +57,7 @@ fi
 # physics as halogen applies. recover mild fragmentation, fail fast otherwise.
 # ctx: GUFO_CTX, else what this hardware's spare memory buys for the quant (config/profiles.json ctx_tiers; 262144 = the model's
 # maximum, measured on the 124 GB box with UD-Q4_K_XL x 2 sessions), else 262144 (27B: its KV is f16 but llama.cpp runs it at 262144 here)
-if [ -n "${GUFO_CTX:-}" ] || [ "$NAME" = qwen3.8-27b ]; then DEFCTX=262144
+if [ -n "${GUFO_CTX:-}" ] || [ "${NAME#qwen3.8-27b}" != "$NAME" ]; then DEFCTX=262144
 else DEFCTX=$(python3 "$(dirname "$0")/../setup/harness.py" ctx-info "$([ "$WEIGHTS" = abliterated ] && echo UD-Q4_K_XL || echo "$QUANT")" 2>/dev/null || echo 262144); fi
 CTX="${GUFO_CTX:-$DEFCTX}"
 # contiguous 2MiB units (order-9 x1 + order-10 x2); order-9 alone false-positives when free memory coalesces to order-10 (same as start-halogen.sh)

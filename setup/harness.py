@@ -171,7 +171,7 @@ def recommend(hw, cap):
         small = f" Only {vram:g} GB VRAM: Strata's published speeds start at {R['strata_listed_vram_gb']} GB cards, so expect it to be slow." if 0 < vram < R["strata_listed_vram_gb"] else ""
         if weights_pref() == "abliterated":  # only the Unsloth-layout Flash-Next has an abliterated build
             if ram + vram < R["strata_min_gb"]:
-                return none(f"{vram} GB VRAM + {ram} GB RAM: Strata's UD-Q4_K_XL (the abliterated weights) needs {R['strata_min_gb']}+ GB of RAM and VRAM together")
+                return none(f"{vram} GB VRAM + {ram} GB RAM: Strata's UD-Q4_K_XL (the abliterated weights) needs ~{R['strata_min_gb']} GB of RAM and VRAM together to keep every expert in memory (Strata's figure)")
             return out(engine="strata", model=DEFAULT_MODEL, download_gb=quant_gb(DEFAULT_QUANT),
                        why=f"{vram} GB VRAM + {ram} GB RAM: Strata runs the abliterated Flash-Next you chose (UD-Q4_K_XL layout).{small}")
         for mid in R["strata_order"]:  # the biggest pack whose RAM need (experts + ~10 GB, Strata's rule) fits
@@ -208,10 +208,36 @@ def ask_route(esc=None):
         return None
     k, b = labels[pick]
     model = routes[k]["model"]
-    if model and not model_pref().startswith(model):  # keeps a saved quant of the same family (flash-next-iq3_s)
+    if model:
+        model = ask_variant(model, b["engine"], esc)
+        if model is BACK:
+            return BACK
+    return b["engine"], model
+
+
+def ask_variant(model, engine, esc=None):
+    """A route's model has quants the engine loads as their own catalog ids (qwen38-27b, qwen38-27b-q8): ask which, the saved
+    one first, and save it. One variant: keep a saved quant of the same family (flash-next-iq3_s) or save the route's model."""
+    cat, cur = catalog(), model_pref()
+    ids = [m for m in cat if (m == model or m.startswith(model + "-")) and engine in cat[m]["engines"]]
+    if len(ids) > 1:
+        ids.sort(key=lambda m: m != cur)
+        pick = {cat[m]["label"].split(" (")[0]: m for m in ids}
+        notes = [f"{n}: {cat[m]['label'].partition(' (')[2].rstrip(')')}, ~{cat[m]['download_gb']} GB download" for n, m in pick.items()]
+        choice = choose(f"Which {routes_label(model)} for {engine}?", list(pick), False, esc, notes)
+        if choice is BACK:
+            return BACK
+        model = pick[choice]
+    elif cur.startswith(model):
+        return model
+    if model != cur:
         os.makedirs(AGENT, exist_ok=True)
         open(MODEL_FILE, "w").write(model + "\n")
-    return b["engine"], model
+    return model
+
+
+def routes_label(model):
+    return next((r["label"].split(" (")[0] for k, r in PROFILES["routes"].items() if not k.startswith("_") and r.get("model") == model), model)
 
 
 def route_speed(b, model):
@@ -1000,10 +1026,14 @@ def stock_ready(quant=DEFAULT_QUANT):
 G27_DRAFT = "Qwen3.8-27B-DFlash2-Q4_K_M.gguf"  # same name in server/start-gufo-flashnext.sh and scripts/download-qwen38-27b.sh
 
 
-def g27_ready():
-    """The 27B target, its DFlash2 draft and the vision projector are all in the folder the gufo launcher reads."""
+def is_27b(m):
+    return m in ("qwen38-27b", "qwen38-27b-q8")
+
+
+def g27_ready(model="qwen38-27b"):
+    """The 27B target (Q4 or Q8), its DFlash2 draft and the vision projector are all in the folder the gufo launcher reads."""
     first = subprocess.run(["bash", os.path.join(REPO, "server", "start-gufo-flashnext.sh"), "--print-model"], capture_output=True, text=True,
-                           env=dict(os.environ, GUFO_FAMILY="qwen38-27b")).stdout.strip()
+                           env=dict(os.environ, GUFO_FAMILY=model)).stdout.strip()
     d = os.path.dirname(first)
     return bool(first) and all(os.path.isfile(os.path.join(d, f)) for f in (os.path.basename(first), G27_DRAFT, "mmproj-BF16.gguf"))
 
@@ -1101,12 +1131,12 @@ def plan_start(engine, running, ask_start=True):
                       f"~{quant_gb(q)} GB, {free} GB free, resumable"):
             return None
         plan["stock"] = q
-    if engine == "gufo" and m == "qwen38-27b" and not g27_ready():
+    if engine == "gufo" and is_27b(m) and not g27_ready(m):
         free = shutil.disk_usage(os.path.expanduser("~")).free // 2**30
-        if not ask_yn(f"Download Qwen3.8 27B? UD-Q4_K_XL, DFlash2 draft, vision projector; "
+        if not ask_yn(f"Download Qwen3.8 27B? {'UD-Q8_K_XL' if m.endswith('-q8') else 'UD-Q4_K_XL'}, DFlash2 draft, vision projector; "
                       f"~{catalog()[m]['download_gb']} GB, {free} GB free, resumable"):
             return None
-        plan["g27"] = True
+        plan["g27"] = m
     gb = weights_download_gb(engine) if engine in WEIGHTS_ENGINES and not own and weights_pref() != "stock" else 0
     if gb:
         free = shutil.disk_usage(os.path.expanduser("~")).free // 2**30
@@ -1131,7 +1161,8 @@ def prepare_start(plan, running):
         return False
     if wd and subprocess.run(["bash", os.path.join(REPO, "scripts", "download-abliterated.sh"), wd, "--yes"]).returncode:
         return False  # before the install: abliterated Strata installs on top of gufo's shards
-    if plan.pop("g27", False) and subprocess.run(["bash", os.path.join(REPO, "scripts", "download-qwen38-27b.sh"), "--yes"]).returncode:
+    g27 = plan.pop("g27", False)
+    if g27 and subprocess.run(["bash", os.path.join(REPO, "scripts", "download-qwen38-27b.sh"), "--yes"], env=dict(os.environ, GUFO_FAMILY=g27)).returncode:
         return False
     sq = plan.pop("stock", False)
     if sq and subprocess.run(["bash", os.path.join(REPO, "scripts", "download-stock.sh"), "--yes"], env=dict(os.environ, GUFO_QUANT=sq)).returncode:
@@ -1913,7 +1944,7 @@ def cmd_setup(a):
             ["download halogen (~124 GB, resumable)"] if plan and plan["download"] else []) + (
             [f"install Strata with {catalog()[engine_model('strata')]['label']} (its setup downloads ~{catalog()[engine_model('strata')]['download_gb']} GB, resumable)" if engine_model("strata") != DEFAULT_MODEL else
              f"install Strata for the {weights_pref()} weights (" + ("orca-uncensored in place" if weights_pref() == "abliterated" else "shared stock UD-Q4_K_XL in place") + ")"] if plan and plan.get("install") == "strata" else []) + (
-            [f"download Qwen3.8 27B (~{catalog()['qwen38-27b']['download_gb']} GB, resumable)"] if plan and plan.get("g27") else []) + (
+            [f"download {catalog()[plan['g27']]['label'].split(' (')[0]} (~{catalog()[plan['g27']]['download_gb']} GB, resumable)"] if plan and plan.get("g27") else []) + (
             [f"download the stock {plan['stock']} (~{quant_gb(plan['stock'])} GB, resumable)"] if plan and plan.get("stock") else []) + (
             [f"download the abliterated {eng} weights (~{plan.get('weights_gb')} GB, resumable)"] if plan and plan.get("weights") else []) + (
             [f"upgrade {eng} (restart, rolls back on failure)"] if upgrade else []) + (
@@ -2076,7 +2107,7 @@ def cmd_config(a):
             notes.append(f"! osmos was last started on the other weights; {weights_pref()} applies on its next start")
         items = {
             f"engine        {engine_title(eng, p['model']) if eng else '-'}": "engine",
-            **({f"model         {catalog().get(model_pref(), {}).get('label', model_pref()).split(' (')[0].split(',')[0]}  (gufo, Strata)": "model"}
+            **({f"model         {catalog().get(model_pref(), {}).get('label', model_pref()).split(' (')[0]}  (gufo, Strata)": "model"}
                if eng in ("gufo", "strata") else {}),  # only those two load the model answer
             f"weights       {weights_pref()}  (every engine, next start)": "weights",
             f"agent         {'none (engine only)' if no_pi() else 'pi'}  (extensions, providers, MCP)": "agent",

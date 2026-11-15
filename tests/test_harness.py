@@ -271,6 +271,12 @@ routes_seen = []
 first = lambda q, o, y, esc=None, notes=(): routes_seen.extend(o) or next(x for x in o if "27B" in x)
 h.choose = first
 assert h.ask_route() == ("gufo", "qwen38-27b") and h.model_pref() == "qwen38-27b"
+# the 27B route asks its quant (Q4 / Q8 are their own catalog ids), saved answer first
+h.choose = lambda q, o, y, esc=None, notes=(): routes_seen.extend(o) or next(x for x in o if ("Q8" in x if "Which Qwen3.8-27B" in q else "27B" in x))
+assert h.ask_route() == ("gufo", "qwen38-27b-q8") and h.model_pref() == "qwen38-27b-q8"
+h.choose = lambda q, o, y, esc=None, notes=(): o[0]
+assert h.ask_variant("qwen38-27b", "gufo") == "qwen38-27b-q8"  # saved one listed first
+h.choose = first
 h.choose = lambda q, o, y, esc=None, notes=(): next(x for x in o if "Flash-Next" in x)
 assert h.ask_route() == ("gufo", "flash-next") and h.model_pref() == "flash-next"
 open(h.MODEL_FILE, "w").write("flash-next-iq3_s\n")
@@ -383,7 +389,7 @@ assert [nv(x)["model"] for x in (56, 48, 44, 40, 32)] == ["flash-next-iq3_xxs", 
 assert nv(30)["engine"] is None and nv(64, gpu="amd")["engine"] == "strata" and rec("apple", 64, 64, name="")["engine"] is None
 assert all(m in h.catalog() for m in R["strata_order"])
 h.weights_pref, real_wp = (lambda: "abliterated"), h.weights_pref
-assert nv(64)["model"] == "flash-next" and nv(60, 8)["engine"] is None and nv(64, 8)["engine"] == "strata"
+assert nv(64)["model"] == "flash-next" and nv(76, 8)["engine"] is None and nv(80, 8)["engine"] == "strata"  # Strata: ~88 GB keeps every UD-Q4_K_XL expert
 h.weights_pref = real_wp
 # the ladder is what the gufo launcher can load: every quant resolves to <quant>/...-00001-of-<shards>, sizes feed the download
 for q in R["quants"]:
@@ -426,13 +432,20 @@ ran = []
 h.subprocess.run = lambda a, **k: ran.append(os.path.basename(a[1])) or types.SimpleNamespace(returncode=0)
 assert h.prepare_start(plan, {}) and ran == ["install-strata.sh"], ran
 open(h.MODEL_FILE, "w").write("qwen38-27b\n")
-h.g27_ready = lambda: False
+h.g27_ready = lambda m="qwen38-27b": False
 plan = h.plan_start("gufo", {})
-assert plan["g27"] is True and not plan.get("stock") and not plan.get("weights"), plan
+assert plan["g27"] == "qwen38-27b" and not plan.get("stock") and not plan.get("weights"), plan
 ran = []
 assert h.prepare_start(plan, {}) and ran == ["download-qwen38-27b.sh"], ran
+open(h.MODEL_FILE, "w").write("qwen38-27b-q8\n")
+plan = h.plan_start("gufo", {})
+assert plan["g27"] == "qwen38-27b-q8" and "UD-Q8_K_XL" in asked[-2] and "~34 GB" in asked[-2], (plan, asked)
+envs = []
+h.subprocess.run = lambda a, **k: envs.append(k.get("env", {}).get("GUFO_FAMILY")) or types.SimpleNamespace(returncode=0)
+assert h.prepare_start(plan, {}) and envs == ["qwen38-27b-q8"], envs
+open(h.MODEL_FILE, "w").write("qwen38-27b\n")
 h.subprocess.run = real_run
-h.g27_ready = lambda: True
+h.g27_ready = lambda m="qwen38-27b": True
 assert not h.plan_start("gufo", {}).get("g27")
 assert h.plan_start("strata", {})["stock"] == "UD-Q4_K_XL"  # 27B is gufo's: Strata falls back to Flash-Next
 for n, f in saved.items(): setattr(h, n, f)
@@ -452,6 +465,8 @@ gd = tempfile.mkdtemp(); open(f"{gd}/harness-model", "w").write("qwen38-27b\n")
 ge = dict(os.environ, PI_CODING_AGENT_DIR=gd, ENGINE_DIR=f"{gd}/flash", GUFO_27B_DIR=f"{gd}/27b")
 assert "/UD-Q4_K_XL/Qwen3.8-Flash-Next" in subprocess.run(["bash", gl, "--print-model"], capture_output=True, text=True, env=ge).stdout
 assert subprocess.run(["bash", gl, "--print-model"], capture_output=True, text=True, env=dict(ge, GUFO_FAMILY="qwen38-27b")).stdout.strip() == f"{gd}/27b/Qwen3.8-27B-UD-Q4_K_XL.gguf"
+assert subprocess.run(["bash", gl, "--print-model"], capture_output=True, text=True, env=dict(ge, GUFO_FAMILY="qwen38-27b-q8")).stdout.strip() == f"{gd}/27b/Qwen3.8-27B-UD-Q8_K_XL.gguf"
+assert h.catalog_id("qwen3.8-27b-q8") == "qwen38-27b-q8" and h.catalog_id("qwen3.8-27b") == "qwen38-27b"  # tune results stay apart
 r = subprocess.run(["bash", gl], capture_output=True, text=True, env=ge)
 assert r.returncode == 1 and "download-qwen38-27b.sh" in r.stderr, r
 assert h.G27_DRAFT in open(gl).read() and h.G27_DRAFT in open(os.path.join(os.path.dirname(gl), "..", "scripts", "download-qwen38-27b.sh")).read()

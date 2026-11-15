@@ -16,6 +16,7 @@
 - Audit of `extensions/subagent`, `bench/` and `scripts/halogen-top.sh`, fixed; the subagent items:
   - A subagent's web/MCP/`curl` use now taints the parent (it used to bypass the taint gate).
   - Project agents can no longer be auto-confirmed, pick a `model:` or read files outside the project; children are leaf, time-limited (30 min) and killed as a process group.
+- gufo: Qwen3.8 27B at UD-Q8_K_XL (`qwen38-27b-q8`, 34 GB download), gufo's other qualified 27B file. Same pinned revision and DFlash2 draft as Q4, served as `qwen3.8-27b-q8` so tune results stay apart; picking the 27B in the model-first menu asks Q4 or Q8. gufo's own benchmarks: ~16 t/s mixed decode vs ~27 for Q4. **Not run here.**
 
 ### Changed
 - The model-first, engine and model menus keep the arrow-key menu on an 80-column window: rows are short, and the speed claims, what each engine loses and the memory warning print once under the question. These rows were 110-150 columns, so they always fell back to the numbered list.
@@ -35,6 +36,7 @@
 - `scripts/uninstall.sh` knows the multi-engine setup and removes what the wizard wrote.
 
 ### Fixed
+- Model and weights claims checked against gufo's and Strata's docs and the pinned Hugging Face trees: the gufo Flash-Next route no longer says "any stock quant (measured)" (gufo qualifies only UD-Q4_K_XL; the others are untested); Strata's minimum for UD-Q4_K_XL is ~88 GB of RAM + VRAM (all experts kept, Strata's figure), not 72 (that was the expert size); the Flash-Next label names both sources (Unsloth stock, brainnxdomain abliterated, unofficial on Strata); `docs/ENGINES.md` no longer calls the abliterated Strata run untested and lists the upstream packs not offered.
 - Abliterated osmos asked to download ~1 GB even with huihui-ai's patch on disk (it checked whether the overlay was on, not the file), and Yes ran a script that rejects osmos, so the start failed either way. libosmos's installer, run by `start-osmos.sh`, reuses the patch or fetches it (0.6 GB); the wizard now just says so.
 - `gum` menus and yes/no prompts showed the question but no options (keys still picked blind): gum draws on stderr, which was being captured.
 - A long question was cut off mid-word by `gum`, which truncates a header at the window edge instead of wrapping it; a menu whose labels do not fit the window now uses the wrapped numbered list.
