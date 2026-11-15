@@ -16,6 +16,7 @@
 #   STRATA_WEIGHTS=stock|abliterated overrides the saved answer
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
+. "$REPO/scripts/lib-prompt.sh"
 [ -n "$(bash "$REPO/server/start-strata.sh" --print-run)" ] && { echo "  Strata already installed for these weights"; exit 0; }
 HAVE=$(bash "$REPO/server/start-strata.sh" --print-dir)
 DIR=${HAVE:-${STRATA_DIR:-$HOME/coding/Strata}}
@@ -41,8 +42,7 @@ else
 fi
 echo "  Strata ($([ "$OWN" = 1 ] && echo "$MODEL_ID" || echo "$WEIGHTS weights")): $([ -n "$HAVE" ] && echo "in $HAVE, " || echo "clone into $DIR, ")then its setup fetches the engine and $WHAT${AVAIL:+ (free: ${AVAIL} GB)}"
 if [ "${1:-}" != --yes ]; then
-  read -r -p "  install now? [y/N] " A || { echo; echo cancelled; exit 130; }
-  case "$A" in [yY]*) ;; *) echo "  aborted" >&2; exit 1 ;; esac
+  prompt_yn "install now?" n || { echo "  aborted" >&2; exit 1; }
 fi
 if [ ! -f "$DIR/setup.sh" ]; then
   mkdir -p "$(dirname "$DIR")"

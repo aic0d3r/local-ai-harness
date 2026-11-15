@@ -16,7 +16,7 @@
 
 Profiles live in config/profiles.json. Stdlib only. Never kills or restarts servers it did not launch.
 """
-import json, os, re, shutil, subprocess, sys, time, urllib.request, uuid, hashlib, glob
+import json, os, re, shutil, subprocess, sys, textwrap, time, urllib.request, uuid, hashlib, glob
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import entries
 import jsonio
@@ -343,8 +343,38 @@ def key():
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
-def choose(question, options, yes):
-    if len(options) == 1 or yes or not sys.stdin.isatty():
+def question_text(question):
+    """The question as printed: the headline (up to its first '?') bold, the detail dimmed under it, wrapped to the terminal."""
+    head, sep, rest = question.partition("? ")
+    w = term_width()
+    out = [paint("1", line) for line in textwrap.wrap(head + "?" if sep else question, w)]
+    out += [paint("2", line) for line in textwrap.wrap(rest, w, initial_indent="  ", subsequent_indent="  ")]
+    return "\n".join(out)
+
+
+def term_width():
+    """Columns to wrap to on a terminal; piped output is never wrapped."""
+    return max(20, shutil.get_terminal_size().columns - 2) if sys.stdout.isatty() else 10**6
+
+
+def no_terminal(question, answer):
+    """A question nobody can answer: the default is taken, and the output says so (a log shows what was chosen)."""
+    print(paint("2", f"{question} -> {answer} (no terminal: default)"))
+
+
+def escape(esc):
+    """Esc or Ctrl-C in a menu: cancel the wizard, or return esc when the menu says what Esc means (settings: done)."""
+    if esc is None:
+        cancel()
+    print()  # end the prompt line the way Enter does
+    return esc
+
+
+def choose(question, options, yes, esc=None):
+    if len(options) == 1 or yes:
+        return options[0]
+    if not sys.stdin.isatty():
+        no_terminal(question, options[0])
         return options[0]
     if shutil.which("gum"):
         r = subprocess.run(["gum", "choose", "--header", question, *options], stdout=subprocess.PIPE, text=True)
@@ -352,25 +382,36 @@ def choose(question, options, yes):
         if out:  # gum trims the line it prints: map it back to the exact option (labels can start with a space)
             return next((o for o in options if o.strip() == out), out)
         if r.returncode in (1, 130):  # Esc / Ctrl-C
-            cancel()
-    print(paint("1", question))
+            return escape(esc)
+    print(question_text(question))
     for i, o in enumerate(options, 1):
-        print(f"  {i}) {o}")
-    if len(options) <= 9:  # one keypress picks; Esc cancels
-        prompt = f"pick 1-{len(options)} " + paint("2", "(Enter = 1, Esc cancels)") + ": "
+        print("\n".join(textwrap.wrap(f"{i}) {o}", term_width(), initial_indent="  ", subsequent_indent="     ")))
+    back = "Esc cancels" if esc is None else f"Esc = {esc}"
+    if len(options) <= 9:  # one keypress picks
+        prompt = f"pick 1-{len(options)} " + paint("2", f"(Enter = 1, {back})") + ": "
         print(prompt, end="", flush=True)
         while True:
             k = key()
             if k == "\x1b":
-                cancel()
+                return escape(esc)
             if k in ("\r", "\n") or (k.isdigit() and 0 < int(k) <= len(options)):
                 i = int(k) if k.isdigit() else 1
                 print(i)
                 return options[i - 1]
             # other keys used to vanish silently: say what works, then ask again
-            print("\n" + paint("2", f"  type 1-{len(options)}, Enter for 1, or Esc to cancel") + "\n" + prompt, end="", flush=True)
-    a = input(f"pick 1-{len(options)} (Enter = 1): ").strip() or "1"
-    return options[int(a) - 1] if a.isdigit() and 0 < int(a) <= len(options) else options[0]
+            print("\n" + paint("2", f"  type 1-{len(options)}, Enter for 1, or {back.lower()}") + "\n" + prompt, end="", flush=True)
+    # more than 9: a whole line, so 10 or 12 can be typed. A typo asks again; it used to pick option 1 silently.
+    back2 = back.replace("Esc", "Esc + Enter", 1)  # a line prompt: Esc needs Enter too
+    prompt = f"pick 1-{len(options)} " + paint("2", f"(Enter = 1, {back2})") + ": "
+    while True:
+        a = input(prompt).strip()
+        if "\x1b" in a:
+            return escape(esc)
+        if not a:
+            return options[0]
+        if a.isdigit() and 0 < int(a) <= len(options):
+            return options[int(a) - 1]
+        print(paint("2", f"  type 1-{len(options)}, Enter for 1, or {back2}"))
 
 
 # ---------- profile ----------
@@ -1099,6 +1140,7 @@ LANGS = {".py": "python", ".ts": "typescript", ".tsx": "typescript", ".js": "typ
 def ask_yn(question, default=False):
     """Every yes/no in the wizard: gum confirm when installed (same look as choose()), else a plain prompt."""
     if not sys.stdin.isatty():
+        no_terminal(question, "yes" if default else "no")
         return default
     if shutil.which("gum"):
         # gum choose, not gum confirm: confirm exits 1 for both "No" and Esc, so Esc could not cancel
@@ -1110,7 +1152,8 @@ def ask_yn(question, default=False):
             return out == "Yes"
         if r.returncode in (1, 130):
             cancel()
-    prompt = f"{paint('1', question)} {paint('2', '[Y/n]' if default else '[y/N]')} "
+    print(question_text(question))
+    prompt = ("[Y/n]" if default else "[y/N]") + " " + paint("2", f"(Enter = {'yes' if default else 'no'}, Esc cancels)") + " "
     print(prompt, end="", flush=True)
     while True:
         k = key().lower()
@@ -1120,6 +1163,7 @@ def ask_yn(question, default=False):
             a = default if k in ("\r", "\n") else k == "y"
             print("yes" if a else "no")
             return a
+        print("\n" + paint("2", "  y or n, Enter for the default, Esc to cancel") + "\n" + prompt, end="", flush=True)
         print("\n" + paint("2", "  y or n, Enter for the default, Esc to cancel") + "\n" + prompt, end="", flush=True)
 
 
@@ -1851,15 +1895,15 @@ def cmd_config(a):
         voice = bool(jget(EXTRAS, {}).get("voice"))
         items = {
             f"engine        {engine_title(p['engine'], p['model']) if p.get('engine') else '-'}": "engine",
-            f"model         {model_pref()}  (gufo and Strata; halogen always runs Flash-Next)": "model",
+            f"model         {model_pref()}  (gufo, Strata)": "model",
             f"weights       {weights_pref()}  (default for halogen and gufo)": "weights",
-            f"agent         {'none (engine only)' if no_pi() else 'pi'}  (pi wiring: extensions, models.json, MCP)": "agent",
+            f"agent         {'none (engine only)' if no_pi() else 'pi'}  (extensions, providers, MCP)": "agent",
             f"sidecar       {'on' if sc else 'off'}  (ling-tiny, ~8 GiB GPU memory)": "sidecar",
             f"voice         {'on' if voice else 'off'}  (Lemonade STT/TTS)": "voice",
-            f"update check  {'on' if upd == '1' else 'off'}  (newer engine release, never installs without asking)": "update",
-            f"sudo hints    {'hidden after first show' if os.path.exists(hints) else 'shown'}  (fabric clock, vm-compact)": "hints",
+            f"update check  {'on' if upd == '1' else 'off'}  (newer engine release; never installs)": "update",
+            f"sudo hints    {'hidden' if os.path.exists(hints) else 'shown'}  (fabric clock, vm-compact)": "hints",
             "done": "done"}
-        k = items[choose("Change which setting?", list(items), False)]
+        k = items[choose("Change which setting?", list(items), False, esc="done")]  # Esc closes the menu, like done
         if k == "done":
             return
         if k == "engine":

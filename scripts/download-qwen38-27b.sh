@@ -6,6 +6,7 @@
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 . "$REPO/scripts/lib-hf.sh"
+. "$REPO/scripts/lib-prompt.sh"
 DIR=$(dirname "$(GUFO_FAMILY=qwen38-27b bash "$REPO/server/start-gufo-flashnext.sh" --print-model)")
 TARGET=Qwen3.8-27B-UD-Q4_K_XL.gguf; DRAFT=Qwen3.8-27B-DFlash2-Q4_K_M.gguf; GB=20
 REV_TARGET=4ca720788d1e01f1bff70c033e0d0028fd02e502; REV_DRAFT=2d9571f8ce46e151f61c6499c99dee6079e1d610
@@ -14,8 +15,7 @@ mkdir -p "$DIR"
 AVAIL=$(df -BG --output=avail "$DIR" 2>/dev/null | tail -1 | tr -dc '0-9')
 echo "  required download: ~$GB GB into $DIR (unsloth/Qwen3.8-27B-GGUF @ ${REV_TARGET:0:8}, z-lab/Qwen3.8-27B-DFlash2-GGUF @ ${REV_DRAFT:0:8})${AVAIL:+ (free: ${AVAIL} GB)}"
 if [ "${1:-}" != --yes ]; then
-  read -r -p "  download now? [y/N] " A || { echo; echo cancelled; exit 130; }
-  case "$A" in [yY]*) ;; *) echo "  aborted" >&2; exit 1 ;; esac
+  prompt_yn "download now?" n || { echo "  aborted" >&2; exit 1; }
 fi
 [ "${AVAIL:-999}" -lt $((GB + 5)) ] && { echo "  only ${AVAIL} GB free - free up at least $((GB + 5)) GB first" >&2; exit 1; }
 HF_BIN="$(command -v hf || command -v huggingface-cli || ls "$HOME/.hf-venv/bin/hf" 2>/dev/null || true)"

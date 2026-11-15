@@ -22,7 +22,11 @@ echo "  - ling-tiny systemd unit"
 echo "  - NOT touched: mcp.json, the sidecar GGUF, the halogen container,"
 echo "    your checkpoint files, the vm-compact.timer (sudo; command printed)"
 if [ "$ASSUME_YES" -ne 1 ]; then
-  read -r -p "type 'uninstall' to continue: " A || { echo; echo cancelled; exit 130; }
+  # a typed word, not y/n: same cancel rules as prompt_yn (Esc + Enter, Ctrl-C, Ctrl-D)
+  trap 'echo; echo cancelled; exit 130' INT
+  read -r -p "  type 'uninstall' to continue (Esc + Enter cancels): " A || { trap - INT; echo; echo cancelled; exit 130; }
+  trap - INT
+  case "$A" in *$'\033'*) echo cancelled; exit 130 ;; esac
   [ "$A" = "uninstall" ] || { echo "aborted"; exit 1; }
 fi
 

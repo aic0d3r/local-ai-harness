@@ -6,6 +6,7 @@
 #   HF_VERIFY_HASH=0 skips the sha256 pass (sizes are still checked); HALOGEN_WEIGHTS_REV pins another weights commit
 set -u
 . "$(dirname "$0")/lib-hf.sh"
+. "$(dirname "$0")/lib-prompt.sh"
 REV="${HALOGEN_WEIGHTS_REV:-c464b5b51c968ff54ea78647a4b2556355b36d2c}"
 DL_DIR="${HALOGEN_MODELS:-$HOME/models}/halogen-qwen3.8-flash-next"
 AVAIL=$(free_gb "$DL_DIR")
@@ -17,8 +18,7 @@ if [ "${AVAIL:-999}" -lt "$NEED" ]; then
   echo "  only ${AVAIL} GB free where that is - free up at least $NEED GB, or put it on a bigger disk: HALOGEN_MODELS=/path/to/models $0" >&2; exit 1
 fi
 if [ "${1:-}" != --yes ]; then
-  read -r -p "  download now? [y/N] " A || { echo; echo cancelled; exit 130; }
-  case "$A" in [yY]*) ;; *) echo "  aborted - download the files (see README 'Minimum download') or pass a checkpoint: ./setup.sh --halogen /path/to/checkpoint.hgn" >&2; exit 1 ;; esac
+  prompt_yn "download now?" n || { echo "  aborted - download the files (see README 'Minimum download') or pass a checkpoint: ./setup.sh --halogen /path/to/checkpoint.hgn" >&2; exit 1; }
 fi
 HF_BIN="$(command -v hf || command -v huggingface-cli || true)"
 if [ -z "$HF_BIN" ]; then

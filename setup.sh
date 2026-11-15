@@ -64,6 +64,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 REPO="$(cd "$(dirname "$0")" && pwd)"
+. "$REPO/scripts/lib-prompt.sh"
 # The config folder: pi's own PI_CODING_AGENT_DIR first, then this harness' PI_HOME sandbox variable, then ~/.pi/agent. Resolved once and
 # exported, so adopt.py, mcp.py, the wizard and the launchers write to the same place. PI_HOME is then the folder above it (speak.json).
 AGENT_DIR="${PI_CODING_AGENT_DIR:-${PI_HOME:-$HOME/.pi}/agent}"
@@ -266,8 +267,8 @@ fi
 UPD_PREF="$AGENT_DIR/harness-update-check"
 # -s: an empty file is not an answer (an older harness-update extension left empty files here)
 if [ "$NO_HALOGEN" = 0 ] && [ ! -s "$UPD_PREF" ] && [ -t 0 ]; then
-  read -r -p "Check for engine updates each time start.sh runs? (one short network call; never installs without asking) [y/N] " A || { echo; echo cancelled; exit 130; }
-  mkdir -p "$(dirname "$UPD_PREF")"; case "$A" in [yY]*) echo 1 ;; *) echo 0 ;; esac > "$UPD_PREF"
+  if prompt_yn "Check for engine updates each time start.sh runs?" n "one short network call; never installs without asking"; then A=1; else A=0; fi
+  mkdir -p "$(dirname "$UPD_PREF")"; echo "$A" > "$UPD_PREF"
 fi
 
 command -v python3 >/dev/null || { fail "python3 required - install python3 and re-run"; exit 1; }
@@ -366,8 +367,7 @@ else
   fi
   # a terminal gets asked; no terminal with a saved answer (the wizard already asked) downloads
   if [ -z "${GGUF:-}" ] && [ -t 0 ]; then
-    read -r -p "  download Ling-3.0-tiny (~4.5 GB) for the sidecar? (n = skip; ./setup.sh --no-sidecar turns it off) [Y/n] " A || { echo; echo cancelled; exit 130; }  # Ctrl-D must not read as Yes
-    case "$A" in [nN]*) GGUF=skip ;; esac
+    prompt_yn "download Ling-3.0-tiny for the sidecar? (~4.5 GB)" y "n = skip; ./setup.sh --no-sidecar turns the sidecar off" || GGUF=skip
   fi
   if [ "${GGUF:-}" = skip ]; then
     GGUF=""; warn "sidecar download skipped - commits/summaries fall back to the main model until it runs"

@@ -6,6 +6,11 @@
 ## Unreleased
 
 ### Changed
+- Every shell question (`setup.sh`, the download and uninstall scripts) goes through `scripts/lib-prompt.sh`: the same `[Y/n]` wording and `(Esc + Enter cancels)`, Ctrl-C prints `cancelled`, and with no terminal it aborts rather than guessing.
+- Questions print a bold headline with the detail dimmed under it, wrapped to the terminal, so `[Y/n]` no longer lands at the end of a long sentence.
+- Yes/no prompts and menus show the same key hints: the default on Enter, and `Esc cancels`.
+- `./harness config` closes on Esc like `done` (it used to print `cancelled`); its rows are shorter so they fit 80 columns.
+- With no terminal a question prints the answer it took, e.g. `Start pi? -> yes (no terminal: default)`, so a log shows what was chosen.
 - Plain menus and yes/no prompts give a hint after an unknown key and show the valid range (`pick 1-3`); shell download and uninstall prompts say `cancelled` on Ctrl-D.
 - The setup summary wraps on narrow terminals with its labels kept aligned, and the saved answers break between items instead of mid-item. The status line is green (ready) or red (NOT ready) and the labels are dimmed; colour only on a terminal, never under `NO_COLOR`.
 - The setup wizard asks about the ling-tiny sidecar on every interactive run, pre-selected with your saved answer, instead of only the first time.
@@ -35,6 +40,7 @@
 - `scripts/uninstall.sh` knows the multi-engine setup and removes what the wizard wrote.
 
 ### Fixed
+- In a menu of more than 9 options (e.g. `./harness endpoint` on a server that lists 10+ models) a typo silently picked option 1; it now asks again, and Esc cancels.
 - Ctrl-D at a wizard prompt was ignored; it now cancels like Esc. Ctrl-D at the Ling-3.0-tiny download prompt (default Yes) no longer starts the 4.5 GB download.
 - The commit tool no longer tells a cloud-model session to write its own message (`message` is for dictated text only); the refusal asks the user to run `/commit` or dictate the message.
 - `./harness tune` counted chunks as tokens (osmos showed 6.0 t/s instead of 40.8); it now uses the server's token count.
