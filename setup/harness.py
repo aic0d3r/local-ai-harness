@@ -642,7 +642,7 @@ def cmd_bench(a):
     if not served_models(PROFILES["engines"][p["engine"]]["port"], p["engine"]):
         sys.exit(f"{p['engine']} is not answering: start it first (./start.sh)")
     depths = tuple(int(x) for x in a.depths.split(","))
-    print(f"== {BENCH_ID}: {p['engine']}/{p['model']}, {a.runs} runs, depths {list(depths)} (minutes; nothing else should be running) ==")
+    print(f"== {BENCH_ID}: {engine_title(p['engine'], p['model'])}, {a.runs} runs, depths {list(depths)} (minutes; nothing else should be running) ==")
     r = bench(p["engine"], p["model"], a.runs, depths)
     for k, v in r["median"].items():
         print(f"  {k:22s} {v:8.1f} t/s   (spread {r['spread'][k]})")
@@ -1403,6 +1403,12 @@ def notice(msg):
     print(f"\033[1;33m{msg}\033[0m" if sys.stdout.isatty() else msg)
 
 
+def engine_title(eng, mod):
+    """`engine · model` for people: an engine that serves one model names it (osmos: DeepSeek-V4.1-Flash (osmos-evo)), the rest name
+    the model they run. The raw id stays what the server and pi use."""
+    return f"{eng} · {PROFILES['engines'].get(eng, {}).get('model_label') or mod}"
+
+
 def choices_line(eng=None):
     """One line with every saved answer, for summaries and the config menu. An engine that serves one model only (osmos:
     DeepSeek-V4.1-Flash) names it, so the saved preference for the Qwen engines is not shown as what osmos runs."""
@@ -1568,7 +1574,7 @@ def verified(eng):
 def finish(eng, mod, no_tune, launch=False):
     tuned = jget(os.path.join(AGENT, "harness-tuned.json"), {}).get(hw_key(eng, mod), {}) if no_tune else {}
     if not no_tune:
-        print(f"== probing {eng}/{mod} (prefill + decode, <2 min) ==")
+        print(f"== probing {engine_title(eng, mod)} (prefill + decode, <2 min) ==")
         tuned = tune(eng, mod)
         print("  ", {k: v for k, v in tuned.items() if k in ("ctx", "prefill_tps", "decode_tps", "error")})
         if "error" in tuned:
@@ -1589,7 +1595,7 @@ def finish(eng, mod, no_tune, launch=False):
     if no_tune and tuned.get("decode_tps"):
         speed += f" (saved {tuned.get('when', '')}; re-measure: ./harness tune)"
     passed = verified(eng)
-    print(f"\n== {'ready' if passed else 'NOT ready'} ==\n  engine   {eng} -> {prov}/{mid}\n  context  {ctx}\n  speed    {speed}")
+    print(f"\n== {'ready' if passed else 'NOT ready'} ==\n  engine   {engine_title(eng, mod)}  (pi: {prov}/{mid})\n  context  {ctx}\n  speed    {speed}")
     print("  start    ./start.sh ~/your-project")
     if eng in ("halogen", "strata"):
         print("  monitor  ./harness monitor   (live speed, memory and requests; Ctrl-C to quit)")
@@ -1712,7 +1718,7 @@ def cmd_status(_):
         return print(f"engine custom {ep['url']} {'UP' if up else 'DOWN'}  model {p['model']}  provider {ep['provider']}  (a custom endpoint: not started, stopped or tuned by this harness)")
     port = PROFILES["engines"][p["engine"]]["port"]
     up = bool(served_models(port, p["engine"]))
-    print(f"engine {p['engine']} :{port} {'UP' if up else 'DOWN'}  model {p['model']}  npu {p['npu']}")
+    print(f"engine {engine_title(p['engine'], p['model'])} :{port} {'UP' if up else 'DOWN'}  npu {p['npu']}")
     t = jget(os.path.join(AGENT, "harness-tuned.json"), {}).get(hw_key(p["engine"], p["model"]))
     print("tuning:", t or "none yet (./harness tune)")
     if sidecar_pref() == "0":
@@ -1792,7 +1798,7 @@ def cmd_config(a):
         sc = sidecar_pref() != "0"
         voice = bool(jget(EXTRAS, {}).get("voice"))
         items = {
-            f"engine        {p.get('engine', '-')}/{p.get('model', '-')}": "engine",
+            f"engine        {engine_title(p['engine'], p['model']) if p.get('engine') else '-'}": "engine",
             f"model         {model_pref()}  (gufo and Strata; halogen always runs Flash-Next)": "model",
             f"weights       {weights_pref()}  (default for halogen and gufo)": "weights",
             f"agent         {'none (engine only)' if no_pi() else 'pi'}  (pi wiring: extensions, models.json, MCP)": "agent",

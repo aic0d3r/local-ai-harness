@@ -5,6 +5,9 @@
 
 ## Unreleased
 
+### Changed
+- Engine names read `engine · model` (osmos · DeepSeek-V4.1-Flash (osmos-evo)) in status, tune, bench and setup; the raw model id is unchanged.
+
 ### Added
 - `./harness bench`: fixed-protocol speed benchmark (cold prefill at 2K/8K/32K, code and prose decode, decode at depth; median of 3, saved to `harness-bench.json`). `./harness tune` is now the quick subset of `bench` (same code path: warm-up, 3 decode samples, one 8K prefill, medians); its decode figure is short code, and old probes are marked for re-run.
 - Setup on a Strix Halo asks which **model** you want first and picks its best engine (`routes` in `config/profiles.json`: Flash-Next halogen > gufo > Strata, Qwen3.8-27B gufo with llama.cpp as fallback, DeepSeek-V4.1-Flash osmos). "Pick an engine instead" keeps the old menu; other hardware is unchanged.
