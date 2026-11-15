@@ -145,5 +145,11 @@ case "$DIGEST" in sha256:*) ;; *) echo "FAIL: no registry digest for $IMG:$TAG -
 # stored per user (harness-pins), not in the tracked launcher: the checkout stays clean so harness updates keep working
 pin_set HALOGEN_IMAGE_TAG "$DEF_TAG" "$TAG" && pin_set HALOGEN_IMAGE_DIGEST "$DEF_DIGEST" "$DIGEST" \
   || { echo "FAIL: could not write $PINS - pin unchanged"; exit 1; }
+# keep one rollback copy (the one just taken for $CUR): each backup is a full ~15 GB NPU set
+if [ "$REFRESHED" = 1 ]; then
+  for old in "$NPU"-*-backup; do
+    [ -d "$old" ] && [ "$old" != "$NPU-$CUR-backup" ] && rm -rf "$old" && echo "      pruned old NPU backup $old"
+  done
+fi
 echo "      $(bash "$START" --print-image)"
 echo "OK: validated and pinned to $TAG in $PINS (a harness update that ships a newer reviewed pin replaces it)."
