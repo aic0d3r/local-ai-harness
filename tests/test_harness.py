@@ -34,7 +34,8 @@ d = h.detect()
 assert [e["engine"] for e in d["engines"]].count("llamacpp") == 1, d["engines"]
 t = h.tune("llamacpp", "Qwen3-8B")
 assert t["prefill_tps"] > 0 and t["decode_tps"] > 0 and t["protocol"] == h.BENCH_ID and t["samples"] == 3, t
-assert h.engine_title("osmos", "osmos-osmos-evo") == "osmos · DeepSeek-V4.1-Flash (osmos-evo)" and h.engine_title("llamacpp", "Qwen3-8B") == "llamacpp · Qwen3-8B"
+assert h.engine_title("osmos", "osmos-osmos-evo") == "osmos · DeepSeek-V4.1-Flash (osmos-evo)" and h.engine_title("llamacpp", "Qwen3-8B") == "llamacpp · Qwen3-8B" and h.engine_title("halogen", "flash-next") == "halogen · Qwen3.8-Flash-Next, Unsloth UD-Q4_K_XL"
+assert h.engine_title("gufo", None) == "gufo · no model" and "/" not in h.engine_title("strata", "flash-next-iq3_s")
 q = h.bench("llamacpp", "Qwen3-8B", runs=2, quick=True)  # tune is this quick subset: one prefill cell, decode repeats
 assert set(q["median"]) == {"decode_code", "prefill_8192"} and q["quick"], q
 # bench: fixed protocol, medians per cell, depths over half the window skipped (the mock reports n_ctx 32768)

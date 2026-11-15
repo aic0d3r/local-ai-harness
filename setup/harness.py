@@ -1406,7 +1406,9 @@ def notice(msg):
 def engine_title(eng, mod):
     """`engine · model` for people: an engine that serves one model names it (osmos: DeepSeek-V4.1-Flash (osmos-evo)), the rest name
     the model they run. The raw id stays what the server and pi use."""
-    return f"{eng} · {PROFILES['engines'].get(eng, {}).get('model_label') or mod}"
+    cfg = PROFILES["engines"].get(eng, {})
+    name = cfg.get("model_label") or (catalog().get(mod or "", {}).get("label") or mod or "").split(" (")[0]  # catalog labels carry a parenthesis of notes
+    return f"{eng} · {name or 'no model'}"
 
 
 def choices_line(eng=None):
