@@ -70,7 +70,7 @@
       "label": "DeepSeek-V4.1-Flash (1M context, streams from the SSD)",
       "model": null,
       "engines": [
-        {"engine": "osmos", "why": "40.8 t/s decode, 452 t/s prefill, 1M context (measured)"}
+        {"engine": "osmos", "why": "36.5 t/s decode, ~426 t/s prefill at 8k, 1M context (measured, osmos-evo)"}
       ]
     }
   },
