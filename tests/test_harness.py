@@ -198,10 +198,22 @@ assert h.weights_pref() == "stock" and h.ask_weights("halogen") is False and "we
 r = lambda d, p, **kw: {"engine": "osmos", "model": "osmos-osmos-evo", "when": "2026-11-15", "protocol": h.BENCH_ID, "decode_tps": d, "prefill_tps": p, **kw}  # noqa: E731
 h.jput(os.path.join(AGENT, "harness-tuned.json"), {h.hw_key("osmos", "osmos-osmos-evo", "stock"): r(33.5, 469),
                                                   h.hw_key("osmos", "osmos-osmos-evo", "abliterated"): r(34.3, 475),
-                                                  "x": {**r(36.0, 405), "engine": "gufo", "model": "qwen3.8-27b", "weights": "stock"}})
+                                                  "x": {**r(36.0, 405), "engine": "gufo", "model": "qwen3.8-27b", "weights": "stock"},
+                                                  "y": {**r(35.0, 400), "engine": "gufo", "model": "qwen3.8-27b", "weights": "abliterated", "when": "2026-11-14"},
+                                                  "z": {**r(16.0, 300), "engine": "gufo", "model": "qwen3.8-27b-q8"}})
 assert set(h.speeds("osmos")) == {"stock", "abliterated"}, h.speeds("osmos")
 assert "stock 33.5 t/s" in h.speed_text("osmos") and "abliterated 34.3 t/s" in h.speed_text("osmos")
 assert h.speed_text("gufo", "flash-next") == "" and "36.0" in h.speed_text("gufo", "qwen38-27b")
+# the 27B has no abliterated build: one newest result, no weights label; Q8 kept apart from Q4
+assert h.speed_text("gufo", "qwen38-27b").startswith("36.0 t/s") and "35.0" not in h.speed_text("gufo", "qwen38-27b"), h.speed_text("gufo", "qwen38-27b")
+assert h.speed_text("gufo", "qwen38-27b-q8").startswith("16.0 t/s")
+# a running gufo on another model than the saved answer needs a restart (Q4 up, Q8 saved)
+open(h.MODEL_FILE, "w").write("qwen38-27b-q8\n")
+up = lambda m: {"gufo": {"engine": "gufo", "port": 8080, "models": [m]}}  # noqa: E731
+assert h.serves_other("gufo", up("qwen3.8-27b")) and not h.serves_other("gufo", up("qwen3.8-27b-q8")) and not h.serves_other("gufo", {})
+open(h.MODEL_FILE, "w").write("flash-next\n")
+assert h.serves_other("gufo", up("qwen3.8-27b")) and not h.serves_other("gufo", up("qwen3.8-flash-next")) and not h.serves_other("strata", up("x"))
+os.remove(h.MODEL_FILE)
 os.remove(os.path.join(AGENT, "harness-tuned.json"))
 k_stock = h.hw_key("gufo", "m")
 open(h.WEIGHTS, "w").write("abliterated\n")

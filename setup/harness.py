@@ -182,6 +182,13 @@ def recommend(hw, cap):
     return none(f"no supported GPU path on this box (gpu={hw['gpu']}); run Strata natively there and point pi at it: ./setup.sh --strata <url>")
 
 
+def serves_other(engine, running):
+    """gufo is up on another model than the saved answer (its served names are ours: qwen3.8-27b-q8 -> qwen38-27b-q8).
+    Only gufo: Strata's served ids are not ours to map."""
+    served = running.get(engine, {}).get("models") or []
+    return engine == "gufo" and bool(served) and catalog_id(served[0]) != engine_model(engine)
+
+
 def best_engine(route, hw):
     """First engine of a profiles.json route this box can run: -> {engine, why, ...} or None."""
     ok = lambda e: e.get("needs") != "npu" or (hw["npu"] and hw["ram_gb"] >= PROFILES["recommend"]["halogen_min_ram_gb"])
@@ -692,7 +699,7 @@ def tune(engine, model_id):
     decode_tps is short-code decode at near-zero context; its prefill_tps is at the 8K depth. Compare it only with bench's cells."""
     ctx = engine_ctx(engine)
     res = {"engine": engine, "model": model_id, "ctx": ctx, "when": time.strftime("%Y-%m-%d"), "protocol": BENCH_ID,
-           **({"weights": weights_pref()} if engine in WEIGHTS_ASK else {})}
+           **({"weights": weights_pref()} if engine in WEIGHTS_ASK and catalog_id(model_id) == DEFAULT_MODEL else {})}  # only Flash-Next has an abliterated build
     try:
         b = bench(engine, model_id, runs=3, quick=True)
     except Exception as ex:
@@ -837,7 +844,9 @@ def speeds(engine, model=None):
         if v.get("engine") != engine or not v.get("decode_tps") or (model and catalog_id(v.get("model")) != catalog_id(model)):
             continue
         w = v.get("weights")
-        if not w:  # results before "weights" was saved: the weights are only in the key
+        if catalog_id(v.get("model")) != DEFAULT_MODEL:
+            w = ""  # no abliterated build of the other models: older results labelled one by the saved answer
+        elif not w:  # results before "weights" was saved: the weights are only in the key
             keys = {x: hw_key(engine, v.get("model"), x, catalog_id(v.get("model"))) for x in ("stock", "abliterated")}
             w = next((x for x, kx in keys.items() if kx == k), "?") if keys["stock"] != keys["abliterated"] else "?"
         out[w] = v
@@ -848,7 +857,7 @@ def speeds(engine, model=None):
 
 def speed_text(engine, model=None):
     """'stock 34.3 t/s decode, 469 prefill (2026-11-15); abliterated ...', or '' when nothing was measured."""
-    return "; ".join(f"{'' if w == '?' else w + ' '}{v['decode_tps']} t/s decode, {v.get('prefill_tps', '?')} prefill "
+    return "; ".join(f"{'' if w in ('?', '') else w + ' '}{v['decode_tps']} t/s decode, {v.get('prefill_tps', '?')} prefill "
                      f"({v.get('when', '?')}{'' if v.get('protocol') == BENCH_ID else ', old probe'})" for w, v in speeds(engine, model).items())
 
 
@@ -1243,6 +1252,13 @@ def pick_engine(d, yes, want=None, on_pick=None, esc=None):
         if eng not in PROFILES["engines"]:
             sys.exit(f"unknown engine {eng}; known: {', '.join(PROFILES['engines'])}")
         c = PROFILES["engines"][eng]
+        if serves_other(eng, running):  # ./harness use gufo after a model change in ./harness config
+            if not (sys.stdin.isatty() and not yes and ask_yn(f"Restart {eng}? it serves {running[eng]['models'][0]}, your saved model is {engine_model(eng)}", True)):
+                print(f"  ! {eng} keeps serving {running[eng]['models'][0]} until it restarts on {engine_model(eng)}")
+                return eng, None
+            plan = plan_start(eng, {k: v for k, v in running.items() if k != eng}, ask_start=False) or sys.exit(not_answering(eng))
+            plan["stop"] = eng
+            return eng, plan
         if c.get("script") and not any(x["port"] == c["port"] for x in d["engines"]):
             # named but down: ask what the wizard asks (stop the memory holder, download) and start it, instead of telling the user to do it by hand
             return eng, plan_start(eng, running) or sys.exit(not_answering(eng))
@@ -1253,13 +1269,15 @@ def pick_engine(d, yes, want=None, on_pick=None, esc=None):
         return next(iter(sorted(running, key=lambda e: e != "halogen"))), None
     if not running:
         print("No engine is running yet. Pick one: halogen, gufo, Strata and osmos can be started (and halogen or Strata installed) from here.")
+    before_pref = model_pref()
     route = ask_route(esc)
     if route is BACK:
         return BACK, None
     eng = route[0] if route else engine_menu(running, esc)
     if eng is BACK:
         return BACK, None
-    before = engine_model(eng)
+    # the model answer before this run: ask_route has already saved the new one
+    before = before_pref if eng in catalog().get(before_pref, {}).get("engines", ()) else DEFAULT_MODEL
     if not (route and route[1] and route[1] != DEFAULT_MODEL) and not offer_recommendation(eng):  # a model picked by name is already answered
         if ask_model(eng, back=esc is BACK) is BACK:
             return BACK, None
@@ -1269,7 +1287,7 @@ def pick_engine(d, yes, want=None, on_pick=None, esc=None):
     if weights_changed is BACK:
         return BACK, None
     # the server keeps what it loaded at start: a new default needs a restart (an upgrade restarts it anyway)
-    restart = (weights_changed or engine_model(eng) != before) and eng in running and not upgrading and ask_yn(
+    restart = (weights_changed or engine_model(eng) != before or serves_other(eng, running)) and eng in running and not upgrading and ask_yn(
         f"Restart {eng}? it is running different weights than your new default", True)
     if eng in running and not restart:
         return eng, None
@@ -2131,7 +2149,7 @@ def cmd_config(a):
             if changed is BACK:
                 continue
             if changed:
-                print(f"  saved; ./harness use {eng} (or ./setup.sh) installs and starts it")
+                print(f"  saved; ./harness use {eng} (or ./setup.sh) installs and (re)starts it")
         elif k == "weights":
             eng = p.get("engine", "halogen")
             changed = ask_weights(eng if eng in WEIGHTS_ASK else "halogen", back=True)
