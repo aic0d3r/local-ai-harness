@@ -77,11 +77,17 @@ decode. The first row was measured at a 40 W cap, so it overstates the gain. Det
 | Strata image 0.2.13, default (4 slots, chunk 1024) | 49.3 t/s | 479 t/s | what a bare `docker run` gives |
 | gufo 0.32.0 | - | - | refuses the file: "No text provider found for model architecture" (qwen35moe is not in its runtime) |
 
-Strata loads the MTP block but proposes no drafts on this file (`drafts accepted 0 of 0`, with or without `--spec 4`), so
-its decode gets no speculative gain; Strata's own Qwen3.6 notes expect ~1.6x from MTP with Unsloth's MTP-GGUF. Its MoE
-prompt chunk is what the parallel count decides: `--parallel 4` caps it at 1024, one slot gets 4096 (8192 with 131k ctx
-is refused: "bad --chunk / --max-context"), and the chunk is worth +44% prefill here. No ROCm llama.cpp build is on this
-box (the local build is Vulkan-only), so llama.cpp's HIP path is not in the table.
+Strata loads the MTP block but proposes no drafts on this file, so its decode gets no speculative gain: `drafts accepted 0 of
+0` for every request, including the engine's own warm-up, at temperature 0 / 0.7 / 1.0, with `--mtp 1` and `--mtp 2`,
+with `--spec 4`, with `STRATA_SPEC_COUPLED=1` and with `--mtp-hnorm stream` (the file carries the whole block:
+`blk.40.nextn.{eh_proj,enorm,hnorm,shared_head_norm}.weight`). Strata's own notes on this exact box (Ryzen AI Max+ 395,
+UD-Q4_K_XL) report 52.8-59.9% draft acceptance and 41-45 t/s output, so the acceptance is a defect/mismatch here, not
+the hardware. Its MoE prompt chunk is what the parallel count decides: `--parallel 4` caps it at 1024, one slot gets 4096
+(8192 with 131k ctx is refused: "bad --chunk / --max-context"), and the chunk is worth +44% prefill here.
+
+No drafter exists on the other side either: llama.cpp has no MTP support, and a speculative draft model needs a smaller
+sibling of the same vocabulary, which Qwen3.6 does not have (smallest: 27B). No ROCm llama.cpp build is on this box
+(the local build is Vulkan-only), so llama.cpp's HIP path is not in the table.
 
 ## Efficiency levers
 
