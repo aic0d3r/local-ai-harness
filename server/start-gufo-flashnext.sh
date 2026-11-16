@@ -16,6 +16,9 @@ if [ "$FAMILY" = qwen38-27b ] || [ "$FAMILY" = qwen38-27b-q8 ]; then
   MDIR="${GUFO_27B_DIR:-$(dirname "$ENGINE_DIR")/qwen38-27b}"
   Q=Q4; [ "$FAMILY" = qwen38-27b-q8 ] && Q=Q8
   MODEL_REL=Qwen3.8-27B-UD-${Q}_K_XL.gguf; DRAFT=Qwen3.8-27B-DFlash2-Q4_K_M.gguf  # DRAFT: keep in step with G27_DRAFT in setup/harness.py
+  # Q8 abliterated: huihui-ai's UD-Q8_K_XL (same layout and size as Unsloth's; same served name, like Flash-Next's weights)
+  WEIGHTS="${GUFO_WEIGHTS:-$(cat "${PI_CODING_AGENT_DIR:-${PI_HOME:-$HOME/.pi}/agent}/harness-weights" 2>/dev/null)}"
+  [ "$Q" = Q8 ] && [ "$WEIGHTS" = abliterated ] && MODEL_REL=Huihui-Qwen3.8-27B-abliterated-UD-Q8_K_XL.gguf
   [ "${1:-}" = --print-model ] && { echo "$MDIR/$MODEL_REL"; exit 0; }
   for f in "$MODEL_REL" "$DRAFT"; do
     [ -f "$MDIR/$f" ] || { echo "gufo 27B file missing: $MDIR/$f - get it: scripts/download-qwen38-27b.sh" >&2; exit 1; }

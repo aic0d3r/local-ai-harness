@@ -74,6 +74,7 @@ def hardware():
 PICK = os.path.join(AGENT, "harness-pick.json")    # accepted recommendation: {engine, quant, ctx}; start_engine passes ctx as GUFO_CTX
 MODEL_FILE = os.path.join(AGENT, "harness-model")  # catalog id; the gufo and Strata launchers read it
 DEFAULT_MODEL = "flash-next"
+ABLITERATED = (DEFAULT_MODEL, "qwen38-27b-q8")  # models with an abliterated build the launchers load (27B Q8: huihui-ai's)
 QUANT_FILE = os.path.join(AGENT, "harness-quant")  # stock quant gufo loads; server/start-gufo-flashnext.sh reads it
 DEFAULT_QUANT = "UD-Q4_K_XL"
 
@@ -248,9 +249,11 @@ def routes_label(model):
 
 
 def route_speed(b, model):
-    """Decode speed for a model menu row: this box's ./harness tune result, stock weights first, else the published one with ~."""
+    """Decode speed for a model menu row: this box's ./harness tune result for the saved variant and weights, else the published one with ~."""
+    if model and model_pref().startswith(model):  # the saved variant (27B Q8), not the route's first one
+        model = model_pref()
     got = speeds(b["engine"], model)
-    v = got.get("stock") or next(iter(got.values()), None)
+    v = got.get(weights_pref()) or got.get("stock") or next(iter(got.values()), None)  # the weights you run first
     if v:
         return f"{v['decode_tps']:g} t/s"
     m = re.search(r"~?[\d.]+(?:-[\d.]+)? t/s", b["why"])
@@ -319,7 +322,7 @@ def ask_model(engine, back=False):
     pick, notes = {}, []
     for m in ids:  # the label's (aside) moves to a note, so the row fits a window and gum keeps the arrow menu
         name, _, aside = cat[m]["label"].partition(" (")
-        pick[name + (f"  ~{cat[m]['download_gb']} GB download, ~{cat[m]['ram_gb']} GB RAM" if "ram_gb" in cat[m] else "")] = m
+        pick[name + (f"  ~{cat[m]['download_gb']} GB download, ~{cat[m]['ram_gb']} GB RAM" if "ram_gb" in cat[m] else "") + ("  (current)" if m == cur else "")] = m
         if aside:
             notes.append(f"{name}: {aside.rstrip(')')}")
     choice = choose(f"Which model for {engine}?", list(pick), False, BACK if back else None, notes)
@@ -662,9 +665,10 @@ def hw_key(engine, model_id, weights=None, model=None):
     """weights/model: the key a result had under other answers (speeds() reads old results back); default the saved ones."""
     h = hardware()
     m = model or engine_model(engine)
-    w = "|abliterated" if engine in WEIGHTS_ENGINES and m == DEFAULT_MODEL and (weights or weights_pref()) == "abliterated" else ""  # stock keeps its old key
+    abl = engine in WEIGHTS_ENGINES and m in ABLITERATED and (weights or weights_pref()) == "abliterated"
+    w = "|abliterated" if abl else ""  # stock keeps its old key
     if m != DEFAULT_MODEL:
-        w = "|" + m  # another model is another speed
+        w = "|" + m + w  # another model is another speed
     elif engine == "gufo" and not w and saved_quant() != DEFAULT_QUANT:
         w = "|" + saved_quant()  # another quant is another speed; the default quant keeps its old key
     return hashlib.sha1(f"{engine}|{model_id}|{h['gpu']}|{h['ram_gb']}{w}".encode()).hexdigest()[:12]
@@ -699,7 +703,7 @@ def tune(engine, model_id):
     decode_tps is short-code decode at near-zero context; its prefill_tps is at the 8K depth. Compare it only with bench's cells."""
     ctx = engine_ctx(engine)
     res = {"engine": engine, "model": model_id, "ctx": ctx, "when": time.strftime("%Y-%m-%d"), "protocol": BENCH_ID,
-           **({"weights": weights_pref()} if engine in WEIGHTS_ASK and catalog_id(model_id) == DEFAULT_MODEL else {})}  # only Flash-Next has an abliterated build
+           **({"weights": weights_pref()} if engine in WEIGHTS_ASK and catalog_id(model_id) in ABLITERATED else {})}  # only these have an abliterated build
     try:
         b = bench(engine, model_id, runs=3, quick=True)
     except Exception as ex:
@@ -842,7 +846,7 @@ def speeds(engine, model=None):
         if v.get("engine") != engine or not v.get("decode_tps") or (model and catalog_id(v.get("model")) != catalog_id(model)):
             continue
         w = v.get("weights")
-        if catalog_id(v.get("model")) != DEFAULT_MODEL:
+        if catalog_id(v.get("model")) not in ABLITERATED:
             w = ""  # no abliterated build of the other models: older results labelled one by the saved answer
         elif not w:  # results before "weights" was saved: the weights are only in the key
             keys = {x: hw_key(engine, v.get("model"), x, catalog_id(v.get("model"))) for x in ("stock", "abliterated")}
@@ -1004,11 +1008,16 @@ def ask_weights(engine, back=False):
     """Which weights the engine loads by default; current answer first. -> True if the answer changed, or BACK."""
     if engine not in WEIGHTS_ASK or not sys.stdin.isatty():
         return False
-    cur = weights_pref()
-    labels = weights_labels(engine)
+    m = engine_model(engine)
+    own = engine in ("gufo", "strata") and m not in ABLITERATED  # the 27B Q4 etc.: stock only
+    cur = "stock" if own else weights_pref()
+    labels = {"stock": f"stock {model_name(m)} (its only build)",
+              "abliterated": f"abliterated: switch {engine} to {model_name(abl_model(m))}, which has one"} if own else (
+        {"stock": f"stock {model_name(m)} (Unsloth)", "abliterated": "abliterated (huihui-ai; refusals removed; docs/ENGINES.md)"}
+        if m != DEFAULT_MODEL else weights_labels(engine))
     opts = sorted(labels, key=lambda k: k != cur)
     measured = speeds(engine, engine_model(engine) if engine in ("gufo", "strata") else None)
-    notes = [f"measured here: {w} {v['decode_tps']} t/s decode, {v.get('prefill_tps', '?')} prefill ({v.get('when', '?')})"
+    notes = [f"measured here: {w + ' ' if w else ''}{v['decode_tps']} t/s decode, {v.get('prefill_tps', '?')} prefill ({v.get('when', '?')})"
              for w, v in measured.items() if w != "?"]
     choice = choose(f"Which weights should {engine} load? one answer for every engine, used on its next start"
                     + ("; abliterated on Strata = gufo's orca-uncensored shards" if engine == "strata" else ""),
@@ -1016,6 +1025,8 @@ def ask_weights(engine, back=False):
     if choice is BACK:
         return BACK
     pick = {labels[k]: k for k in opts}[choice]
+    if own and pick == "stock":
+        return False  # nothing to change, and the saved answer still holds for the Flash-Next engines
     os.makedirs(AGENT, exist_ok=True)
     open(WEIGHTS, "w").write(pick + "\n")
     return pick != cur
@@ -1144,7 +1155,7 @@ def plan_start(engine, running, ask_start=True):
         r = subprocess.run(["bash", os.path.join(REPO, "scripts", "download-qwen38-27b.sh"), "--print-gb"], capture_output=True, text=True,
                            env=dict(os.environ, GUFO_FAMILY=m)).stdout.strip()
         gb = int(r) if r.isdigit() else catalog()[m]["download_gb"]
-        if not ask_yn(f"Download Qwen3.8 27B {'UD-Q8_K_XL' if m.endswith('-q8') else 'UD-Q4_K_XL'}? "
+        if not ask_yn(f"Download Qwen3.8 27B {'UD-Q8_K_XL' if m.endswith('-q8') else 'UD-Q4_K_XL'}{' abliterated (huihui-ai)' if m in ABLITERATED and weights_pref() == 'abliterated' else ''}? "
                       f"~{gb} GB of {catalog()[m]['download_gb']} still to fetch (target, DFlash2 draft, vision projector), {free} GB free, resumable"):
             return None
         plan["g27"], plan["g27_gb"] = m, gb
@@ -1312,8 +1323,8 @@ def pick_engine(d, yes, want=None, on_pick=None, esc=None):
         if ask_model(eng, back=esc is BACK) is BACK:
             return BACK, None
     upgrading = on_pick(eng) if on_pick else False
-    # weights stock/abliterated only mean something for Flash-Next
-    weights_changed = ask_weights(eng, back=esc is BACK) if engine_model(eng) == DEFAULT_MODEL else False
+    # weights stock/abliterated only mean something for a model with an abliterated build
+    weights_changed = ask_weights(eng, back=esc is BACK) if engine_model(eng) in ABLITERATED else False
     if weights_changed is BACK:
         return BACK, None
     # the server keeps what it loaded at start: a new default needs a restart (an upgrade restarts it anyway)
@@ -1689,7 +1700,8 @@ def engine_title(eng, mod):
     """`engine · model` for people: an engine that serves one model names it (osmos: DeepSeek-V4.1-Flash (osmos-evo)), the rest name
     the model they run. The raw id stays what the server and pi use."""
     cfg = PROFILES["engines"].get(eng, {})
-    name = cfg.get("model_label") or (catalog().get(mod or "", {}).get("label") or mod or "").split(" (")[0]  # catalog labels carry a parenthesis of notes
+    entry = catalog().get(mod or "") or (catalog()[catalog_id(mod)] if eng in ("gufo", "strata") and mod else {})  # gufo serves qwen3.8-27b-q8 for qwen38-27b-q8
+    name = cfg.get("model_label") or (entry.get("label") or mod or "").split(" (")[0]  # catalog labels carry a parenthesis of notes
     return f"{eng} · {name or 'no model'}"
 
 
@@ -1698,7 +1710,7 @@ def choices_items(eng=None):
     saved preference for the Qwen engines is not shown as what osmos runs."""
     model = PROFILES["engines"].get(eng or "", {}).get("model_label") or model_pref()
     # the weights answer means nothing to a gufo/Strata model without an abliterated build (the 27B)
-    weights = [] if eng in ("gufo", "strata") and engine_model(eng) != DEFAULT_MODEL else [f"weights {weights_pref()}"]
+    weights = [] if eng in ("gufo", "strata") and engine_model(eng) not in ABLITERATED else [f"weights {weights_pref()}"]
     return [f"model {model}", *weights, f"sidecar {'off' if sidecar_pref() == '0' else 'on'}",
             f"voice {'on' if jget(EXTRAS, {}).get('voice') else 'off'}", f"update check {'on' if update_pref() == '1' else 'off'}"]
 
@@ -1918,7 +1930,7 @@ def finish(eng, mod, no_tune, launch=False):
     speed = f"{tuned['prefill_tps']} t/s prefill, {tuned['decode_tps']} t/s decode (short code)" if tuned.get("decode_tps") else "not probed (./harness tune)"
     if no_tune and tuned.get("decode_tps"):
         speed += f" (saved {tuned.get('when', '')}; re-measure: ./harness tune)"
-    if eng in WEIGHTS_ASK and catalog_id(mod) == DEFAULT_MODEL:  # the other weights' last result beside this one; only Flash-Next has two
+    if eng in WEIGHTS_ASK and catalog_id(mod) in ABLITERATED:  # the other weights' last result beside this one
         other = {w: v for w, v in speeds(eng, mod).items() if w not in ("?", weights_pref())}
         speed = f"{weights_pref()}: {speed}" + "".join(f"; {w}: {v['prefill_tps']} t/s prefill, {v['decode_tps']} t/s decode "
                                                        f"({v.get('when', '?')})" for w, v in other.items())
@@ -2143,6 +2155,24 @@ def osmos_budget_row():
     return f"osmos memory  remember last size{size}  (skips ~3 min sizing)"
 
 
+def model_name(m):
+    return catalog().get(m, {}).get("label", m).split(" (")[0]
+
+
+def abl_model(m):
+    """The nearest model with an abliterated build: the 27B Q8 for a 27B, else Flash-Next."""
+    return "qwen38-27b-q8" if is_27b(m) else DEFAULT_MODEL
+
+
+def switch_now(eng):
+    """After a model change in ./harness config: offer to download what is missing and (re)start eng on it, then rewire pi."""
+    if not ask_yn(f"Switch {eng} to {model_name(engine_model(eng))} now? downloads what is missing, then (re)starts {eng}", True):
+        return print("  saved; ./setup.sh downloads what is missing and (re)starts it")
+    eng, mod = pick_target(detect(), False, eng)  # yes=False: asks to restart a gufo still serving the old model
+    install_extensions(eng, verbose=False)
+    finish(eng, mod, bool(jget(os.path.join(AGENT, "harness-tuned.json"), {}).get(hw_key(eng, mod))))
+
+
 def cmd_config(a):
     """Menu of every saved answer; change one, applied right away."""
     if not sys.stdin.isatty():
@@ -2162,11 +2192,12 @@ def cmd_config(a):
             notes.append(f"{eng} runs {engine_title(eng, p.get('model')).split(' · ', 1)[1]} only; pick gufo or Strata under engine to choose a model")
         if eng == "osmos" and (weights_file("osmos") != "stock") != (weights_pref() == "abliterated"):  # osmos.json = its last start
             notes.append(f"! osmos was last started on the other weights; {weights_pref()} applies on its next start")
+        no_abl = eng in ("gufo", "strata") and engine_model(eng) not in ABLITERATED
         items = {
             f"engine        {engine_title(eng, p['model']) if eng else '-'}": "engine",
-            **({f"model         {catalog().get(model_pref(), {}).get('label', model_pref()).split(' (')[0]}  (gufo, Strata)": "model"}
+            **({f"model         {catalog().get(model_pref(), {}).get('label', model_pref()).split(' (')[0]}": "model"}
                if eng in ("gufo", "strata") else {}),  # only those two load the model answer
-            f"weights       {weights_pref()}  (every engine, next start)": "weights",
+            f"weights       {'stock' if no_abl else weights_pref()}  ({'this model has no abliterated build' if no_abl else 'every engine, next start'})": "weights",
             f"agent         {'none (engine only)' if no_pi() else 'pi'}  (extensions, providers, MCP)": "agent",
             f"sidecar       {'on' if sc else 'off'}  (ling-tiny, ~8 GiB GPU memory)": "sidecar",
             f"voice         {'on' if voice else 'off'}  (Lemonade STT/TTS)": "voice",
@@ -2188,18 +2219,27 @@ def cmd_config(a):
             if changed is BACK:
                 continue
             if changed:
-                print(f"  saved; ./harness use {eng} (or ./setup.sh) installs and (re)starts it")
+                switch_now(eng)
         elif k == "weights":
             eng = p.get("engine", "halogen")
             changed = ask_weights(eng if eng in WEIGHTS_ASK else "halogen", back=True)
+            if no_abl and changed is True:
+                to = abl_model(engine_model(eng))
+                if ask_yn(f"{model_name(engine_model(eng))} has no abliterated build. Switch {eng} to {model_name(to)} abliterated?", True):
+                    open(MODEL_FILE, "w").write(to + "\n")
+                    switch_now(eng)
+                else:
+                    print(f"  saved; {eng} stays on {model_name(engine_model(eng))} (stock) until you pick {model_name(to)} under model")
+                continue
             if changed is BACK or not changed or eng not in WEIGHTS_ASK:
                 continue
             running = {x["engine"]: x for x in detect()["engines"]}
-            if ask_yn(f"Restart {eng} on the {weights_pref()} weights now?", True):
-                if eng in running and not stop_engine(eng, running):
+            if ask_yn(f"{'Restart' if eng in running else 'Start'} {eng} on the {weights_pref()} weights now? downloads them first if missing", True):
+                others = {k: v for k, v in running.items() if k != eng}
+                plan = plan_start(eng, others, ask_start=False)  # download questions before anything stops
+                if plan is None or (eng in running and not stop_engine(eng, running)):
                     continue
-                running.pop(eng, None)
-                start_engine(eng, running)
+                start_engine(eng, others, plan)
         elif k == "agent":
             was_off = no_pi()  # read before open("w") truncates the file
             open(os.path.join(AGENT, "harness-agent"), "w").write("pi\n" if was_off else "none\n")

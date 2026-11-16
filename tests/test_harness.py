@@ -173,7 +173,14 @@ assert h.upgrader("osmos") and h.upgrader("osmos").endswith("upgrade-osmos.sh")
 open(h.MODEL_FILE, "w").write("qwen38-27b\n")
 assert "DeepSeek-V4.1-Flash" in h.choices_line("osmos") and "qwen38-27b" not in h.choices_line("osmos")
 assert "model qwen38-27b" in h.choices_line("gufo") and "model qwen38-27b" in h.choices_line()
-assert "weights" not in h.choices_line("gufo") and "weights" in h.choices_line("halogen")  # the 27B has no abliterated build
+assert "weights" not in h.choices_line("gufo") and "weights" in h.choices_line("halogen")  # the 27B Q4 has no abliterated build
+assert h.hw_key("gufo", "m", "stock", "qwen38-27b") == h.hw_key("gufo", "m", "abliterated", "qwen38-27b") and h.abl_model("qwen38-27b") == "qwen38-27b-q8"
+open(h.MODEL_FILE, "w").write("qwen38-27b-q8\n")  # the Q8 has one (huihui-ai's), keyed apart; stock keeps its old key
+assert "weights" in h.choices_line("gufo") and h.hw_key("gufo", "m", "stock", "qwen38-27b-q8") != h.hw_key("gufo", "m", "abliterated", "qwen38-27b-q8")
+for w, f in (("stock", "/Qwen3.8-27B-UD-Q8_K_XL.gguf"), ("abliterated", "/Huihui-Qwen3.8-27B-abliterated-UD-Q8_K_XL.gguf")):
+    assert subprocess.run(["bash", os.path.join(h.REPO, "server", "start-gufo-flashnext.sh"), "--print-model"], capture_output=True, text=True,
+                          env=dict(os.environ, GUFO_FAMILY="qwen38-27b-q8", GUFO_WEIGHTS=w)).stdout.strip().endswith(f)
+open(h.MODEL_FILE, "w").write("qwen38-27b\n")
 # ready screen's memory line: gufo's own load log; another model's load says nothing
 log = os.path.join(AGENT, "gufo-test.log")
 open(log, "w").write("x [cache] schema=c event=configured sessions=2 capacity_bytes=21991874560\n"

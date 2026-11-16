@@ -230,7 +230,7 @@ for you). The list is `config/profiles.json` (`catalog`):
 | `flash-next-iq3_s` / `-iq3_xxs` / `-iq2_xs` / `-q2_0` | Strata | ISTA-DASLab packs of the same model | 60 / 53 / 46 / 44 GB RAM, 84 / 76 / 68 / 66 GB download |
 | `qwen36-q4` / `-q6` / `-q8` | Strata | Qwen3.6-35B-A3B (small MoE, Unsloth GGUFs with MTP) | 32 / 44 / 52 GB RAM, 24 / 34 / 39 GB download |
 | `qwen38-27b` | gufo | Qwen3.8 27B dense, UD-Q4_K_XL + DFlash2 draft, vision | 20 GB download |
-| `qwen38-27b-q8` | gufo | same, UD-Q8_K_XL target (gufo's other qualified 27B file; its benchmarks: ~16 t/s mixed decode with DFlash2 vs ~27 for Q4) | 34 GB download, shares the draft and projector |
+| `qwen38-27b-q8` | gufo | same, UD-Q8_K_XL target (gufo's other qualified 27B file; its benchmarks: ~16 t/s mixed decode with DFlash2 vs ~27 for Q4) | 34 GB download, shares the draft and projector; abliterated = huihui-ai's UD-Q8_K_XL (same size) |
 
 Strata installs the non-default rows through its own `setup.sh --family F --model SIZE` (`scripts/install-strata.sh`,
 which downloads their files); gufo's 27B comes from `scripts/download-qwen38-27b.sh` at the revisions gufo's docs pin
@@ -240,7 +240,8 @@ which downloads their files); gufo's 27B comes from `scripts/download-qwen38-27b
 Not offered, though upstream has them: Strata's Coder IQ1_M, Swift 1.5, Unsloth UD-IQ4_XS/Q5/Q6/Q8, Gyro and NVFP4
 packs of Flash-Next. gufo qualifies Flash-Next on UD-Q4_K_XL only: the smaller quants `./harness recommend` can pick
 for gufo are untested.
-The stock/abliterated answer applies to `flash-next` only: no abliterated build of the others exists here.
+The stock/abliterated answer applies to `flash-next` and `qwen38-27b-q8` only: the others have no abliterated build here
+(picking abliterated on the 27B Q4 offers the Q8).
 
 **Recommendation off Strix Halo.** gufo targets Strix Halo (gfx1151) only, so every other AMD or NVIDIA box is
 recommended Strata, on the biggest ISTA pack whose RAM need fits (Strata's rule: experts + ~10 GB), Qwen3.6 Q4 from
@@ -293,8 +294,10 @@ Neither engine has run the stock 3.1 files on this box yet; `scripts/engine-matr
 
 ## Abliterated models
 
-Refusal-removed builds, all derived from `orcarouter/Qwen3.8-Flash-Next-Uncensored` (BF16 rev
-`8336e613`), so the engines behave alike.
+Refusal-removed builds. Flash-Next: all derived from `orcarouter/Qwen3.8-Flash-Next-Uncensored` (BF16 rev
+`8336e613`), so the engines behave alike. Qwen3.8 27B Q8 (gufo): `huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF`
+`Huihui-Qwen3.8-27B-abliterated-UD-Q8_K_XL.gguf` @ `c4b90228`, fetched by `scripts/download-qwen38-27b.sh` next to the stock
+files; it keeps Unsloth's vision projector and z-lab's DFlash2 draft (abliteration changes only the language weights).
 
 **Plug and play:** `./setup.sh` asks "Default model weights?" after you pick halogen, gufo or Strata
 (change it later with `./harness config` -> weights). The answer is saved in
@@ -345,6 +348,7 @@ weights are not on disk are skipped, never downloaded):
 | gufo 0.31.0 | abliterated | 27 s (warm page cache) | pass, 75.2 t/s | 0/19 |
 | Strata 0.2.12 | stock | - | skipped: not installed (94 GB download) | - |
 | Strata 0.2.12 | abliterated | 69 s | pass, 46.9 t/s | 0/19 |
+| gufo 0.32.0, 27B Q8 | abliterated (huihui-ai) | 15 s (warm page cache) | 32.8 t/s decode, 371 prefill (`./harness tune`, 2026-11-17) | 0/18 |
 
 The decode column is `engine-acceptance.py`'s "count from 1 to 80" prompt, which speculative decoding
 flatters: use it to compare an engine with itself, not against the 10-prompt battery numbers elsewhere. Load

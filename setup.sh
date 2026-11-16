@@ -222,10 +222,12 @@ if [ "$DOCTOR" = 1 ]; then
   else
     ok "weights: stock (refusals kept; ./harness config -> weights abliterated removes them)"
   fi
-  # a non-default model (gufo and Strata): the stock/abliterated answer above is about Flash-Next only
+  # a non-default model (gufo and Strata): the stock/abliterated answer above reaches Flash-Next and the 27B Q8 only
   M=$(head -1 "$AGENT_DIR/harness-model" 2>/dev/null)
   if [ -n "$M" ] && [ "$M" != flash-next ] && python3 "$REPO/setup/harness.py" model-info "$M" engines 2>/dev/null | grep -qw "${ACT:-none}"; then
-    ok "model: $M on $ACT (the weights answer above applies to Flash-Next only; ./harness config -> model)"
+    case $M in qwen38-27b-q8) note="the weights answer above applies to this model; ./harness config -> model" ;; *)
+      note="the weights answer above applies to Flash-Next and the 27B Q8 only; ./harness config -> model" ;; esac
+    ok "model: $M on $ACT ($note)"
   fi
   # what the active engine gives up: the NPU models exist only on halogen. Everything else is engine-independent.
   if [ -n "${ACT:-}" ] && [ "$ACT" != halogen ]; then
