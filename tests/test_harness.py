@@ -173,25 +173,28 @@ assert h.upgrader("osmos") and h.upgrader("osmos").endswith("upgrade-osmos.sh")
 open(h.MODEL_FILE, "w").write("qwen38-27b\n")
 assert "DeepSeek-V4.1-Flash" in h.choices_line("osmos") and "qwen38-27b" not in h.choices_line("osmos")
 assert "model qwen38-27b" in h.choices_line("gufo") and "model qwen38-27b" in h.choices_line()
-assert "weights" not in h.choices_line("gufo") and "weights" in h.choices_line("halogen")  # the 27B Q4 has no abliterated build
-assert h.hw_key("gufo", "m", "stock", "qwen38-27b") == h.hw_key("gufo", "m", "abliterated", "qwen38-27b") and h.abl_model("qwen38-27b") == "qwen38-27b-q8"
-open(h.MODEL_FILE, "w").write("qwen38-27b-q8\n")  # the Q8 has one (huihui-ai's), keyed apart; stock keeps its old key
-assert "weights" in h.choices_line("gufo") and h.hw_key("gufo", "m", "stock", "qwen38-27b-q8") != h.hw_key("gufo", "m", "abliterated", "qwen38-27b-q8")
-for w, f in (("stock", "/Qwen3.8-27B-UD-Q8_K_XL.gguf"), ("abliterated", "/Huihui-Qwen3.8-27B-abliterated-UD-Q8_K_XL.gguf")):
+assert "weights" in h.choices_line("gufo") and "weights" in h.choices_line("halogen")  # Q4 has an abliterated build too
+assert h.hw_key("gufo", "m", "stock", "qwen38-27b") != h.hw_key("gufo", "m", "abliterated", "qwen38-27b") == h.hw_key("gufo", "m", "abliterated", "qwen38-27b")
+open(h.MODEL_FILE, "w").write("qwen38-27b-q8\n")  # keyed apart from the Q4 as well
+assert "weights" in h.choices_line("gufo") and h.hw_key("gufo", "m", "abliterated", "qwen38-27b-q8") != h.hw_key("gufo", "m", "abliterated", "qwen38-27b")
+for fam, w, f in (("qwen38-27b", "stock", "/Qwen3.8-27B-UD-Q4_K_XL.gguf"), ("qwen38-27b", "abliterated", "/Huihui-Qwen3.8-27B-abliterated-UD-Q4_K_XL.gguf"),
+                  ("qwen38-27b-q8", "stock", "/Qwen3.8-27B-UD-Q8_K_XL.gguf"), ("qwen38-27b-q8", "abliterated", "/Huihui-Qwen3.8-27B-abliterated-UD-Q8_K_XL.gguf")):
     assert subprocess.run(["bash", os.path.join(h.REPO, "server", "start-gufo-flashnext.sh"), "--print-model"], capture_output=True, text=True,
-                          env=dict(os.environ, GUFO_FAMILY="qwen38-27b-q8", GUFO_WEIGHTS=w)).stdout.strip().endswith(f)
+                          env=dict(os.environ, GUFO_FAMILY=fam, GUFO_WEIGHTS=w)).stdout.strip().endswith(f), (fam, w)
 open(h.MODEL_FILE, "w").write("qwen38-27b\n")
-# the weights menu on the 27B: Q4 offers the Q8 (its abliterated build) and stock is a no-op; the Q8 changes either way
+# the weights menu on the 27B Q4 and Q8: stock and abliterated are both real files, so either pick is a change
 open(h.WEIGHTS, "w").write("stock\n")
 seen = []
 real_choose, real_yn = h.choose, h.ask_yn
 real_stdin, h.sys.stdin = h.sys.stdin, types.SimpleNamespace(isatty=lambda: True)
-h.choose = lambda q, o, y, esc=None, notes=(): seen.extend(o) or next(x for x in o if x.startswith("abliterated"))
-assert h.ask_weights("gufo", back=True) is True and "27B Q8" in seen[1] and "Flash-Next" not in " ".join(seen), seen
-h.choose = lambda q, o, y, esc=None, notes=(): seen.extend(o) or next(x for x in o if x.startswith("stock"))
-assert h.ask_weights("gufo", back=True) is False and h.weights_pref() == "abliterated", seen  # Q4 stock: nothing to change, the answer stays
+h.choose = lambda q, o, y, esc=None, notes=(): seen.clear() or seen.extend(o) or next(x for x in o if x.startswith("abliterated"))
+assert h.ask_weights("gufo", back=True) is True and "abliterated UD-Q4_K_XL (huihui-ai" in " ".join(seen) and "Flash-Next" not in " ".join(seen), seen
+h.choose = lambda q, o, y, esc=None, notes=(): seen.clear() or seen.extend(o) or next(x for x in o if x.startswith("stock"))
+assert h.ask_weights("gufo", back=True) is True and h.weights_pref() == "stock" and "stock UD-Q4_K_XL (Unsloth)" in " ".join(seen)
 open(h.MODEL_FILE, "w").write("qwen38-27b-q8\n")
-assert h.ask_weights("gufo", back=True) is True and h.weights_pref() == "stock"  # the Q8 has both: a real change
+h.choose = lambda q, o, y, esc=None, notes=(): seen.clear() or seen.extend(o) or next(x for x in o if x.startswith("abliterated"))
+assert h.ask_weights("gufo", back=True) is True and "abliterated UD-Q8_K_XL (huihui-ai" in " ".join(seen), seen
+assert h.abl_model("qwen36-q4") == "flash-next" and h.abl_model("qwen38-27b") == "qwen38-27b-q8"
 h.choose, h.ask_yn = real_choose, real_yn
 h.sys.stdin = real_stdin
 os.remove(h.WEIGHTS)  # back to never asked, as the tests below expect
@@ -267,8 +270,8 @@ h.jput(os.path.join(AGENT, "harness-tuned.json"), {h.hw_key("osmos", "osmos-osmo
 assert set(h.speeds("osmos")) == {"stock", "abliterated"}, h.speeds("osmos")
 assert "stock 33.5 t/s" in h.speed_text("osmos") and "abliterated 34.3 t/s" in h.speed_text("osmos")
 assert h.speed_text("gufo", "flash-next") == "" and "36.0" in h.speed_text("gufo", "qwen38-27b")
-# the 27B has no abliterated build: one newest result, no weights label; Q8 kept apart from Q4
-assert h.speed_text("gufo", "qwen38-27b").startswith("36.0 t/s") and "35.0" not in h.speed_text("gufo", "qwen38-27b"), h.speed_text("gufo", "qwen38-27b")
+# the 27B Q4 has an abliterated build too, so both results are labelled; the Q8 keeps its own apart from the Q4
+assert h.speed_text("gufo", "qwen38-27b").startswith("abliterated 35.0 t/s") and "stock 36.0" in h.speed_text("gufo", "qwen38-27b"), h.speed_text("gufo", "qwen38-27b")
 assert h.speed_text("gufo", "qwen38-27b-q8").startswith("16.0 t/s")
 # a running gufo on another model than the saved answer needs a restart (Q4 up, Q8 saved)
 open(h.MODEL_FILE, "w").write("qwen38-27b-q8\n")

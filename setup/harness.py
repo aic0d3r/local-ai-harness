@@ -74,7 +74,7 @@ def hardware():
 PICK = os.path.join(AGENT, "harness-pick.json")    # accepted recommendation: {engine, quant, ctx}; start_engine passes ctx as GUFO_CTX
 MODEL_FILE = os.path.join(AGENT, "harness-model")  # catalog id; the gufo and Strata launchers read it
 DEFAULT_MODEL = "flash-next"
-ABLITERATED = (DEFAULT_MODEL, "qwen38-27b-q8")  # models with an abliterated build the launchers load (27B Q8: huihui-ai's)
+ABLITERATED = (DEFAULT_MODEL, "qwen38-27b", "qwen38-27b-q8")  # models with an abliterated build the launchers load (27B: huihui-ai's)
 QUANT_FILE = os.path.join(AGENT, "harness-quant")  # stock quant gufo loads; server/start-gufo-flashnext.sh reads it
 DEFAULT_QUANT = "UD-Q4_K_XL"
 
@@ -1009,7 +1009,7 @@ def ask_weights(engine, back=False):
     if engine not in WEIGHTS_ASK or not sys.stdin.isatty():
         return False
     m = engine_model(engine)
-    own = engine in ("gufo", "strata") and m not in ABLITERATED  # the 27B Q4 etc.: stock only
+    own = engine in ("gufo", "strata") and m not in ABLITERATED  # a model without an abliterated build (Qwen3.6, Strata's packs)
     cur = "stock" if own else weights_pref()
     labels = {"stock": f"stock {short_model(m)} (its only build)",
               "abliterated": f"abliterated: switch to {short_model(abl_model(m))}, its abliterated build"} if own else (
