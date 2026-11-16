@@ -237,7 +237,8 @@ for you). The list is `config/profiles.json` (`catalog`):
 |---|---|---|---|
 | `flash-next` (default) | gufo, Strata | UD-Q4_K_XL: stock = Unsloth's, abliterated = brainnxdomain's Uncensored-Gufo build (same tensor layout; unofficial on Strata) | 104 GiB download; Strata: ~88 GB RAM + VRAM for every expert |
 | `flash-next-iq3_s` / `-iq3_xxs` / `-iq2_xs` / `-q2_0` | Strata | ISTA-DASLab packs of the same model | 60 / 53 / 46 / 44 GB RAM, 84 / 76 / 68 / 66 GB download |
-| `qwen36-q4` / `-q6` / `-q8` | Strata | Qwen3.6-35B-A3B (small MoE, Unsloth GGUFs with MTP) | 32 / 44 / 52 GB RAM, 24 / 34 / 39 GB download |
+| `qwen36-q4` | **llama.cpp** (Docker) | Qwen3.6-35B-A3B (small MoE, Unsloth GGUF with the MTP head); 85.3 t/s decode, 2,048 t/s prefill with the draft (measured) | 24 GB download or Strata's copy, 32 GB RAM |
+| `qwen36-q6` / `-q8` | Strata | Qwen3.6-35B-A3B, larger quants (also run on llama.cpp with `QWEN36_ALT_MODEL`) | 44 / 52 GB RAM, 34 / 39 GB download |
 | `qwen38-27b` | gufo | Qwen3.8 27B dense, UD-Q4_K_XL + DFlash2 draft, vision; abliterated = huihui-ai's UD-Q4_K_XL | 20 GB download |
 | `qwen38-27b-q8` | gufo | same, UD-Q8_K_XL target (gufo's other qualified 27B file; its benchmarks: ~16 t/s mixed decode with DFlash2 vs ~27 for Q4) | 34 GB download, shares the draft and projector; abliterated = huihui-ai's UD-Q8_K_XL (same size) |
 Strata installs the non-default rows through its own `setup.sh --family F --model SIZE` (`scripts/install-strata.sh`,

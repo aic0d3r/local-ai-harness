@@ -9,9 +9,22 @@ Use `./setup.sh --no-halogen` for the pi wiring on this path, or wire it by hand
 ## 1. Engine
 
 [Nathanw1014/strix-halo-llamacpp](https://github.com/Nathanw1014/strix-halo-llamacpp) v0.7.4.1+
-(fixed stale-KV and a top-k race that were in upstream too); the Vulkan work is migrating to
-[halo-box/strix-llama.cpp](https://github.com/halo-box/strix-llama.cpp); either tree works.
-Build from source if you can — the portable payload leaves 6-24% decode on the table.
+(fixed stale-KV and a top-k race that were in upstream too); the Vulkan work has migrated to
+[halo-box/strix-llama.cpp](https://github.com/halo-box/strix-llama.cpp), which also publishes container images:
+`ghcr.io/halo-box/strix-llama.cpp:server-vulkan` (1.3 GB, Mesa RADV bundled, entrypoint `/app/llama-server`) and
+`:server-rocm`. `server/start-qwen36.sh` runs the Vulkan image for Qwen3.6-35B-A3B, so nothing is built here:
+
+```bash
+./harness use llamacpp        # starts server/start-qwen36.sh on :8080 and wires pi
+```
+
+Measured on this box (2026-11-16, `bench-v1`, 131072 ctx, one engine at a time): **85.3 t/s decode and 2,048 t/s
+prefill with the model's own MTP head** (`--spec-type draft-mtp --spec-draft-n-max 2`, 85-88% of drafts accepted),
+59.8 / 1,017 for the same model without the draft, 51.7 / 601 on the Strata image, and gufo cannot load the
+architecture at all. `docs/BENCHMARKS.md` has the full table.
+
+Build from source if you want to change the build itself (the portable payload leaves 6-24% decode on the table on
+the older 27B runs; the container above measures faster than the local `qwen4exp` build did here).
 
 ## 2. Models
 

@@ -177,6 +177,23 @@ assert "DeepSeek-V4.1-Flash" in h.choices_line("osmos") and "qwen38-27b" not in 
 assert "model qwen38-27b" in h.choices_line("gufo") and "model qwen38-27b" in h.choices_line()
 # Strata serves its own ids (qwen3.6-35b-a3b-ud-q4_k_xl): the ready screen used to call that Qwen3.8-Flash-Next
 assert h.catalog_id("qwen3.6-35b-a3b-ud-q4_k_xl") == "qwen36-q4" and "Qwen3.6-35B-A3B" in h.model_name(h.catalog_id("qwen3.6-35b-a3b-ud-q4_k_xl"))
+# Qwen3.6-35B-A3B runs on llama.cpp (Docker, halo-box image) now, and the weights answer is moot for it
+assert h.PROFILES["catalog"]["qwen36-q4"]["engines"][0] == "llamacpp" and h.PROFILES["engines"]["llamacpp"]["script"] == "server/start-qwen36.sh"
+assert h.PROFILES["routes"]["qwen36"]["model"] == "qwen36-q4" and h.PROFILES["routes"]["qwen36"]["engines"][0]["engine"] == "llamacpp"
+real_model = open(h.MODEL_FILE).read() if os.path.exists(h.MODEL_FILE) else "qwen38-27b\n"
+open(h.MODEL_FILE, "w").write("qwen36-q4\n")
+assert "weights" not in h.choices_line("llamacpp"), h.choices_line("llamacpp")  # no abliterated build for this model
+open(h.MODEL_FILE, "w").write("flash-next\n")
+assert "weights" in h.choices_line("llamacpp"), h.choices_line("llamacpp")
+open(h.MODEL_FILE, "w").write(real_model)
+# the llama.cpp launcher is one docker run: it names the GGUF it serves and the image, and says what is missing
+lc = os.path.join(h.REPO, "server", "start-qwen36.sh")
+assert subprocess.run(["bash", lc, "--print-image"], capture_output=True, text=True).stdout.startswith("ghcr.io/halo-box/strix-llama.cpp@sha256:")
+assert subprocess.run(["bash", lc, "--print-model"], capture_output=True, text=True,
+                      env=dict(os.environ, QWEN36_GGUF="/tmp/x.gguf")).stdout.strip() == "/tmp/x.gguf"
+none_env = dict(os.environ, QWEN36_GGUF="", QWEN36_DIR="/nonexistent", HOME="/nonexistent")
+assert subprocess.run(["bash", lc, "--print-model"], capture_output=True, text=True, env=none_env).stdout.strip() == ""
+assert "not on disk" in subprocess.run(["bash", lc], capture_output=True, text=True, env=none_env).stderr
 assert h.catalog_id("qwen3.8-flash-next-ud-q4_k_xl") == "flash-next" and h.catalog_id("qwen3.8-flash-next-iq3_xxs") == "flash-next-iq3_xxs"
 assert "weights" in h.choices_line("gufo") and "weights" in h.choices_line("halogen")  # Q4 has an abliterated build too
 assert h.hw_key("gufo", "m", "stock", "qwen38-27b") != h.hw_key("gufo", "m", "abliterated", "qwen38-27b") == h.hw_key("gufo", "m", "abliterated", "qwen38-27b")

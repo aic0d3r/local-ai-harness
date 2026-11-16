@@ -1737,8 +1737,8 @@ def choices_items(eng=None):
     """Every saved answer as its own item. An engine that serves one model only (osmos: DeepSeek-V4.1-Flash) names it, so the
     saved preference for the Qwen engines is not shown as what osmos runs."""
     model = PROFILES["engines"].get(eng or "", {}).get("model_label") or model_pref()
-    # the weights answer means nothing to a gufo/Strata model without an abliterated build (the 27B)
-    weights = [] if eng in ("gufo", "strata") and engine_model(eng) not in ABLITERATED else [f"weights {weights_pref()}"]
+    # the weights answer means nothing to a gufo/Strata/llama.cpp model without an abliterated build (the 27B, Qwen3.6)
+    weights = [] if eng in ("gufo", "strata", "llamacpp") and engine_model(eng) not in ABLITERATED else [f"weights {weights_pref()}"]
     return [f"model {model}", *weights, f"sidecar {'off' if sidecar_pref() == '0' else 'on'}",
             f"voice {'on' if jget(EXTRAS, {}).get('voice') else 'off'}", f"update check {'on' if update_pref() == '1' else 'off'}"]
 

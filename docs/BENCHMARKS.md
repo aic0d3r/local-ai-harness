@@ -71,7 +71,9 @@ decode. The first row was measured at a 40 W cap, so it overstates the gain. Det
 
 | engine | decode (short code) | prefill, 8K | note |
 |---|---|---|---|
-| llama-server (Vulkan, `-fa on -ub 1024`) | **59.8 t/s** | **1,017 t/s** | no draft layer; `-b 4096 -ub 1024 -fa on` |
+| **llama-server (halo-box image, Vulkan) + MTP-2** | **85.3 t/s** | **2,048 t/s** | the engine `./harness use llamacpp` starts (85-88% of drafts accepted) |
+| llama-server (Nathan v0.8.0 payload, Vulkan) + MTP-2 / MTP-3 | 83.9 / 81.4 t/s | 1,980 / 1,841 t/s | same fork lineage, prebuilt zip |
+| llama-server (Vulkan, `-fa on -ub 1024`) | 59.8 t/s | 1,017 t/s | no draft layer; `-b 4096 -ub 1024 -fa on` |
 | llama-server (Vulkan, defaults) | 60.0 t/s | 933 t/s | `-b 2048 -ub 512` |
 | Strata image 0.2.13, `PARALLEL=1` (prompt chunk 4096) | 51.7-52.6 t/s | 601-692 t/s | every routed expert in VRAM (18.75 GiB); the launcher's default now |
 | Strata image 0.2.13, default (4 slots, chunk 1024) | 49.3 t/s | 479 t/s | what a bare `docker run` gives |

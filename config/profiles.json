@@ -16,7 +16,7 @@
                  "script": "server/start-gufo-flashnext.sh", "loses": "NPU tools (guard, triage, dedup)",
                  "update": { "have": "pin server/start-gufo-flashnext.sh DEFAULT_VERSION GUFO_VERSION", "latest": "ghcr:gufo-org/toolboxes/gufo-runtime",
                              "how": "scripts/upgrade-gufo.sh (restarts gufo, checks it, pins on success, rolls back on failure)" } },
-    "llamacpp": { "port": 8080,  "probe": "/health",     "provider": "llamacpp","npu": false, "managed": false, "loses": "NPU tools (guard, triage, dedup)", "note": "llama-server; see docs/LLAMACPP.md",
+    "llamacpp": { "port": 8080,  "probe": "/health",     "provider": "llamacpp","npu": false, "managed": false, "loses": "NPU tools (guard, triage, dedup)", "note": "llama-server in Docker (halo-box Strix Halo image, Vulkan); server/start-qwen36.sh serves Qwen3.6-35B-A3B with its MTP draft. See docs/LLAMACPP.md", "script": "server/start-qwen36.sh",
                  "update": { "have": "/props build_info", "latest": "gh:ggml-org/llama.cpp", "how": "rebuild or download llama.cpp {new}" } },
     "vllm":     { "port": 8000,  "probe": "/v1/models",  "provider": "vllm",    "npu": false, "managed": false, "loses": "NPU tools (guard, triage, dedup)",
                  "update": { "have": "/version version", "latest": "gh:vllm-project/vllm", "how": "pip install -U vllm (or pull the new vllm image)" } },
@@ -58,7 +58,15 @@
         {"engine": "strata", "why": "43 t/s decode, ~990 t/s prefill, open source (measured)"}
       ]
     },
-    "qwen38-27b": {
+    "qwen36": {
+    "label": "Qwen3.6-35B-A3B (35B MoE, 3B active)", "short": "35B MoE, 3B active",
+    "model": "qwen36-q4",
+    "engines": [
+      {"engine": "llamacpp", "why": "85.3 t/s decode and 2,048 t/s prefill with the model's MTP head (measured here, 131072 ctx); one docker image, nothing to build"},
+      {"engine": "strata", "why": "51.7 t/s decode, 601 t/s prefill (measured): its image starts 4 slots, which caps the MoE prompt chunk at 1024; its MTP loads but proposes no drafts on this file"}
+    ]
+  },
+  "qwen38-27b": {
       "label": "Qwen3.8-27B (dense, vision)", "short": "dense, vision",
       "model": "qwen38-27b",
       "engines": [
@@ -93,7 +101,7 @@
     "flash-next-iq3_xxs": { "label": "Qwen3.8-Flash-Next, ISTA IQ3_XXS", "engines": ["strata"], "strata": ["qwen", "IQ3_XXS"], "run": "run-iq3_xxs.sh", "ram_gb": 53, "download_gb": 76 },
     "flash-next-iq2_xs":  { "label": "Qwen3.8-Flash-Next, ISTA IQ2_XS", "engines": ["strata"], "strata": ["qwen", "IQ2_XS"],  "run": "run-iq2_xs.sh",  "ram_gb": 46, "download_gb": 68 },
     "flash-next-q2_0":    { "label": "Qwen3.8-Flash-Next, ISTA Q2_0 (smallest, fastest)", "engines": ["strata"], "strata": ["qwen", "Q2_0"],    "run": "run-q2_0.sh",    "ram_gb": 44, "download_gb": 66 },
-    "qwen36-q4": { "label": "Qwen3.6-35B-A3B, UD-Q4_K_XL (small MoE, runs on 32 GB RAM)", "engines": ["strata"], "strata": ["qwen36", "UD-Q4_K_XL"], "run": "run-qwen36-ud-q4_k_xl.sh", "ram_gb": 32, "download_gb": 24 },
+    "qwen36-q4": { "label": "Qwen3.6-35B-A3B, UD-Q4_K_XL (small MoE, runs on 32 GB RAM)", "engines": ["llamacpp", "strata"], "strata": ["qwen36", "UD-Q4_K_XL"], "run": "run-qwen36-ud-q4_k_xl.sh", "ram_gb": 32, "download_gb": 24 },
     "qwen36-q6": { "label": "Qwen3.6-35B-A3B, UD-Q6_K_XL", "engines": ["strata"], "strata": ["qwen36", "UD-Q6_K_XL"], "run": "run-qwen36-ud-q6_k_xl.sh", "ram_gb": 44, "download_gb": 34 },
     "qwen36-q8": { "label": "Qwen3.6-35B-A3B, Q8_0", "engines": ["strata"], "strata": ["qwen36", "Q8_0"], "run": "run-qwen36-q8_0.sh", "ram_gb": 52, "download_gb": 39 },
     "qwen38-27b": { "label": "Qwen3.8 27B dense, UD-Q4_K_XL + DFlash2 draft (gufo, Strix Halo; 16.4 GiB target, the faster one)", "engines": ["gufo"], "download_gb": 20 },
