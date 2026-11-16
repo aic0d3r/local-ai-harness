@@ -2,19 +2,20 @@
 """Acceptance battery the engine upgraders share: the model answers, and decodes fast enough.
   scripts/engine-acceptance.py <base-url> [min-decode-t/s]   exit 0 = pass
 """
-import json, sys, time, urllib.request
+import json, os, sys, time, urllib.request
 
 url, min_tps = sys.argv[1].rstrip("/"), float(sys.argv[2]) if len(sys.argv) > 2 else 15
+HDR = {"Authorization": f"Bearer {os.environ['STRATA_KEY']}"} if os.environ.get("STRATA_KEY") else {}  # Strata's Docker image always serves with a key
 
 
 def chat(content, max_tokens):
     body = json.dumps({"model": model, "max_tokens": max_tokens, "temperature": 0,
                        "messages": [{"role": "user", "content": content}]}).encode()
-    req = urllib.request.Request(url + "/v1/chat/completions", data=body, headers={"content-type": "application/json"})
+    req = urllib.request.Request(url + "/v1/chat/completions", data=body, headers={"content-type": "application/json", **HDR})
     return json.load(urllib.request.urlopen(req, timeout=180))
 
 
-model = json.load(urllib.request.urlopen(url + "/v1/models", timeout=10))["data"][0]["id"]
+model = json.load(urllib.request.urlopen(urllib.request.Request(url + "/v1/models", headers=HDR), timeout=10))["data"][0]["id"]
 txt = chat("Reply with exactly: OK", 400)["choices"][0]["message"].get("content") or ""
 print(f"      answer: {txt.strip()[:40]!r}")
 assert "OK" in txt, "no OK in the reply"

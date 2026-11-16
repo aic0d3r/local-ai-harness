@@ -8,6 +8,30 @@ PORT=8080
 URL=http://127.0.0.1:$PORT
 mkdir -p "$HOME/.cache"; LOG="$HOME/.cache/strata-upgrade.log"  # per-user dir: a fixed /tmp name can be a planted symlink
 
+# Strata in Docker: pull the newest tag of the same image, restart it the same way, roll back to the old digest on failure
+IMAGE=$(bash "$REPO/server/start-strata.sh" --print-image)
+if [ -n "$IMAGE" ]; then
+  KEY=$(cat "${STRATA_DATA:-${XDG_CACHE_HOME:-$HOME/.cache}/local-ai-harness/strata-data}/harness-key" 2>/dev/null)
+  AUTH=(-H "Authorization: Bearer $KEY")
+  up(){ curl -sf -m 3 "${AUTH[@]}" "$URL/v1/models" >/dev/null 2>&1; }
+  OLD=$(docker image inspect -f '{{index .RepoDigests 0}}' "$IMAGE" 2>/dev/null)
+  echo "[1/3] pulling the newest $IMAGE"
+  docker pull "$IMAGE" || { echo "FAIL: docker pull failed (offline, or the tag moved) - nothing changed"; exit 1; }
+  echo "[2/3] restarting it (server/start-strata.sh)"
+  docker stop -t 30 $(docker ps -q --filter publish=$PORT) >/dev/null 2>&1
+  setsid nohup bash "$REPO/server/start-strata.sh" > "$LOG.server" 2>&1 < /dev/null &
+  for i in $(seq 1 80); do sleep 15; up && break; done
+  if ! up; then
+    tail -5 "$LOG.server"
+    [ -n "$OLD" ] && { echo "FAIL: not answering after 20 min - rolling back to ${OLD##*@}"; docker pull "$OLD" >/dev/null 2>&1 && \
+      { docker stop -t 30 $(docker ps -q --filter publish=$PORT) >/dev/null 2>&1; setsid nohup bash "$REPO/server/start-strata.sh" > "$LOG.rollback" 2>&1 < /dev/null & }; }
+    exit 1
+  fi
+  echo "[3/3] answer + decode check"
+  python3 "$REPO/scripts/engine-acceptance.py" "$URL" 15 && echo "OK: Strata image updated and answering ($IMAGE)" || { echo "FAIL: acceptance failed (log: $LOG.server)"; exit 1; }
+  exit 0
+fi
+
 PID=$(ss -ltnpH "sport = :$PORT" 2>/dev/null | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2)
 if [ -z "$PID" ]; then
   echo "[0/4] Strata is not running - starting it (server/start-strata.sh) so the upgrade can restart it the same way"

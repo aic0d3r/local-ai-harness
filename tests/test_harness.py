@@ -6,6 +6,8 @@ os.environ["PI_CODING_AGENT_DIR"] = AGENT
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "setup"))
 import harness as h
 
+PRISTINE = {n: getattr(h, n) for n in ("served_models", "server_ctx")}  # the tests below stub these; the last block needs the real ones
+
 
 class Mock(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
@@ -684,3 +686,33 @@ threading.Thread(target=draft.serve_forever, daemon=True).start()
 ptok, _, tps = h.stream_once(draft.server_port, "osmos-x", "hi", 12)
 assert ptok == 900 and 20 < tps < 60, (ptok, tps)  # 12 tokens over ~0.3 s; chunk counting says 1/0.3 = 3.3
 print("ok: decode counts tokens, not chunks")
+
+# Strata in Docker always serves with a key (docs/DOCKER.md): start-strata.sh writes it in its data volume, and pi,
+# the HTTP probes and the Strata dashboard all have to send it or every request is a 401
+kroot = tempfile.mkdtemp()
+open(os.path.join(kroot, "harness-key"), "w").write("k" * 32 + "\n")
+old_sd = os.environ.get("STRATA_DATA")
+os.environ["STRATA_DATA"] = kroot
+assert h.strata_key() == "k" * 32 and h.engine_key("strata") == "k" * 32 and h.engine_key("gufo") is None
+seen, real_http = {}, h.http
+
+def fake_http(url, body=None, timeout=3, key=None):
+    seen["key"] = key
+    raise OSError
+
+
+h.http = fake_http
+PRISTINE["served_models"](8080, "strata")
+assert seen["key"] == "k" * 32, seen  # status, the ready screen and finish() list models through here
+PRISTINE["server_ctx"](h.PROFILES["engines"]["strata"]["port"])  # several engines share :8080; the tests above moved ports around
+assert seen["key"] == "k" * 32, seen
+h.http = real_http
+assert h.build_entry("strata", "qwen36-q4", 262144, {})["apiKey"] == "k" * 32  # pi sends it as the bearer token
+assert h.build_entry("gufo", "qwen38-27b-q8", 262144, {})["apiKey"] == "dummy"
+os.remove(os.path.join(kroot, "harness-key"))
+assert h.strata_key() is None
+if old_sd is None:
+    os.environ.pop("STRATA_DATA")
+else:
+    os.environ["STRATA_DATA"] = old_sd
+print("ok: Strata's Docker key reaches pi and the probes")

@@ -19,6 +19,7 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 . "$REPO/scripts/lib-prompt.sh"
 [ -n "$(bash "$REPO/server/start-strata.sh" --print-run)" ] && { echo "  Strata already installed for these weights"; exit 0; }
 HAVE=$(bash "$REPO/server/start-strata.sh" --print-dir)
+IMAGE=$(bash "$REPO/server/start-strata.sh" --print-image)
 DIR=${HAVE:-${STRATA_DIR:-$HOME/coding/Strata}}
 WEIGHTS="${STRATA_WEIGHTS:-$(cat "${PI_CODING_AGENT_DIR:-${PI_HOME:-$HOME/.pi}/agent}/harness-weights" 2>/dev/null)}"
 WEIGHTS=${WEIGHTS:-stock}
@@ -39,6 +40,18 @@ else
     exit 1
   fi
   MODEL=UD-Q4_K_XL; GGUF=(--gguf-dir "$(dirname "$SHARD1")"); WHAT="uses $(dirname "$SHARD1") (no weights download)"
+fi
+# Docker: the ready-made image for this card, no compile and no ~10 GB ROCm wheels (its /data volume holds the pack)
+if [ -n "$IMAGE" ]; then
+  DATA=$(bash "$REPO/server/start-strata.sh" --print-dir)
+  AVAILD=$(df -BG --output=avail "$(dirname "$DATA")" 2>/dev/null | tail -1 | tr -dc '0-9')
+  echo "  Strata in Docker: $IMAGE (pulls once, no compile), $WHAT"
+  echo "  data volume: $DATA (Strata writes its pack there: ~40 GB for UD-Q4_K_XL${AVAILD:+, free: $AVAILD GB})"
+  if [ "${1:-}" != --yes ]; then prompt_yn "install now?" n || { echo "  aborted" >&2; exit 1; }; fi
+  docker pull "$IMAGE" || { echo "  docker pull failed - check the image name for this card (docs/DOCKER.md)" >&2; exit 1; }
+  [ -n "$(bash "$REPO/server/start-strata.sh" --print-run)" ] || { echo "  image pulled but start-strata.sh does not see it" >&2; exit 1; }
+  echo "  Strata installed ($IMAGE, data in $DATA). Start it with server/start-strata.sh or ./harness up"
+  exit 0
 fi
 echo "  Strata ($([ "$OWN" = 1 ] && echo "$MODEL_ID" || echo "$WEIGHTS weights")): $([ -n "$HAVE" ] && echo "in $HAVE, " || echo "clone into $DIR, ")then its setup fetches the engine and $WHAT${AVAIL:+ (free: ${AVAIL} GB)}"
 if [ "${1:-}" != --yes ]; then

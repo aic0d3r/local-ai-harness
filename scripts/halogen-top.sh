@@ -67,7 +67,15 @@ GRN, YEL, RED, CYN, MAG = (lambda s: c("32", s)), (lambda s: c("33", s)), \
 
 
 def get(path, js=True):
-    raw = urllib.request.urlopen(URL + path, timeout=3).read().decode()
+    # Strata in Docker always serves with a key (server/start-strata.sh keeps it in its volume); other engines have none
+    key_file = os.path.join(os.environ.get("STRATA_DATA") or os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"),
+                                                                        "local-ai-harness", "strata-data"), "harness-key")
+    try:
+        key = open(key_file).read().strip()
+    except OSError:
+        key = ""
+    req = urllib.request.Request(URL + path, headers={"Authorization": f"Bearer {key}"} if key and STRATA else {})
+    raw = urllib.request.urlopen(req, timeout=3).read().decode()
     return json.loads(raw) if js else raw
 
 

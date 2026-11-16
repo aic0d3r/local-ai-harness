@@ -26,6 +26,20 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 AGENT = os.environ.get("PI_CODING_AGENT_DIR") or os.path.join(os.environ.get("PI_HOME", os.path.expanduser("~/.pi")), "agent")
 PROFILES = json.load(open(os.path.join(REPO, "config", "profiles.json")))
 LOGDIR = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "local-ai-harness")  # not /tmp: a planted symlink there would be followed
+STRATA_DATA = os.path.join(LOGDIR, "strata-data")  # Strata's Docker /data: packs, settings, the API key
+
+
+def strata_key():
+    """The bearer token Strata's Docker image serves with (docs/DOCKER.md: always a key); server/start-strata.sh drops it in the volume."""
+    try:
+        return open(os.path.join(os.environ.get("STRATA_DATA") or STRATA_DATA, "harness-key")).read().strip() or None
+    except OSError:
+        return None
+
+
+def engine_key(engine):
+    """The token an engine wants, or None when it serves without one."""
+    return strata_key() if engine == "strata" else None
 MODEL_DIRS = ["~/models", "~/.cache/huggingface/hub", "/models", "~/llm"]
 TUNE_BUDGET_S = 120
 
@@ -337,6 +351,7 @@ def ask_model(engine, back=False):
 def served_models(port, engine=None, base=None, key=None):
     """Model ids the server lists, minus helper models the engine hides (halogen's NPU sidecars). base/key: a custom endpoint's."""
     hide = PROFILES["engines"].get(engine or "", {}).get("hide")
+    key = key or engine_key(engine or "")
     try:
         ids = [m["id"] for m in json.load(http(f"{base or f'http://127.0.0.1:{port}'}/v1/models", key=key))["data"]]
     except (OSError, ValueError, LookupError):
@@ -515,6 +530,7 @@ def model_profile(model_id):
 
 def server_ctx(port, base=None, key=None):
     """Real context window from the server, or 0 if it will not say. base/key: a custom endpoint's."""
+    key = key or next(filter(None, (engine_key(e) for e, p in PROFILES["engines"].items() if p["port"] == port)), None)
     for path, pick in (("/props", lambda d: d["default_generation_settings"]["n_ctx"]), ("/v1/models", lambda d: d["data"][0]["meta"]["n_ctx"]),
                        ("/v1/models", lambda d: d["data"][0]["context_length"]),  # gufo
                        ("/v1/models", lambda d: d["data"][0]["max_model_len"])):  # vLLM
@@ -547,8 +563,11 @@ def build_entry(engine, model_id, ctx, tuned):
     if not ctx:
         print(f"  ! {engine} did not report its context window; assuming 32768. If it runs a different size, set contextWindow for {model_id} in models.json")
         ctx = 32768
-    return entries.build_provider(f"http://127.0.0.1:{e['port']}/v1", engine, model_id, ctx, server_input(e["port"]), PROFILES,
-                                  max_tokens=tuned.get("maxTokens"))
+    p = entries.build_provider(f"http://127.0.0.1:{e['port']}/v1", engine, model_id, ctx, server_input(e["port"]), PROFILES,
+                               max_tokens=tuned.get("maxTokens"))
+    if engine_key(engine):
+        p["apiKey"] = engine_key(engine)  # Strata's Docker image rejects anything else; pi sends it as the bearer token
+    return p
 
 
 def reserve_for(ctx):
@@ -1781,7 +1800,7 @@ def live_reply(eng, model_id, timeout=120):
     """Ask the engine itself for a few tokens over HTTP (no agent needed) -> (ok, detail)."""
     ep = custom_endpoint() if eng == CUSTOM else None
     port = "" if ep else PROFILES["engines"][eng]["port"]
-    base, key, where = (ep["url"], ep["key"], ep["url"]) if ep else (f"http://127.0.0.1:{port}", None, f":{port}")
+    base, key, where = (ep["url"], ep["key"], ep["url"]) if ep else (f"http://127.0.0.1:{port}", engine_key(eng), f":{port}")
     body = {"model": model_id, "stream": True, "max_tokens": 64, "temperature": 0,
             "messages": [{"role": "user", "content": "Reply with exactly: OK"}]}
     t0 = time.time()

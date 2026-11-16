@@ -29,19 +29,28 @@ on `http://127.0.0.1:8080`, so it plugs into pi like any other engine.
 
 ```bash
 # plug and play: ./setup.sh, pick strata, answer "Default model weights?" - if that model is not
-# installed the wizard offers to install it (scripts/install-strata.sh: git clone into ~/coding/Strata
-# or $STRATA_DIR, then its own ./setup.sh --yes --no-start --family unsloth --model ...):
+# installed the wizard offers to install it (scripts/install-strata.sh).
+# Docker (default when docker is installed and the card has a ready-made image: gfx1151 Strix Halo, other RDNA
+# 3/4, NVIDIA 575+/580+): pulls ghcr.io/niko1221/strata:<release>-<flavor> (1.5 GB, ~5 min) and runs it, no compile
+# and no ~10 GB ROCm wheels. Its /data volume is $STRATA_DATA (default ~/.cache/local-ai-harness/strata-data): the
+# pack, its settings and the API key live there, the GGUF folder is mounted read-only (MODEL_PATH, docs/DOCKER.md).
+# The image always serves with a key, so start-strata.sh writes <data>/harness-key and the wizard puts the same key
+# in models.json - probes, /monitor and pi authenticate with it. Update: scripts/upgrade-strata.sh pulls the newest
+# tag, restarts, checks and rolls back to the old image digest. A source install (git clone into ~/coding/Strata or
+# $STRATA_DIR, then its own ./setup.sh --yes --no-start --family unsloth --model ...) is used whenever one exists, and
+# always with STRATA_SOURCE=1: STRATA_IMAGE pins an image, STRATA_TAG a release, STRATA_DATA the volume.
 #   abliterated -> UD-Q4_K_XL via --gguf-dir on gufo's orca-uncensored shards (no weights download)
 #   stock       -> UD-Q4_K_XL via --gguf-dir on the Unsloth GGUF gufo shares (scripts/download-stock.sh, ~112 GB once)
 # both run run-unsloth-ud-q4_k_xl.sh. Strata keys its repacked dense weights (a 1.4 GB pack) by model name only,
-# so switching ./harness config -> weights deletes that pack and Strata rebuilds it from the other GGUF (minutes,
-# no download); <Strata dir>/.harness-weights records which one it was built from and start-strata.sh refuses a
-# start on the other answer rather than pair a pack with the wrong experts.
-# Strix Halo: on every start, scripts/strata-uma.py swaps setup's RAM-budget config for every expert in the GPU
-# pool when they fit (cache = all experts, --mmap-experts, --ple-io mmap, --no-prefill-borrow, 16K chunks, the
-# Windows gfx1151 matrix-core prompt set). Orca UD-Q4_K_XL, 124 GiB, 128K, full power (85 W median): 1,080 t/s
-# prompt (8K/30K), 47-48 t/s decode, probe 1,034 / 42.2 - Strata's own stock UD-Q4_K_XL Linux numbers are
-# 1,169-1,248 / 43-53. The rest of its fast config measured 4% slower prompts here, so it is left out.
+# so switching ./harness config -> weights drops that pack and Strata rebuilds it from the other GGUF (minutes,
+# no download); <Strata dir>/.harness-weights (the Docker route keeps the same file in its volume) records which one
+# it was built from, so a start never pairs a pack with the wrong experts.
+# Strix Halo (source install only: the image carries its own tuning): on every start, scripts/strata-uma.py swaps
+# setup's RAM-budget config for every expert in the GPU pool when they fit (cache = all experts, --mmap-experts,
+# --ple-io mmap, --no-prefill-borrow, 16K chunks, the Windows gfx1151 matrix-core prompt set). Orca UD-Q4_K_XL,
+# 124 GiB, 128K, full power (85 W median): 1,080 t/s prompt (8K/30K), 47-48 t/s decode, probe 1,034 / 42.2 - Strata's
+# own stock UD-Q4_K_XL Linux numbers are 1,169-1,248 / 43-53. The rest of its fast config measured 4% slower prompts
+# here, so it is left out.
 # Setup's file stays as strata-<model>.json.budget-mode.
 # by hand instead: install + start Strata per its README, then in this repo:
 ./setup.sh --strata                      # or: ./setup.sh --strata http://host:port

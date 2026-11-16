@@ -44,6 +44,7 @@ if [ $# -eq 0 ] && [ -z "${HARNESS_ENGINE:-}" ]; then  # the wizard sets HARNESS
   [ -n "$SAVED_ENG" ] && [ "$SAVED_ENG" != halogen ] && exec python3 -u "$(dirname "$(readlink -f "$0")")/setup/harness.py" refresh
 fi
 HALOGEN_CKPT=""; SIDECAR_SET=""; AGENT_SET=""; DOCTOR=0; REFUSALS=0; REFRESH_MCP=0; VOICE=0; NO_HALOGEN=0; STRATA=0; GUFO=0; ENG=strata; ENG_URL=http://127.0.0.1:8080
+STRATA_KEY=$(cat "${STRATA_DATA:-${XDG_CACHE_HOME:-$HOME/.cache}/local-ai-harness/strata-data}/harness-key" 2>/dev/null)  # Strata in Docker serves only with a key
 while [ $# -gt 0 ]; do
   case "$1" in
     --endpoint)    shift; exec python3 -u "$(dirname "$(readlink -f "$0")")/setup/harness.py" endpoint "$@" ;;  # any OpenAI-compatible server: see ./harness endpoint --help
@@ -92,7 +93,7 @@ FAILS=0  # every fail() counts; --doctor exits 1 when any happened
 fail(){ FAILS=$((FAILS+1)); printf '  %s✗%s %s\n' "$C_FAIL" "$C_OFF" "$1"; }
 tiny_up(){ curl -sf -m 3 "localhost:$TINY_PORT/health" >/dev/null 2>&1; }
 hal_up(){  curl -sf -m 3 "localhost:$HAL_PORT/health"  >/dev/null 2>&1; }
-eng_up(){ curl -sf -m 3 "$ENG_URL/v1/models" >/dev/null 2>&1; }
+eng_up(){ curl -sf -m 3 ${STRATA_KEY:+-H "Authorization: Bearer $STRATA_KEY"} "$ENG_URL/v1/models" >/dev/null 2>&1; }
 lem_up(){  curl -sf -m 3 "localhost:13305/api/v1/models" >/dev/null 2>&1 || curl -sf -m 3 "localhost:13305/health" >/dev/null 2>&1; }
 # fabric clock held? GPU+NPU together on Strix Halo are only safe with it held
 # (halogen NPU docs). The container holds it while it runs via /sys, but any NPU
@@ -126,7 +127,7 @@ host_checks(){
   local o9
   o9=$(awk '$4=="Normal"{u=0; for(i=14;i<=NF;i++) u+=$(i)*2**(i-14); print u}' /proc/buddyinfo 2>/dev/null | head -1)
   # a running engine (halogen :8731, gufo/Strata :8080) holds the GPU heap, so the count only means something before a launch
-  if hal_up || curl -sf -m 3 localhost:8080/v1/models >/dev/null 2>&1; then ok "order-9 pages: n/a while an engine holds the GPU memory"
+  if hal_up || curl -sf -m 3 ${STRATA_KEY:+-H "Authorization: Bearer $STRATA_KEY"} localhost:8080/v1/models >/dev/null 2>&1; then ok "order-9 pages: n/a while an engine holds the GPU memory"
   else [ -n "$o9" ] && [ "$o9" -lt 200 ] \
     && warn "order-9 pages = $o9 (<200): full-ctx halogen (262k) will wedge; 65k/2-slot is fine. reboot before full-ctx." \
     || ok "order-9 pages: ${o9:-n/a}"; fi
