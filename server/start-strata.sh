@@ -95,6 +95,10 @@ fi
 mkdir -p "$DATA" || exit 1
 KEYFILE=$DATA/harness-key
 [ -s "$KEYFILE" ] || ( umask 077; python3 -c 'import secrets; print(secrets.token_hex(24))' > "$KEYFILE" ) || exit 1
+# the key a start left inside the volume wins (Strata keeps it root-only there, so read it through a container): a Strata
+# started by hand or by its own installer has its own key, and the harness has to send that one, not the file's
+PREV=$(docker run --rm -v "$DATA":/data --entrypoint cat "$IMAGE" /data/state/api-key 2>/dev/null | tr -d '\r\n')
+[ -n "$PREV" ] && printf '%s\n' "$PREV" > "$KEYFILE"
 # a start while one is already running (the wizard retries, ./harness up runs again) must not fail on the name: follow it
 # instead, and clear a container an earlier crash left behind
 if [ -n "$(docker ps -q --filter "name=^strata-$PORT$")" ]; then
@@ -104,7 +108,9 @@ fi
 docker rm -f "strata-$PORT" >/dev/null 2>&1
 ARGS=(--rm -i --name "strata-$PORT"
   --ulimit memlock=-1:-1 --shm-size 2g --stop-timeout 120
-  -p "127.0.0.1:$PORT:8080" -v "$DATA":/data -e "API_KEY=$(cat "$KEYFILE")")
+  -p "127.0.0.1:$PORT:8080" -v "$DATA":/data -e "API_KEY=$(cat "$KEYFILE")"
+  -e "PARALLEL=${STRATA_PARALLEL:-1}")  # one slot: the MoE prompt chunk grows 1024 -> 4096, measured 479 -> 692 t/s prefill
+[ -n "${STRATA_SET:-}" ] && ARGS+=(-e "STRATA_SET=$STRATA_SET")  # advanced engine settings (strata launch --set), e.g. prefill=4096
 if case "$IMAGE" in *cuda*) true ;; *) false ;; esac; then
   ARGS+=(--gpus all)
 else

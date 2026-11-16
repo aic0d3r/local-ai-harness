@@ -66,6 +66,23 @@ For scale, Strata's own Linux Strix Halo numbers for the stock UD-Q4_K_XL file a
 decode. The first row was measured at a 40 W cap, so it overstates the gain. Details:
 [ENGINES.md](ENGINES.md#strata-the-pick-for-nvidia-and-amd-desktop-gpus).
 
+**Qwen3.6-35B-A3B UD-Q4_K_XL: which engine (2026-11-16).** Same protocol as `./harness tune` (`bench-v1`: warm-up,
+3 x 256-token greedy code answers, one 8K cold prefill), one engine at a time, the whole 124 GiB pool, 131072 ctx:
+
+| engine | decode (short code) | prefill, 8K | note |
+|---|---|---|---|
+| llama-server (Vulkan, `-fa on -ub 1024`) | **59.8 t/s** | **1,017 t/s** | no draft layer; `-b 4096 -ub 1024 -fa on` |
+| llama-server (Vulkan, defaults) | 60.0 t/s | 933 t/s | `-b 2048 -ub 512` |
+| Strata image 0.2.13, `PARALLEL=1` (prompt chunk 4096) | 51.7-52.6 t/s | 601-692 t/s | every routed expert in VRAM (18.75 GiB); the launcher's default now |
+| Strata image 0.2.13, default (4 slots, chunk 1024) | 49.3 t/s | 479 t/s | what a bare `docker run` gives |
+| gufo 0.32.0 | - | - | refuses the file: "No text provider found for model architecture" (qwen35moe is not in its runtime) |
+
+Strata loads the MTP block but proposes no drafts on this file (`drafts accepted 0 of 0`, with or without `--spec 4`), so
+its decode gets no speculative gain; Strata's own Qwen3.6 notes expect ~1.6x from MTP with Unsloth's MTP-GGUF. Its MoE
+prompt chunk is what the parallel count decides: `--parallel 4` caps it at 1024, one slot gets 4096 (8192 with 131k ctx
+is refused: "bad --chunk / --max-context"), and the chunk is worth +44% prefill here. No ROCm llama.cpp build is on this
+box (the local build is Vulkan-only), so llama.cpp's HIP path is not in the table.
+
 ## Efficiency levers
 
 The harness is tuned to spend as few tokens, and as little main-model time, as possible:
