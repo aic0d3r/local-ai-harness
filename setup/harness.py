@@ -16,7 +16,7 @@
 
 Profiles live in config/profiles.json. Stdlib only. Never kills or restarts servers it did not launch.
 """
-import json, os, re, shutil, subprocess, sys, textwrap, time, urllib.request, uuid, hashlib, glob
+import json, os, re, shutil, subprocess, sys, textwrap, time, urllib.parse, urllib.request, uuid, hashlib, glob
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import entries
 import jsonio
@@ -63,6 +63,10 @@ def jput(path, obj):
 
 
 def http(url, body=None, timeout=3, key=None):
+    if not key:  # Strata in Docker serves only with its key: every probe of a local engine port has to carry it
+        u = urllib.parse.urlsplit(url)
+        if u.hostname in ("127.0.0.1", "localhost"):
+            key = next(filter(None, (engine_key(e) for e, p in PROFILES["engines"].items() if u.port == p["port"])), None)
     headers = {"Content-Type": "application/json", **({"Authorization": f"Bearer {key}"} if key else {})}  # key: a custom endpoint's
     return urllib.request.urlopen(urllib.request.Request(url, data=json.dumps(body).encode() if body else None, headers=headers), timeout=timeout)
 
@@ -852,9 +856,14 @@ def cmd_detect(_):
 
 
 def catalog_id(served):
-    """The catalog id a served model id is (qwen3.8-27b -> qwen38-27b), longest match; DEFAULT_MODEL if none matches."""
+    """The catalog id a served model id is (qwen3.8-27b-q8 -> qwen38-27b-q8; Strata's qwen3.6-35b-a3b-ud-q4_k_xl ->
+    qwen36-q4, from the catalog's own strata [family, size]): longest catalog id inside the served name, DEFAULT_MODEL
+    when nothing matches."""
     norm = lambda s: re.sub(r"[^a-z0-9]", "", (s or "").lower())  # noqa: E731
-    return max((k for k in catalog() if norm(k) in norm(served)), key=len, default=DEFAULT_MODEL)
+    s = norm(served)
+    hit = next((k for k, v in catalog().items()  # Strata serves its own ids: family and size both have to be in them
+                if len(v.get("strata") or ()) == 2 and norm(v["strata"][0]) in s and norm(v["strata"][1]) in s), None)
+    return hit or max((k for k in catalog() if norm(k) in s), key=len, default=DEFAULT_MODEL)
 
 
 def speeds(engine, model=None):

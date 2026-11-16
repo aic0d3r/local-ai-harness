@@ -95,6 +95,13 @@ fi
 mkdir -p "$DATA" || exit 1
 KEYFILE=$DATA/harness-key
 [ -s "$KEYFILE" ] || ( umask 077; python3 -c 'import secrets; print(secrets.token_hex(24))' > "$KEYFILE" ) || exit 1
+# a start while one is already running (the wizard retries, ./harness up runs again) must not fail on the name: follow it
+# instead, and clear a container an earlier crash left behind
+if [ -n "$(docker ps -q --filter "name=^strata-$PORT$")" ]; then
+  echo "  Strata is already running (container strata-$PORT): following its log; stop it with docker stop strata-$PORT"
+  exec docker logs -f "strata-$PORT"
+fi
+docker rm -f "strata-$PORT" >/dev/null 2>&1
 ARGS=(--rm -i --name "strata-$PORT"
   --ulimit memlock=-1:-1 --shm-size 2g --stop-timeout 120
   -p "127.0.0.1:$PORT:8080" -v "$DATA":/data -e "API_KEY=$(cat "$KEYFILE")")

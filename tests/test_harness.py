@@ -175,6 +175,9 @@ assert h.upgrader("osmos") and h.upgrader("osmos").endswith("upgrade-osmos.sh")
 open(h.MODEL_FILE, "w").write("qwen38-27b\n")
 assert "DeepSeek-V4.1-Flash" in h.choices_line("osmos") and "qwen38-27b" not in h.choices_line("osmos")
 assert "model qwen38-27b" in h.choices_line("gufo") and "model qwen38-27b" in h.choices_line()
+# Strata serves its own ids (qwen3.6-35b-a3b-ud-q4_k_xl): the ready screen used to call that Qwen3.8-Flash-Next
+assert h.catalog_id("qwen3.6-35b-a3b-ud-q4_k_xl") == "qwen36-q4" and "Qwen3.6-35B-A3B" in h.model_name(h.catalog_id("qwen3.6-35b-a3b-ud-q4_k_xl"))
+assert h.catalog_id("qwen3.8-flash-next-ud-q4_k_xl") == "flash-next" and h.catalog_id("qwen3.8-flash-next-iq3_xxs") == "flash-next-iq3_xxs"
 assert "weights" in h.choices_line("gufo") and "weights" in h.choices_line("halogen")  # Q4 has an abliterated build too
 assert h.hw_key("gufo", "m", "stock", "qwen38-27b") != h.hw_key("gufo", "m", "abliterated", "qwen38-27b") == h.hw_key("gufo", "m", "abliterated", "qwen38-27b")
 open(h.MODEL_FILE, "w").write("qwen38-27b-q8\n")  # keyed apart from the Q4 as well
