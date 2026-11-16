@@ -1,5 +1,5 @@
 """python3 tests/test_harness.py - wizard core against a mock OpenAI server (no real engine needed)."""
-import json, os, re, subprocess, sys, tempfile, threading, time, http.server
+import json, os, re, subprocess, sys, tempfile, threading, time, types, http.server
 
 AGENT = tempfile.mkdtemp()
 os.environ["PI_CODING_AGENT_DIR"] = AGENT
@@ -181,6 +181,51 @@ for w, f in (("stock", "/Qwen3.8-27B-UD-Q8_K_XL.gguf"), ("abliterated", "/Huihui
     assert subprocess.run(["bash", os.path.join(h.REPO, "server", "start-gufo-flashnext.sh"), "--print-model"], capture_output=True, text=True,
                           env=dict(os.environ, GUFO_FAMILY="qwen38-27b-q8", GUFO_WEIGHTS=w)).stdout.strip().endswith(f)
 open(h.MODEL_FILE, "w").write("qwen38-27b\n")
+# the weights menu on the 27B: Q4 offers the Q8 (its abliterated build) and stock is a no-op; the Q8 changes either way
+open(h.WEIGHTS, "w").write("stock\n")
+seen = []
+real_choose, real_yn = h.choose, h.ask_yn
+real_stdin, h.sys.stdin = h.sys.stdin, types.SimpleNamespace(isatty=lambda: True)
+h.choose = lambda q, o, y, esc=None, notes=(): seen.extend(o) or next(x for x in o if x.startswith("abliterated"))
+assert h.ask_weights("gufo", back=True) is True and "27B Q8" in seen[1] and "Flash-Next" not in " ".join(seen), seen
+h.choose = lambda q, o, y, esc=None, notes=(): seen.extend(o) or next(x for x in o if x.startswith("stock"))
+assert h.ask_weights("gufo", back=True) is False and h.weights_pref() == "abliterated", seen  # Q4 stock: nothing to change, the answer stays
+open(h.MODEL_FILE, "w").write("qwen38-27b-q8\n")
+assert h.ask_weights("gufo", back=True) is True and h.weights_pref() == "stock"  # the Q8 has both: a real change
+h.choose, h.ask_yn = real_choose, real_yn
+h.sys.stdin = real_stdin
+os.remove(h.WEIGHTS)  # back to never asked, as the tests below expect
+# ./harness use gufo with gufo up on another model: it asks, even though use passes yes=True (it used to keep the old model)
+up = {"engines": [{"engine": "gufo", "port": 8080, "models": ["qwen3.8-27b"]}]}  # gufo serving the Q4
+open(h.MODEL_FILE, "w").write("qwen38-27b-q8\n")  # saved: the Q8
+asked = []
+real_yn, real_stdin = h.ask_yn, h.sys.stdin
+h.sys.stdin = types.SimpleNamespace(isatty=lambda: True)
+h.ask_yn = lambda q, d=False: asked.append(q) or False
+assert h.pick_engine(up, True, "gufo") == ("gufo", None) and asked, asked  # declined: warned, not restarted
+h.ask_yn, h.sys.stdin = real_yn, real_stdin
+open(h.MODEL_FILE, "w").write("qwen38-27b\n")  # saved Q4 == served Q4: no question
+assert not h.serves_other("gufo", {x["engine"]: x for x in up["engines"]})
+# switch_now (a model change in ./harness config): start it, restart it only where the change needs it, then rewire pi
+calls = []
+saved = {n: getattr(h, n) for n in ("detect", "plan_start", "start_engine", "stop_engine", "served_models", "install_extensions", "finish", "ask_yn")}
+h.ask_yn = lambda q, d=False: True
+h.plan_start = lambda e, r, ask_start=True: calls.append(f"plan ask_start={ask_start}") or {"stop": None, "download": False}
+h.start_engine = lambda e, r, plan=None, wait_s=900: calls.append(f"start {e}") or True
+h.stop_engine = lambda e, r: calls.append(f"stop {e}") or True
+h.served_models = lambda port, e=None, base=None, key=None: ["qwen3.8-27b-q8"]
+h.install_extensions = lambda e, verbose=False: calls.append("wire")
+h.finish = lambda e, m, no_tune, launch=False: calls.append(f"finish {e} {m}")
+open(h.MODEL_FILE, "w").write("qwen38-27b-q8\n")
+for up, want in (({"engines": [{"engine": "gufo", "port": 8080, "models": ["qwen3.8-27b-q8"]}]}, ["plan ask_start=False", "wire", "finish gufo qwen3.8-27b-q8"]),
+                 ({"engines": [{"engine": "gufo", "port": 8080, "models": ["qwen3.8-27b"]}]}, ["plan ask_start=False", "stop gufo", "start gufo", "wire"]),
+                 ({"engines": [{"engine": "strata", "port": 8080, "models": ["flash-next"]}]}, ["plan ask_start=False", "stop strata", "start strata", "wire"])):
+    calls.clear()
+    h.detect = lambda up=up: up
+    h.switch_now("gufo" if "gufo" in str(up) else "strata")
+    assert calls[:len(want)] == want, calls
+for n, f in saved.items():
+    setattr(h, n, f)
 # ready screen's memory line: gufo's own load log; another model's load says nothing
 log = os.path.join(AGENT, "gufo-test.log")
 open(log, "w").write("x [cache] schema=c event=configured sessions=2 capacity_bytes=21991874560\n"

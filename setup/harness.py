@@ -1011,9 +1011,9 @@ def ask_weights(engine, back=False):
     m = engine_model(engine)
     own = engine in ("gufo", "strata") and m not in ABLITERATED  # the 27B Q4 etc.: stock only
     cur = "stock" if own else weights_pref()
-    labels = {"stock": f"stock {model_name(m)} (its only build)",
-              "abliterated": f"abliterated: switch {engine} to {model_name(abl_model(m))}, which has one"} if own else (
-        {"stock": f"stock {model_name(m)} (Unsloth)", "abliterated": "abliterated (huihui-ai; refusals removed; docs/ENGINES.md)"}
+    labels = {"stock": f"stock {short_model(m)} (its only build)",
+              "abliterated": f"abliterated: switch to {short_model(abl_model(m))}, its abliterated build"} if own else (
+        {"stock": f"stock {quant_of(m)} (Unsloth)", "abliterated": f"abliterated {quant_of(m)} (huihui-ai; refusals removed)"}
         if m != DEFAULT_MODEL else weights_labels(engine))
     opts = sorted(labels, key=lambda k: k != cur)
     measured = speeds(engine, engine_model(engine) if engine in ("gufo", "strata") else None)
@@ -1294,7 +1294,7 @@ def pick_engine(d, yes, want=None, on_pick=None, esc=None):
             sys.exit(f"unknown engine {eng}; known: {', '.join(PROFILES['engines'])}")
         c = PROFILES["engines"][eng]
         if serves_other(eng, running):  # ./harness use gufo after a model change in ./harness config
-            if not (sys.stdin.isatty() and not yes and ask_yn(f"Restart {eng}? it serves {running[eng]['models'][0]}, your saved model is {engine_model(eng)}", True)):
+            if not (sys.stdin.isatty() and ask_yn(f"Restart {eng}? it serves {running[eng]['models'][0]}, your saved model is {engine_model(eng)}", True)):
                 print(f"  ! {eng} keeps serving {running[eng]['models'][0]} until it restarts on {engine_model(eng)}")
                 return eng, None
             plan = plan_start(eng, {k: v for k, v in running.items() if k != eng}, ask_start=False) or sys.exit(not_answering(eng))
@@ -2159,18 +2159,42 @@ def model_name(m):
     return catalog().get(m, {}).get("label", m).split(" (")[0]
 
 
+def short_model(m):
+    """A menu label: the 27B quants get a short name, so a weights row stays inside an 80-column window."""
+    lbl = model_name(m)
+    return f"Qwen3.8 27B {'Q8' if m.endswith('-q8') else 'Q4'}" if "27B" in lbl else lbl
+
+
 def abl_model(m):
     """The nearest model with an abliterated build: the 27B Q8 for a 27B, else Flash-Next."""
     return "qwen38-27b-q8" if is_27b(m) else DEFAULT_MODEL
 
 
+def quant_of(m):
+    """'UD-Q8_K_XL' from the catalog label ('Qwen3.8 27B dense, UD-Q8_K_XL + DFlash2 draft')."""
+    return catalog().get(m, {}).get("label", "").partition(", ")[2].partition(" +")[0]
+
+
 def switch_now(eng):
-    """After a model change in ./harness config: offer to download what is missing and (re)start eng on it, then rewire pi."""
+    """After a model change in ./harness config: download what is missing, (re)start eng on the new model, then rewire pi."""
     if not ask_yn(f"Switch {eng} to {model_name(engine_model(eng))} now? downloads what is missing, then (re)starts {eng}", True):
         return print("  saved; ./setup.sh downloads what is missing and (re)starts it")
-    eng, mod = pick_target(detect(), False, eng)  # yes=False: asks to restart a gufo still serving the old model
+    running = {x["engine"]: x for x in detect()["engines"]}
+    others = {k: v for k, v in running.items() if k != eng}
+    plan = plan_start(eng, others, ask_start=False)  # download questions before anything stops; starting needs no question here
+    if plan is None:
+        return
+    served = None
+    if eng in running:        # strata: its served ids are not ours to map, so a changed model always restarts it
+        if eng == "gufo" and not serves_other(eng, running):
+            print(f"  {eng} already serves {engine_model(eng)}")
+        elif not stop_engine(eng, running) or not start_engine(eng, others, plan):
+            return
+    elif not start_engine(eng, others, plan):
+        return
+    served = (served_models(PROFILES["engines"][eng]["port"], eng) or [""])[0]
     install_extensions(eng, verbose=False)
-    finish(eng, mod, bool(jget(os.path.join(AGENT, "harness-tuned.json"), {}).get(hw_key(eng, mod))))
+    finish(eng, served, bool(jget(os.path.join(AGENT, "harness-tuned.json"), {}).get(hw_key(eng, served))))
 
 
 def cmd_config(a):
@@ -2225,11 +2249,11 @@ def cmd_config(a):
             changed = ask_weights(eng if eng in WEIGHTS_ASK else "halogen", back=True)
             if no_abl and changed is True:
                 to = abl_model(engine_model(eng))
-                if ask_yn(f"{model_name(engine_model(eng))} has no abliterated build. Switch {eng} to {model_name(to)} abliterated?", True):
+                if ask_yn(f"{short_model(engine_model(eng))} has no abliterated build. Switch {eng} to {short_model(to)} abliterated?", True):
                     open(MODEL_FILE, "w").write(to + "\n")
                     switch_now(eng)
                 else:
-                    print(f"  saved; {eng} stays on {model_name(engine_model(eng))} (stock) until you pick {model_name(to)} under model")
+                    print(f"  saved; {eng} stays on {short_model(engine_model(eng))} (stock) until you pick {short_model(to)} under model")
                 continue
             if changed is BACK or not changed or eng not in WEIGHTS_ASK:
                 continue
