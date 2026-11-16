@@ -7,8 +7,8 @@
 #   gufo                       cannot load qwen35moe at all
 # The drafter is the model's own MTP layer (blk.40.nextn.* in the GGUF), so no second model and no extra download:
 # --spec-type draft-mtp is llama.cpp's MTP path (upstream PR #22673) and --spec-draft-n-max 2 was the best of 2 / 3 here.
-# Image: ghcr.io/halo-box/strix-llama.cpp:server-vulkan, the Vulkan build of github.com/halo-box/strix-llama.cpp (where
-# Nathan's strix-halo-llamacpp Vulkan work moved); it bundles Mesa RADV, so the host needs only the amdgpu driver.
+# Image: ghcr.io/halo-box/strix-llama.cpp:server-vulkan, the Vulkan build of github.com/halo-box/strix-llama.cpp (the
+# Strix Halo fork that absorbed the older strix-halo-llamacpp work); it bundles Mesa RADV, so the host needs only the amdgpu driver.
 # The GGUF: $QWEN36_GGUF, else a known models folder, else the copy Strata's Docker volume already downloaded (no move).
 #   QWEN36_IMAGE, QWEN36_CTX (default 131072), QWEN36_SPEC (draft tokens, default 2), QWEN36_BATCH (default 2048),
 #   PORT (default 8080), QWEN36_ALT_MODEL (serve another GGUF file name, for the 27B/Flash-Next llama.cpp route)

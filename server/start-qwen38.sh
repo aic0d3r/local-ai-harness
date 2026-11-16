@@ -15,9 +15,8 @@
 # template supports it; the flag makes the server retain instead of strip). Also available:
 # --reasoning-budget N as a server-side hard thinking cap (-1 unrestricted, 0 off, N>0 cap).
 #
-# Requires: Nathan's strix-halo-llamacpp v0.6.5+ (DFlash2); v0.7.4.1 recommended
-# and bench-validated on both models (2026-09-06: 27B trio low/med/high ran on the
-# v0.7.4.1 portable payload at parity — 16/13/15 static, 38-min artifact-complete high)
+# Requires: halo-box/strix-llama.cpp (DFlash2 and the ROCmFPx quant types live there now); validate the
+# model trio again on whatever build you install (2026-09-06: 27B trio low/med/high at parity — 16/13/15 static, 38-min artifact-complete high)
 # (greedy repeatability: stale-KV between requests + a top-k race above ~2k prompt
 # tokens, both also in upstream, fixed there; throughput at parity). The bundled
 # RADV from the v0.7.x payload beats system Mesa on dense prefill — point

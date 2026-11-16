@@ -14,7 +14,7 @@
 # 14/19 vs 16/19) — this flag is burn-out protection, not a quality knob.
 #
 # No template file: Flash-Next uses its embedded chat template (--jinja handles the
-# kwargs). Engine: Nathan's strix-halo-vulkan releases, validated v0.6.11 through
+# kwargs). Engine: halo-box/strix-llama.cpp (the Strix Halo fork: Vulkan or ROCm release zips, or the
 # v0.7.4.1 (0.7.4+ = throughput parity + greedy repeatability fixes; the release
 # payload's bundled RADV beats system Mesa on prefill).
 #

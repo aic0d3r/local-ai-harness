@@ -12,7 +12,7 @@ llama.cpp).
 | stack | what | when |
 |---|---|---|
 | **halogen** (recommended) | NPU+GPU engine, Qwen3.8 Flash-Next (125B) from a local checkpoint, no network needed to run | just works, **262k ctx** x 4 slots |
-| **llama.cpp (Vulkan)** | Nathan's builds, full control, DFlash2/MTP spec decode, vision, local GGUFs, no network needed to run, **256k ctx** max | tuning and the **27B** runs — see [the llama.cpp path](LLAMACPP.md) |
+| **llama.cpp (halo-box fork, Vulkan)** | Docker image via server/start-qwen36.sh (nothing to build), release zips or source; full control, MTP/DFlash2 spec decode, vision, local GGUFs, no network needed to run, **256k ctx** max | tuning and the **27B** runs — see [the llama.cpp path](LLAMACPP.md) |
 
 **Which engine for which model (Strix Halo).** Setup asks the model first and takes the first usable engine of its route
 (`routes` in `config/profiles.json`, each with the numbers behind the order and whether they were measured here or only reported):

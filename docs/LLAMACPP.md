@@ -1,6 +1,7 @@
 # llama.cpp (Vulkan) Setup for Qwen3.8 on Strix Halo
 
-The alternative engine for Strix Halo: Nathan's Vulkan llama.cpp builds instead of the halogen container.
+The alternative engine for Strix Halo: [halo-box/strix-llama.cpp](https://github.com/halo-box/strix-llama.cpp), the
+Strix Halo Vulkan/ROCm fork, instead of the halogen container.
 Full control over flags, drafter and GGUF quant, **256k ctx** max, and the way to go for the
 **27B** runs. You lose every NPU feature — see [Engines](ENGINES.md).
 
@@ -8,9 +9,8 @@ Use `./setup.sh --no-halogen` for the pi wiring on this path, or wire it by hand
 
 ## 1. Engine
 
-[Nathanw1014/strix-halo-llamacpp](https://github.com/Nathanw1014/strix-halo-llamacpp) v0.7.4.1+
-(fixed stale-KV and a top-k race that were in upstream too); the Vulkan work has migrated to
-[halo-box/strix-llama.cpp](https://github.com/halo-box/strix-llama.cpp), which also publishes container images:
+[halo-box/strix-llama.cpp](https://github.com/halo-box/strix-llama.cpp) publishes both routes: release zips
+(`llama-b<build>-ubuntu-vulkan-x64.zip`, `-ubuntu-rocm-gfx1151-x64.zip`, ROCm 10.1 bundled) and container images --
 `ghcr.io/halo-box/strix-llama.cpp:server-vulkan` (1.3 GB, Mesa RADV bundled, entrypoint `/app/llama-server`) and
 `:server-rocm`. `server/start-qwen36.sh` runs the Vulkan image for Qwen3.6-35B-A3B, so nothing is built here:
 
@@ -23,8 +23,8 @@ prefill with the model's own MTP head** (`--spec-type draft-mtp --spec-draft-n-m
 59.8 / 1,017 for the same model without the draft, 51.7 / 601 on the Strata image, and gufo cannot load the
 architecture at all. `docs/BENCHMARKS.md` has the full table.
 
-Build from source if you want to change the build itself (the portable payload leaves 6-24% decode on the table on
-the older 27B runs; the container above measures faster than the local `qwen4exp` build did here).
+Build from source if you want to change the build itself (halo-box's zips and the image above ship their own Mesa; the
+container measured faster than the local `qwen4exp` build did here).
 
 ## 2. Models
 
@@ -43,7 +43,7 @@ the older 27B runs; the container above measures faster than the local `qwen4exp
   [unsloth UD-IQ4_XS](https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF) (3 shards) +
   `mmproj-F16.gguf`
 - **Aux sidecar** — [inclusionAI/Ling-3.0-tiny](https://huggingface.co/inclusionAI/Ling-3.0-tiny)
-  Q4_K_M (runs happily on the portable v0.7.6.1 payload). This is the server every ling-tiny
+  Q4_K_M (runs happily on any halo-box release zip or the container image). This is the server every ling-tiny
   extension talks to on `:8090`; it is a GPU model, not an NPU one.
 - **Template (27B)** — vendored in `config/template/` (`sharp-v22.3.2.jinja`). Upstream:
   [peculiar-ragdoll/Qwen-Sharp-Chat-Templates](https://huggingface.co/peculiar-ragdoll/Qwen-Sharp-Chat-Templates)
@@ -53,9 +53,9 @@ the older 27B runs; the container above measures faster than the local `qwen4exp
 One big model at a time on this APU; a second 27B-class server means device-lost.
 
 ```sh
-ENGINE_DIR=... MODEL_DIR=... server/start-flashnext.sh   # daily driver
-ENGINE_DIR=... MODEL_DIR=... server/start-qwen38.sh      # 256k / low-memory
-ENGINE_DIR=... MODEL_DIR=... server/start-ling-tiny.sh   # sidecar (second terminal)
+ENGINE_DIR=/path/to/halo-box/build/bin MODEL_DIR=... server/start-flashnext.sh   # daily driver
+ENGINE_DIR=/path/to/halo-box/build/bin MODEL_DIR=... server/start-qwen38.sh      # 256k / low-memory
+ENGINE_DIR=/path/to/halo-box/build/bin MODEL_DIR=... server/start-ling-tiny.sh   # sidecar (second terminal)
 ```
 
 **GPU memory** — the ~91 GB model lives in the GTT heap, so size it: boot args
