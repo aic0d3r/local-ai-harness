@@ -14,6 +14,11 @@
 #   PORT (default 8080), QWEN36_ALT_MODEL (serve another GGUF file name, for the 27B/Flash-Next llama.cpp route)
 #   --print-model   the GGUF it serves (empty when none is on disk)
 #   --print-image   the image it runs
+#   --print-lora    the abliteration LoRA path (Flash-Next only; may not exist yet)
+# Qwen3.8-Flash-Next instead when the wizard's saved model is flash-next (harness-model; LLAMACPP_FAMILY overrides): the
+# stock Unsloth UD-Q4_K_XL that gufo and Strata share (scripts/download-stock.sh), and with the saved weights answer
+# "abliterated" (LLAMACPP_WEIGHTS overrides) huihui's v2 abliteration as a 2.3 MB rank-1 LoRA on top (--lora,
+# scripts/download-abliterated.sh llamacpp) instead of a second ~112 GB model. Not measured here yet: ./harness tune.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 XDG=${XDG_CACHE_HOME:-$HOME/.cache}
@@ -32,7 +37,34 @@ find_gguf() {
     [ -n "$d" ] && [ -f "$d/$GGUF_NAME" ] && { echo "$d/$GGUF_NAME"; return; }
   done
 }
-GGUF=$(find_gguf)
+AGENT_DIR=${PI_CODING_AGENT_DIR:-${PI_HOME:-$HOME/.pi}/agent}
+FAMILY=${LLAMACPP_FAMILY:-$(cat "$AGENT_DIR/harness-model" 2>/dev/null)}  # no saved answer: Qwen3.6, this script's own model
+EXTRA=()
+if [ "$FAMILY" = flash-next ]; then
+  GGUF=$(GUFO_WEIGHTS=stock GUFO_QUANT=UD-Q4_K_XL bash "$HERE/start-gufo-flashnext.sh" --print-model)  # .../UD-Q4_K_XL/<shard 1>
+  ROOT=$(dirname "$(dirname "$GGUF")")
+  LORA=$ROOT/HUIHUI-V2-Qwen3.8-Flash-Next-LoRA-F32.gguf
+  WEIGHTS=${LLAMACPP_WEIGHTS:-$(cat "$AGENT_DIR/harness-weights" 2>/dev/null)}
+  case "${1:-}" in --print-model) echo "$GGUF"; exit 0 ;; --print-lora) echo "$LORA"; exit 0 ;; --print-image) echo "$IMAGE"; exit 0 ;; esac
+  # the whole quant, not just shard 1 (it is tiny and lands first)
+  N=$(echo "$GGUF" | sed -E 's/.*-of-0*([0-9]+)\.gguf/\1/'); i=1
+  while [ "$i" -le "$N" ]; do
+    [ -f "${GGUF/-00001-of-/-0000$i-of-}" ] || { echo "stock Flash-Next shard $i of $N missing beside $GGUF - get it: scripts/download-stock.sh" >&2; exit 1; }
+    i=$((i + 1))
+  done
+  if [ "$WEIGHTS" = abliterated ]; then
+    [ -f "$LORA" ] || { echo "abliteration LoRA missing: $LORA - get it: scripts/download-abliterated.sh llamacpp   (or run stock: LLAMACPP_WEIGHTS=stock $0)" >&2; exit 1; }
+    EXTRA+=(--lora "/models/$(basename "$LORA")")
+  fi
+  # Flash-Next burns its whole output budget thinking without a server default (server/start-flashnext.sh); pi sends its own
+  # shortcut: no MTP draft and no vision projector yet (neither checked with this image on Flash-Next), add them after ./harness tune
+  EXTRA+=(--reasoning-effort medium --reasoning-budget 2048)
+  GGUF_NAME=${GGUF#"$ROOT"/}; MOUNT=$ROOT; NAME=qwen3.8-flash-next; CTX=${QWEN36_CTX:-262144}; SPEC_ARGS=()
+else
+  GGUF=$(find_gguf); MOUNT=$(dirname "$GGUF"); NAME=${QWEN36_NAME:-qwen36-q4}
+  SPEC_ARGS=(--spec-type draft-mtp --spec-draft-n-max "$SPEC")
+  [ "${1:-}" = --print-lora ] && exit 0
+fi
 case "${1:-}" in
   --print-model) echo "$GGUF"; exit 0 ;;
   --print-image) echo "$IMAGE"; exit 0 ;;
@@ -53,11 +85,11 @@ exec docker run --rm -i --name "llamacpp-$PORT" \
   --device /dev/kfd --device /dev/dri \
   --group-add "${RENDER_GID}" --group-add "${VIDEO_GID}" \
   --security-opt seccomp=unconfined --ipc=host --ulimit memlock=-1:-1 \
-  -v "$(dirname "$GGUF")":/models:ro \
+  -v "$MOUNT":/models:ro \
   -p "127.0.0.1:$PORT:$PORT" \
   "$IMAGE" \
-    -m "/models/$GGUF_NAME" --alias "${QWEN36_NAME:-qwen36-q4}" \
+    -m "/models/$GGUF_NAME" --alias "$NAME" \
     -c "$CTX" -np 1 -fa on -ctk q8_0 -ctv q8_0 \
-    --spec-type draft-mtp --spec-draft-n-max "$SPEC" \
+    "${SPEC_ARGS[@]}" "${EXTRA[@]}" \
     -b "$BATCH" -ub "$BATCH" \
     --host 0.0.0.0 --port "$PORT" --jinja

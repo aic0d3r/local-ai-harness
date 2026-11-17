@@ -308,6 +308,22 @@ Refusal-removed builds. Flash-Next: all derived from `orcarouter/Qwen3.8-Flash-N
 `Huihui-Qwen3.8-27B-abliterated-UD-{Q4,Q8}_K_XL.gguf` @ `c4b90228`, fetched by `scripts/download-qwen38-27b.sh` next to the
 stock files; it keeps Unsloth's vision projector and z-lab's DFlash2 draft (abliteration changes only the language weights).
 
+**llama.cpp: abliterated as a 2.3 MB LoRA, no second model.** With `flash-next` as the saved model, `server/start-qwen36.sh`
+serves the stock Unsloth UD-Q4_K_XL that gufo and Strata share, and the abliterated answer adds
+`--lora HUIHUI-V2-Qwen3.8-Flash-Next-LoRA-F32.gguf`
+([nazeshinjite/Qwen3.8-Flash-Next-Abliterated-LoRA](https://huggingface.co/nazeshinjite/Qwen3.8-Flash-Next-Abliterated-LoRA)
+@ `dee8e017`, sha256 `349022ca...`; `scripts/download-abliterated.sh llamacpp` puts it beside the stock folder). This is
+a different edit than the orca builds above: huihui's v2, one refusal direction removed from 96 dense writers, routed experts
+untouched; its card reports it on par with huihui's full v2 GGUF. gufo (issue gufo-org/gufo#1247), Strata and halogen
+cannot load adapters. No MTP draft and no vision projector on this route yet.
+**Measured here (2026-11-17, halo-box image `27ffff9f`, 65536 ctx, shards on a USB exFAT drive):** loads in ~2.5 min,
+`/lora-adapters` lists it at scale 1.0. Six prompts stock refuses (phishing, hotwiring, lockpicking, keylogger, fake
+ID, harassment), greedy, thinking off: **6/6 refused at LoRA scale 0, 0/6 at scale 1** on the same loaded model;
+`bench/refusal-canary.py` 0/19. Speed, 8K prefill + 400-token decode: **912 t/s / 24.8 t/s with the LoRA, 1,146 /
+25.9 without** - the runtime LoRA costs ~20% prefill and ~4% decode. Far behind gufo (40 t/s) and halogen (65 t/s)
+without an MTP draft, so this route is for "abliterated without a second model", not for speed. The 96 targets are
+Q8_0 in Unsloth's file, so merging the LoRA offline would remove that prefill cost.
+
 **Plug and play:** `./setup.sh` asks "Default model weights?" after you pick halogen, gufo or Strata
 (change it later with `./harness config` -> weights). The answer is saved in
 `~/.pi/agent/harness-weights` (`stock` or `abliterated`). Both launchers read it, the wizard and

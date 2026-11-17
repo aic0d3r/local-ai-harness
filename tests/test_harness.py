@@ -1,5 +1,5 @@
 """python3 tests/test_harness.py - wizard core against a mock OpenAI server (no real engine needed)."""
-import json, os, re, subprocess, sys, tempfile, threading, time, types, http.server
+import json, os, re, shutil, subprocess, sys, tempfile, threading, time, types, http.server
 
 AGENT = tempfile.mkdtemp()
 os.environ["PI_CODING_AGENT_DIR"] = AGENT
@@ -194,6 +194,18 @@ assert subprocess.run(["bash", lc, "--print-model"], capture_output=True, text=T
 none_env = dict(os.environ, QWEN36_GGUF="", QWEN36_DIR="/nonexistent", HOME="/nonexistent")
 assert subprocess.run(["bash", lc, "--print-model"], capture_output=True, text=True, env=none_env).stdout.strip() == ""
 assert "not on disk" in subprocess.run(["bash", lc], capture_output=True, text=True, env=none_env).stderr
+# Flash-Next on llama.cpp: the stock GGUF gufo shares, abliterated = a LoRA beside it; says which file is missing
+fn_dir = tempfile.mkdtemp()
+fn_env = dict(os.environ, LLAMACPP_FAMILY="flash-next", ENGINE_DIR=fn_dir, LLAMACPP_WEIGHTS="abliterated")
+assert subprocess.run(["bash", lc, "--print-lora"], capture_output=True, text=True, env=fn_env).stdout.strip() == f"{fn_dir}/HUIHUI-V2-Qwen3.8-Flash-Next-LoRA-F32.gguf"
+assert subprocess.run(["bash", lc, "--print-model"], capture_output=True, text=True, env=fn_env).stdout.strip().endswith("UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf")
+assert "shard 1 of 4 missing" in subprocess.run(["bash", lc], capture_output=True, text=True, env=fn_env).stderr
+os.makedirs(f"{fn_dir}/UD-Q4_K_XL")
+for i in range(1, 5):
+    open(f"{fn_dir}/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-0000{i}-of-00004.gguf", "w").close()
+assert "download-abliterated.sh llamacpp" in subprocess.run(["bash", lc], capture_output=True, text=True, env=fn_env).stderr
+assert subprocess.run(["bash", lc, "--print-lora"], capture_output=True, text=True, env=dict(fn_env, LLAMACPP_FAMILY="qwen36-q4")).stdout == ""
+shutil.rmtree(fn_dir)
 assert h.catalog_id("qwen3.8-flash-next-ud-q4_k_xl") == "flash-next" and h.catalog_id("qwen3.8-flash-next-iq3_xxs") == "flash-next-iq3_xxs"
 assert "weights" in h.choices_line("gufo") and "weights" in h.choices_line("halogen")  # Q4 has an abliterated build too
 assert h.hw_key("gufo", "m", "stock", "qwen38-27b") != h.hw_key("gufo", "m", "abliterated", "qwen38-27b") == h.hw_key("gufo", "m", "abliterated", "qwen38-27b")

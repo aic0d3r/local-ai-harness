@@ -16,7 +16,7 @@
                  "script": "server/start-gufo-flashnext.sh", "loses": "NPU tools (guard, triage, dedup)",
                  "update": { "have": "pin server/start-gufo-flashnext.sh DEFAULT_VERSION GUFO_VERSION", "latest": "ghcr:gufo-org/toolboxes/gufo-runtime",
                              "how": "scripts/upgrade-gufo.sh (restarts gufo, checks it, pins on success, rolls back on failure)" } },
-    "llamacpp": { "port": 8080,  "probe": "/health",     "provider": "llamacpp","npu": false, "managed": false, "loses": "NPU tools (guard, triage, dedup)", "note": "llama-server in Docker (halo-box Strix Halo image, Vulkan); server/start-qwen36.sh serves Qwen3.6-35B-A3B with its MTP draft. See docs/LLAMACPP.md", "script": "server/start-qwen36.sh",
+    "llamacpp": { "port": 8080,  "probe": "/health",     "provider": "llamacpp","npu": false, "managed": false, "loses": "NPU tools (guard, triage, dedup)", "note": "llama-server in Docker (halo-box Strix Halo image, Vulkan); server/start-qwen36.sh serves Qwen3.6-35B-A3B with its MTP draft, or Flash-Next (stock GGUF, abliterated = + LoRA) when that is the saved model. See docs/LLAMACPP.md", "script": "server/start-qwen36.sh",
                  "update": { "have": "/props build_info", "latest": "gh:ggml-org/llama.cpp", "how": "rebuild or download llama.cpp {new}" } },
     "vllm":     { "port": 8000,  "probe": "/v1/models",  "provider": "vllm",    "npu": false, "managed": false, "loses": "NPU tools (guard, triage, dedup)",
                  "update": { "have": "/version version", "latest": "gh:vllm-project/vllm", "how": "pip install -U vllm (or pull the new vllm image)" } },
@@ -96,7 +96,7 @@
   },
   "catalog": {
     "_doc": "Models the wizard can set up, one saved answer (harness-model). engines = who can load it; halogen always serves its own Flash-Next checkpoint and ignores the answer. strata = [family, size] for Strata's `setup.sh --family F --model SIZE` (it downloads the files itself); run = the start script that setup writes; ram_gb = RAM Strata's docs say to plan for (experts + ~10 GB); download_gb = what setup fetches. Sizes are Strata's MODELS.md / DETAILS.md and the Hugging Face repos; none of the non-default rows has run here.",
-    "flash-next": { "label": "Qwen3.8-Flash-Next, UD-Q4_K_XL (stock: Unsloth's; abliterated: brainnxdomain's Uncensored-Gufo build, unofficial on Strata)", "engines": ["gufo", "strata"] },
+    "flash-next": { "label": "Qwen3.8-Flash-Next, UD-Q4_K_XL (stock: Unsloth's; abliterated: brainnxdomain's Uncensored-Gufo build, unofficial on Strata; llama.cpp: stock + huihui's v2 abliteration LoRA, 2.3 MB)", "engines": ["gufo", "strata", "llamacpp"] },
     "flash-next-iq3_s":   { "label": "Qwen3.8-Flash-Next, ISTA IQ3_S (matches the full model on Strata's tests)", "engines": ["strata"], "strata": ["qwen", "IQ3_S"],   "run": "run-iq3_s.sh",   "ram_gb": 60, "download_gb": 84 },
     "flash-next-iq3_xxs": { "label": "Qwen3.8-Flash-Next, ISTA IQ3_XXS", "engines": ["strata"], "strata": ["qwen", "IQ3_XXS"], "run": "run-iq3_xxs.sh", "ram_gb": 53, "download_gb": 76 },
     "flash-next-iq2_xs":  { "label": "Qwen3.8-Flash-Next, ISTA IQ2_XS", "engines": ["strata"], "strata": ["qwen", "IQ2_XS"],  "run": "run-iq2_xs.sh",  "ram_gb": 46, "download_gb": 68 },

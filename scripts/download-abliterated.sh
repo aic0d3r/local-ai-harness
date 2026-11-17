@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Fetch the abliterated weights the launchers use when the saved weights choice is "abliterated"
 # (docs/ENGINES.md#abliterated-models). Resumable; asks first unless --yes; exits 1 on abort/failure.
-#   scripts/download-abliterated.sh halogen|gufo [--yes]
+#   scripts/download-abliterated.sh halogen|gufo|llamacpp [--yes]
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 . "$REPO/scripts/lib-hf.sh"
@@ -21,7 +21,13 @@ case "$ENG" in
     # pinned to the commit current on 2026-09-30 (a third-party repo: a later push must not change what runs); GUFO_ABLITERATED_REV overrides
     ARGS=(brainnxdomain/Qwen3.8-Flash-Next-Uncensored-Gufo-GGUF --include '*.gguf' --revision "${GUFO_ABLITERATED_REV:-c706902043613af036f996682ce25b7c12270d16}")
     ROOT=$(dirname "$DIR"); MTP=mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf ;;
-  *) echo "usage: $0 halogen|gufo [--yes]" >&2; exit 1 ;;
+  llamacpp)
+    # huihui's v2 abliteration as a rank-1 LoRA over the stock GGUF (server/start-qwen36.sh loads it with --lora)
+    WANT=$(LLAMACPP_FAMILY=flash-next bash "$REPO/server/start-qwen36.sh" --print-lora)
+    DIR=$(dirname "$WANT"); GB=1
+    # pinned (third-party repo: a later push must not change what runs); LLAMACPP_LORA_REV overrides
+    ARGS=(nazeshinjite/Qwen3.8-Flash-Next-Abliterated-LoRA "$(basename "$WANT")" --revision "${LLAMACPP_LORA_REV:-dee8e0177e4e61efdaa3fb7128c40d6ab7a085d4}") ;;
+  *) echo "usage: $0 halogen|gufo|llamacpp [--yes]" >&2; exit 1 ;;
 esac
 # gufo also needs the shared MTP head beside the weights folder (the launcher's --mtp-model)
 [ -f "$WANT" ] && { [ "$ENG" != gufo ] || [ -f "$ROOT/$MTP" ]; } && { echo "  already there: $WANT"; exit 0; }

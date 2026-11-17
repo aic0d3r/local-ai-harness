@@ -997,7 +997,8 @@ def halogen_ckpt():
 
 # ---------- weights (stock / abliterated), one saved answer the halogen and gufo launchers read ----------
 WEIGHTS = os.path.join(AGENT, "harness-weights")
-WEIGHTS_ENGINES = {"halogen": ("--print-ckpt", 89), "gufo": ("--print-model", 112), "osmos": ("--print-weights", 1)}  # launcher flag, download GB
+WEIGHTS_ENGINES = {"halogen": ("--print-ckpt", 89), "gufo": ("--print-model", 112), "osmos": ("--print-weights", 1),
+                   "llamacpp": ("--print-lora", 1)}  # launcher flag, download GB (llamacpp: a 2.3 MB LoRA over the stock GGUF)
 WEIGHTS_ASK = (*WEIGHTS_ENGINES, "strata")  # strata: the answer picks which model scripts/install-strata.sh installs and starts
 WEIGHTS_LABELS = {"stock": "stock Qwen3.8-Flash-Next (default)",
                   "abliterated": "abliterated (refusals removed; docs/ENGINES.md)"}
@@ -1170,7 +1171,8 @@ def plan_start(engine, running, ask_start=True):
     # gufo and Strata share one stock GGUF (Unsloth's UD-Q4_K_XL, latest Dynamic): fetch it once, whichever comes first.
     # gufo may follow the hardware pick to a smaller quant; Strata only runs UD-Q4_K_XL.
     q = saved_quant(engine)
-    if engine in ("gufo", "strata") and not own and weights_pref() == "stock" and not stock_ready(q):
+    # llama.cpp needs the stock GGUF for both answers: abliterated is a LoRA on top of it
+    if (engine in ("gufo", "strata") and weights_pref() == "stock" or engine == "llamacpp") and not own and not stock_ready(q):
         free = shutil.disk_usage(os.path.expanduser("~")).free // 2**30
         if not ask_yn(f"Download the stock weights? Unsloth {q}, "
                       f"{'shared by gufo and Strata' if q == DEFAULT_QUANT else 'picked for this hardware'}; "
@@ -2244,11 +2246,11 @@ def cmd_config(a):
             notes.append(f"{eng} runs {engine_title(eng, p.get('model')).split(' · ', 1)[1]} only; pick gufo or Strata under engine to choose a model")
         if eng == "osmos" and (weights_file("osmos") != "stock") != (weights_pref() == "abliterated"):  # osmos.json = its last start
             notes.append(f"! osmos was last started on the other weights; {weights_pref()} applies on its next start")
-        no_abl = eng in ("gufo", "strata") and engine_model(eng) not in ABLITERATED
+        no_abl = eng in ("gufo", "strata", "llamacpp") and engine_model(eng) not in ABLITERATED
         items = {
             f"engine        {engine_title(eng, p['model']) if eng else '-'}": "engine",
             **({f"model         {catalog().get(model_pref(), {}).get('label', model_pref()).split(' (')[0]}": "model"}
-               if eng in ("gufo", "strata") else {}),  # only those two load the model answer
+               if eng in ("gufo", "strata", "llamacpp") else {}),  # only these load the model answer
             f"weights       {'stock' if no_abl else weights_pref()}  ({'this model has no abliterated build' if no_abl else 'every engine, next start'})": "weights",
             f"agent         {'none (engine only)' if no_pi() else 'pi'}  (extensions, providers, MCP)": "agent",
             f"sidecar       {'on' if sc else 'off'}  (ling-tiny, ~8 GiB GPU memory)": "sidecar",
