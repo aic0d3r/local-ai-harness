@@ -8,6 +8,9 @@
 ### Added
 - Flash-Next on llama.cpp (halo-box image), abliterated without a second model: with `flash-next` as the saved model `server/start-qwen36.sh` serves the stock Unsloth UD-Q4_K_XL gufo and Strata share, and the abliterated weights answer loads huihui's v2 abliteration as a 2.3 MB rank-1 LoRA (`--lora`, `scripts/download-abliterated.sh llamacpp`, pinned and sha256-checked) instead of a ~112 GB download. Measured here: 6/6 refusals at LoRA scale 0 vs 0/6 at scale 1 on the same model; 912 t/s prefill (8K) and 24.8 t/s decode with the LoRA, 1,146 / 25.9 without. No MTP draft or vision on this route yet. See docs/ENGINES.md#abliterated-models.
 
+### Changed
+- Qwen3.8-27B engine order now rests on a run here instead of Talus's (2026-11-18, `bench-v1`, UD-Q4_K_XL + DFlash2): gufo 40.2 t/s code decode / 464 t/s prefill at 8K vs halo-box llama.cpp 34.0 / 413, even past ~8K context. gufo stays first. halo-box's own recipe flags (7 adaptive drafts, ub 2048, q8_0 KV) were slower on this bench, so `start-qwen38.sh` keeps 4 drafts. harness-hub's pi-adapted 27B LoRA was tried and not added: it matched stock on a small pi task set (docs/ENGINES.md).
+
 ## 2.2.0 - 2026-11-15
 
 ### Added

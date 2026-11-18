@@ -17,8 +17,17 @@ llama.cpp).
 **Which engine for which model (Strix Halo).** Setup asks the model first and takes the first usable engine of its route
 (`routes` in `config/profiles.json`, each with the numbers behind the order and whether they were measured here or only reported):
 Flash-Next: halogen (NPU + 110 GB RAM) > gufo > Strata; Qwen3.8-27B: gufo (DFlash2 draft) > llama.cpp; DeepSeek-V4.1-Flash: osmos.
-The 27B order rests on another project's same-desktop run (Talus v0.1.3: gufo 49 t/s on code, llama.cpp 45), not on a run here;
-re-measure with `./harness tune` before moving it.
+The 27B order is measured here (2026-11-18, `bench-v1`, UD-Q4_K_XL + DFlash2, 262k ctx, back to back): gufo 0.32.0 decodes
+40.2 t/s code / 30.2 prose / 28.0 at 8K / 21.6 at 32K and prefills 453-464 (401 at 32K); halo-box llama.cpp with
+`start-qwen38.sh`'s flags (4 drafts, ub 4096, f16 KV) 34.0 / 27.9 / 27.0 / 23.0 and 408-413 (360). halo-box's own 27B recipe
+flags (7 adaptive drafts, ub 2048, q8_0 KV, `--no-spec-draft-backend-sampling`) were slower on this bench (30.8 code,
+23.1 prose; prefill +3-5%). gufo stays first; halo-box is a close fallback that catches up past ~8K.
+
+**harness-hub/Qwen3.8-27B-pi-adapted (pi RL LoRA): tried, not shipped.** Runs on llama.cpp only (gufo has no LoRA
+loading): 319 MB GGUF LoRA over the stock 27B, no decode or draft-acceptance cost. On 6 small bug-fix tasks under plain
+pi (hidden tests, 1-3 runs per arm) it matched stock: thinking off 15/18 for both, thinking on 6/6 and 12/12; thinking
+off failed the same edge-case task every time for both, so the card's "thinking-level accuracy without thinking" did
+not show. Its gains are claimed on long SWE-bench-style tasks, not run here.
 
 ## Strata: the pick for NVIDIA and AMD desktop GPUs
 
