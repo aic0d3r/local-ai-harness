@@ -69,7 +69,8 @@ try:
     h.pick_engine({"engines": []}, True, "gufo")
     raise AssertionError("declined start must exit")
 except SystemExit as e:
-    assert "gufo is not answering" in str(e)
+    assert "gufo not started" in str(e)
+assert h.pick_engine({"engines": []}, True, "gufo", esc=h.BACK) == (h.BACK, None)  # ./harness config: back, not exit
 h.plan_start = real_plan
 assert h.pick_engine({"engines": []}, True, "vllm") == ("vllm", None)  # no launcher: bring_up prints how to start it
 h.PROFILES["engines"]["gufo"]["port"] = gport
@@ -229,6 +230,11 @@ open(h.MODEL_FILE, "w").write("qwen38-27b-q8\n")
 h.choose = lambda q, o, y, esc=None, notes=(): seen.clear() or seen.extend(o) or next(x for x in o if x.startswith("abliterated"))
 assert h.ask_weights("gufo", back=True) is True and "abliterated UD-Q8_K_XL (huihui-ai" in " ".join(seen), seen
 assert h.abl_model("qwen36-q4") == "flash-next" and h.abl_model("qwen38-27b") == "qwen38-27b-q8"
+# llama.cpp on Qwen3.6: no abliterated build, so the menu offers the switch to Flash-Next, not a Qwen3.6 that does not exist
+open(h.MODEL_FILE, "w").write("qwen36-q4\n")
+h.choose = lambda q, o, y, esc=None, notes=(): seen.clear() or seen.extend(o) or o[0]
+h.ask_weights("llamacpp", back=True)
+assert any("its only build" in x for x in seen) and any("switch to Qwen3.8-Flash-Next" in x for x in seen), seen
 h.choose, h.ask_yn = real_choose, real_yn
 h.sys.stdin = real_stdin
 os.remove(h.WEIGHTS)  # back to never asked, as the tests below expect

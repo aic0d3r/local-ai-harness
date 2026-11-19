@@ -70,8 +70,7 @@
       "label": "Qwen3.8-27B (dense, vision)", "short": "dense, vision",
       "model": "qwen38-27b",
       "engines": [
-        {"engine": "gufo", "why": "40 t/s decode on code, ~460 t/s prefill at 8K on UD-Q4_K_XL with its DFlash2 draft (measured); Q8 31 t/s / 380"},
-        {"engine": "llamacpp", "why": "fallback: 34 t/s decode on code, ~410 t/s prefill at 8K, even with gufo past ~8K context (measured)"}
+        {"engine": "gufo", "why": "40 t/s decode on code, ~460 t/s prefill at 8K on UD-Q4_K_XL with its DFlash2 draft (measured); Q8 31 t/s / 380"}
       ]
     },
     "deepseek": {

@@ -205,6 +205,13 @@ for line in out.splitlines():
 assert "(Enter = yes, Esc cancels)" in out, out
 print("ok: a long question wraps inside 40 columns")
 
+# inside ./harness config, Esc at a yes/no answers No (back to the menu) instead of quitting everything
+PY_YN_MENU = PY_YN.replace("print(", "h.IN_MENU = True; print(", 1)
+rc, out = pty_run([sys.executable, "-c", PY_YN_MENU, os.path.join(ROOT, "setup"), "Restart gufo?"], 80, keys=(b"\x1b",),
+                  env_extra={"PI_CODING_AGENT_DIR": "/tmp/prompt-test-agent"})
+assert rc == 0 and "ANSWER False" in out and "Esc = no" in out, (rc, out)
+print("ok: Esc at a yes/no in the settings menu answers No")
+
 # a maximized window must not give very long lines: the wrap stops at 78 columns even in a 200-column terminal
 rc, out = pty_run([sys.executable, "-c", PY_YN, os.path.join(ROOT, "setup"), long_q], 200, keys=(b"\r",),
                   env_extra={"PI_CODING_AGENT_DIR": "/tmp/prompt-test-agent"})
