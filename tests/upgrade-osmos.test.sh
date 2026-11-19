@@ -48,7 +48,7 @@ rel() { echo "$1" > VERSION; [ -n "${2:-}" ] && echo "$2" > BROKEN; [ -n "${3:-}
 rel 0.1.0; rel 0.2.0; git checkout -q -b broken; rel 0.3.0 1; git checkout -q main; git checkout -q -b conflict; rel 0.4.0 "" "release-edit"; git checkout -q main
 git clone -q --bare "$T/src" "$T/origin.git"
 git clone -q "$T/origin.git" "$T/libosmos"; cd "$T/libosmos" && git checkout -q v0.1.0 && git checkout -q -B main v0.1.0
-mkdir -p "$T/models/osmos-evo-a"; echo '{}' > "$T/models/osmos-evo-a/osmos.json"
+mkdir -p "$T/models/osmos-evo"; echo '{}' > "$T/models/osmos-evo/osmos.json"
 export OSMOS_DIR="$T/libosmos" OSMOS_MODELS="$T/models" OSMOS_PORT=$PORT OSMOS_POLL_S=1
 export FAKE="$T/fake_api.py"
 up() { (cd "$OSMOS_DIR" && make -s serve api >/dev/null) && setsid nohup bash "$REPO/server/start-osmos.sh" > "$T/start.log" 2>&1 < /dev/null & for _ in $(seq 1 30); do curl -sf -m1 "localhost:$PORT/health" >/dev/null && return 0; sleep 0.3; done; return 1; }
