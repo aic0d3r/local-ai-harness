@@ -1356,7 +1356,8 @@ def pick_engine(d, yes, want=None, on_pick=None, esc=None):
             sys.exit("no engine answering on the usual ports. Start one (see docs/ENGINES.md, or `./setup.sh --halogen auto`), then re-run.")
         return next(iter(sorted(running, key=lambda e: e != "halogen"))), None
     if not running:
-        print("No engine is running yet. Pick one: halogen, gufo, Strata and osmos can be started (and halogen or Strata installed) from here.")
+        print("\n".join(textwrap.wrap("No engine is running yet. Pick one: halogen, gufo, Strata and osmos can be started "
+                                      "(and halogen or Strata installed) from here.", term_width())))
     before_pref = model_pref()
     route = ask_route(esc)
     if route is BACK:
@@ -2270,7 +2271,7 @@ def cmd_config(a):
         sc = sidecar_pref() != "0"
         voice = bool(jget(EXTRAS, {}).get("voice"))
         eng = p.get("engine")
-        own = eng and eng not in ("gufo", "strata") and eng != CUSTOM  # serves its own model: the model answer is not its
+        own = eng and eng not in ("gufo", "strata", "llamacpp") and eng != CUSTOM  # serves its own model: the model answer is not its
         notes = []
         if eng and eng != CUSTOM:  # a row stays short (80 columns); the numbers go under the question
             notes.append(f"{eng} speed (./harness tune): {speed_text(eng, p.get('model')) or 'not measured yet'}")
@@ -2316,7 +2317,8 @@ def cmd_config(a):
                     open(MODEL_FILE, "w").write(to + "\n")
                     switch_now(eng)
                 else:
-                    print(f"  saved; {eng} stays on {short_model(engine_model(eng))} (stock) until you pick {short_model(to)} under model")
+                    print("\n".join(textwrap.wrap(f"  saved; {eng} stays on {short_model(engine_model(eng))} (stock) until you pick "
+                                                  f"{short_model(to)} under model", term_width(), subsequent_indent="    ")))
                 continue
             if changed is BACK or not changed or eng not in WEIGHTS_ASK:
                 continue
