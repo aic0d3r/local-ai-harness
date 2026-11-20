@@ -1,9 +1,12 @@
-# Inference engines: halogen, gufo, Strata, llama.cpp and the rest
+# Inference engines: halogen, gufo, Strata, strix-llama.cpp and the rest
 
 Any OpenAI-compatible server (or cloud provider) works with pi. Only Strix Halo was measured here. On Strix Halo,
-**halogen and gufo are the best options**. The harness can install and start halogen, gufo and Strata (`./setup.sh`,
-`./harness use`); for llama.cpp, vLLM, Ollama and LM Studio it detects what is running and wires pi to it, and you start
-them yourself. The NPU tools (guard, triage, dedup) ride on halogen's NPU sidecars and no other engine exposes them, so
+**halogen and gufo are the best options**. The harness can install and start halogen, gufo, Strata, osmos and
+strix-llama.cpp (`./setup.sh`, `./harness use`); for a plain llama.cpp `llama-server`, vLLM, Ollama and LM Studio it
+detects what is running and wires pi to it, and you start them yourself. strix-llama.cpp (engine id `llamacpp`) is
+[halo-box's Strix Halo fork](https://github.com/halo-box/strix-llama.cpp) in Docker and only recommended on Strix Halo;
+a llama-server on :8080 counts as it only when its `llamacpp-8080` container serves it, otherwise it is plain llama.cpp
+(engine id `llama-server`). The NPU tools (guard, triage, dedup) ride on halogen's NPU sidecars and no other engine exposes them, so
 on every other engine they are off; pi keeps working and the degradation is graceful but real (all measured on gufo /
 llama.cpp).
 
@@ -12,11 +15,11 @@ llama.cpp).
 | stack | what | when |
 |---|---|---|
 | **halogen** (recommended) | NPU+GPU engine, Qwen3.8 Flash-Next (125B) from a local checkpoint, no network needed to run | just works, **262k ctx** x 4 slots |
-| **llama.cpp (halo-box fork, Vulkan)** | Docker image via server/start-qwen36.sh (nothing to build), release zips or source; full control, MTP/DFlash2 spec decode, vision, local GGUFs, no network needed to run, **256k ctx** max | tuning and the **27B** runs — see [the llama.cpp path](LLAMACPP.md) |
+| **strix-llama.cpp (halo-box fork, Vulkan)** | Docker image via server/start-qwen36.sh (nothing to build), release zips or source; full control, MTP/DFlash2 spec decode, vision, local GGUFs, no network needed to run, **256k ctx** max | tuning and the **27B** runs — see [the llama.cpp path](LLAMACPP.md) |
 
 **Which engine for which model (Strix Halo).** Setup asks the model first and takes the first usable engine of its route
 (`routes` in `config/profiles.json`, each with the numbers behind the order and whether they were measured here or only reported):
-Flash-Next: halogen (NPU + 110 GB RAM) > gufo > Strata; Qwen3.8-27B: gufo (DFlash2 draft) > llama.cpp; DeepSeek-V4.1-Flash: osmos.
+Flash-Next: halogen (NPU + 110 GB RAM) > gufo > Strata; Qwen3.8-27B: gufo (DFlash2 draft) > strix-llama.cpp; DeepSeek-V4.1-Flash: osmos.
 The 27B order is measured here (2026-11-18, `bench-v1`, UD-Q4_K_XL + DFlash2, 262k ctx, back to back): gufo 0.32.0 decodes
 40.2 t/s code / 30.2 prose / 28.0 at 8K / 21.6 at 32K and prefills 453-464 (401 at 32K); halo-box llama.cpp with
 `start-qwen38.sh`'s flags (4 drafts, ub 4096, f16 KV) 34.0 / 27.9 / 27.0 / 23.0 and 408-413 (360). halo-box's own 27B recipe
@@ -246,7 +249,7 @@ for you). The list is `config/profiles.json` (`catalog`):
 |---|---|---|---|
 | `flash-next` (default) | gufo, Strata | UD-Q4_K_XL: stock = Unsloth's, abliterated = brainnxdomain's Uncensored-Gufo build (same tensor layout; unofficial on Strata) | 104 GiB download; Strata: ~88 GB RAM + VRAM for every expert |
 | `flash-next-iq3_s` / `-iq3_xxs` / `-iq2_xs` / `-q2_0` | Strata | ISTA-DASLab packs of the same model | 60 / 53 / 46 / 44 GB RAM, 84 / 76 / 68 / 66 GB download |
-| `qwen36-q4` | **llama.cpp** (Docker) | Qwen3.6-35B-A3B (small MoE, Unsloth GGUF with the MTP head); 85.3 t/s decode, 2,048 t/s prefill with the draft (measured) | 24 GB download or Strata's copy, 32 GB RAM |
+| `qwen36-q4` | **strix-llama.cpp** (Docker) | Qwen3.6-35B-A3B (small MoE, Unsloth GGUF with the MTP head); 85.3 t/s decode, 2,048 t/s prefill with the draft (measured) | 24 GB download or Strata's copy, 32 GB RAM |
 | `qwen36-q6` / `-q8` | Strata | Qwen3.6-35B-A3B, larger quants (also run on llama.cpp with `QWEN36_ALT_MODEL`) | 44 / 52 GB RAM, 34 / 39 GB download |
 | `qwen38-27b` | gufo | Qwen3.8 27B dense, UD-Q4_K_XL + DFlash2 draft, vision; abliterated = huihui-ai's UD-Q4_K_XL | 20 GB download |
 | `qwen38-27b-q8` | gufo | same, UD-Q8_K_XL target (gufo's other qualified 27B file; its benchmarks: ~16 t/s mixed decode with DFlash2 vs ~27 for Q4) | 34 GB download, shares the draft and projector; abliterated = huihui-ai's UD-Q8_K_XL (same size) |

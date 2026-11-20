@@ -28,15 +28,21 @@ class Mock(http.server.BaseHTTPRequestHandler):
 STRATA = GUFO = False
 srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Mock)
 threading.Thread(target=srv.serve_forever, daemon=True).start()
-h.PROFILES["engines"]["llamacpp"]["port"] = srv.server_port
+h.PROFILES["engines"]["llamacpp"]["port"] = h.PROFILES["engines"]["llama-server"]["port"] = srv.server_port
 
 assert h.model_profile("Qwen3-8B")["reasoning"] and h.model_profile("unknown-x")["maxTokens"] == 8192
 assert h.server_ctx(srv.server_port) == 32768
+# owned_by=llamacpp: strix-llama.cpp when our llamacpp-<port> container serves it, else a llama-server of your own
+real_strix, h.strix_container = h.strix_container, lambda port: False
+mine = [e["engine"] for e in h.detect()["engines"] if e["port"] == srv.server_port]
+assert mine == ["llama-server"], mine
+h.strix_container = lambda port: True
 d = h.detect()
-assert [e["engine"] for e in d["engines"]].count("llamacpp") == 1, d["engines"]
+assert [e["engine"] for e in d["engines"] if e["port"] == srv.server_port] == ["llamacpp"], d["engines"]
+h.strix_container = real_strix
 t = h.tune("llamacpp", "Qwen3-8B")
 assert t["prefill_tps"] > 0 and t["decode_tps"] > 0 and t["protocol"] == h.BENCH_ID and t["samples"] == 3, t
-assert h.engine_title("osmos", "osmos-osmos-evo") == "osmos · DeepSeek-V4.1-Flash (osmos-evo)" and h.engine_title("llamacpp", "Qwen3-8B") == "llamacpp · Qwen3-8B" and h.engine_title("halogen", "flash-next") == "halogen · Qwen3.8-Flash-Next (halogen .hgn)"
+assert h.engine_title("osmos", "osmos-osmos-evo") == "osmos · DeepSeek-V4.1-Flash (osmos-evo)" and h.engine_title("llamacpp", "Qwen3-8B") == "strix-llama.cpp · Qwen3-8B" and h.engine_title("halogen", "flash-next") == "halogen · Qwen3.8-Flash-Next (halogen .hgn)"
 assert h.engine_title("gufo", None) == "gufo · no model" and "/" not in h.engine_title("strata", "flash-next-iq3_s")
 q = h.bench("llamacpp", "Qwen3-8B", runs=2, quick=True)  # tune is this quick subset: one prefill cell, decode repeats
 assert set(q["median"]) == {"decode_code", "prefill_8192"} and q["quick"], q
@@ -373,6 +379,23 @@ asked.pop()
 h.sys.stdin = real_stdin
 for n, f in saved.items(): setattr(h, n, f)
 assert asked == [False, True], asked
+# Esc in the engine menu reached from the model menu goes back to the model menu; without a model menu it is the first menu
+saved = {n: getattr(h, n) for n in ("ask_route", "engine_menu", "choose_engine", "offer_recommendation", "ask_weights", "plan_start")}
+seq = iter([h.ENGINE_MENU, ("gufo", None)])
+h.ask_route = lambda esc=None: next(seq)
+h.engine_menu = lambda r, esc=None: h.BACK if esc is h.BACK else "halogen"
+assert h.choose_engine({}, None) == ("gufo", None)
+h.ask_route = lambda esc=None: None
+assert h.choose_engine({}, None) == ("halogen", None) and h.choose_engine({}, h.BACK) is h.BACK  # ./harness config: back to its menu
+# a start that did not happen (declined, or the box cannot run it) asks again instead of leaving the wizard
+picks, plans = iter([("gufo", None), ("halogen", None)]), iter([None, {"stop": None, "download": False}])
+h.choose_engine = lambda r, esc: next(picks)
+h.offer_recommendation, h.ask_weights = (lambda e: True), (lambda e, back=False: False)
+h.plan_start = lambda e, r, ask_start=True: next(plans)
+real_stdin, h.sys.stdin = h.sys.stdin, types.SimpleNamespace(isatty=lambda: True)
+assert h.pick_engine({"engines": []}, False) == ("halogen", {"stop": None, "download": False})
+h.sys.stdin = real_stdin
+for n, f in saved.items(): setattr(h, n, f)
 
 # model-first routes: the best engine this box can run, first usable wins
 R = h.PROFILES["routes"]
@@ -402,7 +425,11 @@ assert h.ask_route() == ("gufo", "flash-next") and h.model_pref() == "flash-next
 h.choose = lambda q, o, y, esc=None, notes=(): next(x for x in o if "DeepSeek" in x)
 assert h.ask_route() == ("osmos", None) and h.model_pref() == "flash-next-iq3_s"
 h.choose = lambda q, o, y, esc=None, notes=(): o[-1]
-assert h.ask_route() is None
+assert h.ask_route() is h.ENGINE_MENU
+# Esc in the quant menu returns to the model menu, not out of it
+asked_q = []
+h.choose = lambda q, o, y, esc=None, notes=(): asked_q.append(q) or (h.BACK if q.startswith("Which Qwen3.8-27B") and len(asked_q) == 2 else next(x for x in o if ("Q8" in x if "Which Qwen3.8-27B" in q else "27B" in x)))
+assert h.ask_route() == ("gufo", "qwen38-27b-q8") and [q.split("?")[0] for q in asked_q] == ["Which model do you want to run", "Which Qwen3.8-27B for gufo"] * 2, asked_q
 # gum cuts a label at the window edge and a too-wide one drops the menu to numbers: rows fit 80 columns, detail goes in notes
 assert all(len(o) + 2 <= 80 for o in routes_seen), [o for o in routes_seen if len(o) + 2 > 80]
 h.capacity = lambda: {"gpu_name": "NVIDIA RTX 4090"}

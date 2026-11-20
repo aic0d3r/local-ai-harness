@@ -1,6 +1,7 @@
-# llama.cpp (Vulkan) Setup for Qwen3.8 on Strix Halo
+# strix-llama.cpp (Vulkan) Setup for Qwen3.8 on Strix Halo
 
-The alternative engine for Strix Halo: [halo-box/strix-llama.cpp](https://github.com/halo-box/strix-llama.cpp), the
+The alternative engine for Strix Halo (menus call it strix-llama.cpp, engine id `llamacpp`; on other hardware run your
+own upstream llama-server and the harness detects it as plain llama.cpp): [halo-box/strix-llama.cpp](https://github.com/halo-box/strix-llama.cpp), the
 Strix Halo Vulkan/ROCm fork, instead of the halogen container.
 Full control over flags, drafter and GGUF quant, **256k ctx** max, and the way to go for the
 **27B** runs. You lose every NPU feature — see [Engines](ENGINES.md).

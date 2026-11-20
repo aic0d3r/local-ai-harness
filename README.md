@@ -4,7 +4,7 @@ Run a coding agent on a local model, on any hardware. Built on [pi](https://gith
 Windows (beta). Tuned and measured on AMD Strix Halo.
 
 - **Detects your GPU and RAM**, recommends an engine and model, and sizes limits to your context window.
-- **Switches engines:** Strata, llama.cpp, vLLM, Ollama, LM Studio, halogen, gufo, osmos (DeepSeek-V4.1-Flash at 1M context), or a cloud model.
+- **Switches engines:** Strata, strix-llama.cpp (Strix Halo), plain llama.cpp, vLLM, Ollama, LM Studio, halogen, gufo, osmos (DeepSeek-V4.1-Flash at 1M context), or a cloud model.
 - **Cuts tokens:** compressed command output, symbol-level code tools, search by meaning.
 - **Resumes after a crash:** relaunch, say "continue".
 

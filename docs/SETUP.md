@@ -9,15 +9,19 @@ The full walkthrough of `./setup.sh`, the `./harness` commands and `./start.sh`.
 0. **Checks for harness updates.** If your checkout is behind origin it lists the new commits, offers
    `git pull --ff-only`, then restarts on the new code. It stays quiet offline, with local edits, or when there is
    nothing new.
-1. **Detects** your hardware and which engines are already serving: halogen, gufo, llama.cpp, Strata, vLLM, Ollama,
-   LM Studio.
-2. **Shows one engine menu every run** (current engine first): running or not, the served model, the last measured
+1. **Detects** your hardware and which engines are already serving: halogen, gufo, strix-llama.cpp, Strata, osmos,
+   a plain llama.cpp llama-server, vLLM, Ollama, LM Studio.
+2. **Asks which model, then which engine, every run.** On Strix Halo the first menu is the model (each on its fastest
+   engine here, the recommended one first; "Pick an engine instead" opens the engine menu). Esc in any menu after the
+   first goes back one menu; Esc in the first one cancels, and Ctrl-C always does. The engine menu (current engine
+   first) shows running or not, the served model, the last measured
    prefill/decode speed, what you lose on that engine (the NPU tools off halogen), and a warning when halogen and gufo
-   would fight over the same GPU memory. Picking an engine that is down offers to start it (halogen, gufo), asks before
+   would fight over the same GPU memory. Picking an engine that is down offers to start it (halogen, gufo, Strata, osmos, strix-llama.cpp), asks before
    stopping the one holding the memory, and waits until it answers. On a fresh box with no engine running the menu still
    shows, halogen first on an NPU box, and picking halogen without a checkpoint offers the ~124 GB download
-   ([`scripts/download-halogen.sh`](../scripts/download-halogen.sh)). Other engines print how to start them. To switch
-   later, run `./setup.sh` again.
+   ([`scripts/download-halogen.sh`](../scripts/download-halogen.sh)). Other engines print how to start them. A start you decline (or one this
+   box cannot do) brings the first menu back instead of ending setup. To switch later, run `./setup.sh` again or
+   `./harness config`.
 
    **All questions come first**, then a summary ("about to: ...") and one `Continue? [Y/n]`; after that the run needs
    nothing from you. Before `Continue?` nothing has been installed or started, and **Esc** (or Ctrl-C) at any prompt
@@ -36,7 +40,8 @@ The full walkthrough of `./setup.sh`, the `./harness` commands and `./start.sh`.
    - whether to run the **ling-tiny sidecar**, asked on every wizard run with your saved answer pre-selected (default yes where the GPU has 24 GB or more, no on smaller cards; it holds ~8 GiB of GPU memory, and "no" means the main
      model writes commits and summaries, with compaction blocking on it; non-interactive: `./setup.sh --no-sidecar` /
      `--sidecar`);
-   - the engine update check (any engine with a known release source: halogen, gufo, Strata, llama.cpp, vLLM, Ollama).
+   - the engine update check (any engine with a known release source: halogen, gufo, Strata, osmos, plain llama.cpp, vLLM,
+     Ollama; strix-llama.cpp runs an image pinned by digest, so it has none).
      On halogen, gufo and Strata it offers the safe upgrade right away (`scripts/upgrade-<engine>.sh`: update, restart,
      check, roll back on failure); on the others it prints the upgrade command. `start.sh` repeats the one-line notice,
      and `./harness update-check` runs it on demand;
