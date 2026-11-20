@@ -56,7 +56,7 @@ One big model at a time on this APU; a second 27B-class server means device-lost
 ```sh
 ENGINE_DIR=/path/to/halo-box/build/bin MODEL_DIR=... server/start-flashnext.sh   # daily driver
 ENGINE_DIR=/path/to/halo-box/build/bin MODEL_DIR=... server/start-qwen38.sh      # 256k / low-memory
-ENGINE_DIR=/path/to/halo-box/build/bin MODEL_DIR=... server/start-ling-tiny.sh   # sidecar (second terminal)
+server/start-ling-tiny.sh   # sidecar (second terminal): pinned strix-llama.cpp image; ENGINE_DIR=... runs a native build
 ```
 
 **GPU memory** — the ~91 GB model lives in the GTT heap, so size it: boot args

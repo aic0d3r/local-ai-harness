@@ -107,12 +107,14 @@ fclk_held(){
   done
   return 1
 }
-# resolve a usable llama-server for the sidecar: $LLAMA_SERVER, PATH, ~/.local/bin, then the newest build under ~/LLMBench/engines (the author's layout)
-LLS="${LLAMA_SERVER:-}"; [ -x "$LLS" ] || LLS="$(command -v llama-server 2>/dev/null || true)"
-[ -z "$LLS" ] && [ -x "$HOME/.local/bin/llama-server" ] && LLS="$HOME/.local/bin/llama-server"
-[ -z "$LLS" ] && for c in "$HOME"/LLMBench/engines/*/vulkan/bin/llama-server; do  # glob order is oldest first: the last hit wins
-  [ -x "$c" ] && LLS="$c"
-done
+# the sidecar runs server/start-ling-tiny.sh: the pinned strix-llama.cpp image when docker is here, else a native
+# llama-server ($LLAMA_SERVER always wins; PATH and ~/.local/bin only without docker). TINY_RUN = it can run at all.
+LLS="${LLAMA_SERVER:-}"; [ -x "$LLS" ] || LLS=""
+if [ -z "$LLS" ] && ! command -v docker >/dev/null; then
+  LLS="$(command -v llama-server 2>/dev/null || true)"
+  [ -z "$LLS" ] && [ -x "$HOME/.local/bin/llama-server" ] && LLS="$HOME/.local/bin/llama-server"
+fi
+TINY_RUN="$LLS"; [ -z "$TINY_RUN" ] && command -v docker >/dev/null && TINY_RUN=docker
 # find the main halogen checkpoint: one search, owned by the launcher
 find_ckpt(){ bash "$REPO/server/start-halogen.sh" --print-ckpt; }
 # sudo one-time fixes: full command on the first install run (always in --doctor), then only in the log until fixed
@@ -363,8 +365,8 @@ else
   fail "sidecar not running"
   GGUF="$(ls "$HOME"/.models/ling3.0-tiny/*.gguf "$REPO"/models/ling3.0-tiny/*.gguf 2>/dev/null | head -1)"
   # no llama-server to run it: do not fetch 4.5 GB first
-  if [ -z "${GGUF:-}" ] && [ -z "${LLS:-}" ]; then
-    GGUF=skip; warn "no llama-server binary found (PATH, ~/.local/bin) - not downloading the sidecar model; install one and re-run ./setup.sh"
+  if [ -z "${GGUF:-}" ] && [ -z "$TINY_RUN" ]; then
+    GGUF=skip; warn "no docker and no llama-server (PATH, ~/.local/bin) - not downloading the sidecar model; install docker and re-run ./setup.sh"
   fi
   # no terminal and no saved answer (the wizard or --sidecar saves one): never download 4.5 GB unasked
   if [ -z "${GGUF:-}" ] && [ ! -t 0 ] && [ ! -s "$SC_PREF" ]; then
@@ -398,16 +400,16 @@ else
       [ -n "$GGUF" ] && mv "$GGUF" "${GGUF%.part}" && GGUF="${GGUF%.part}"
     fi
   fi
-  if [ -n "${LLS:-}" ] && [ -n "${GGUF:-}" ]; then
-    setsid nohup "$LLS" -a ling3.0-tiny -m "$GGUF" -ngl 99 -c 131072 -b $UB_TINY -ub $UB_TINY --jinja \
-      --host 127.0.0.1 --port $TINY_PORT > "$REPO/ling-tiny.log" 2>&1 < /dev/null &
-    for i in $(seq 1 12); do sleep 5; tiny_up && break; done
+  if [ -n "$TINY_RUN" ] && [ -n "${GGUF:-}" ]; then
+    LLAMA_SERVER="$LLS" LING_GGUF="$GGUF" UBBATCH=$UB_TINY setsid nohup bash "$REPO/server/start-ling-tiny.sh" \
+      > "$REPO/ling-tiny.log" 2>&1 < /dev/null &
+    for i in $(seq 1 24); do sleep 5; tiny_up && break; done  # first run may pull the 1.3 GB image
     tiny_up && ok "sidecar started (log: $REPO/ling-tiny.log)" || fail "started but not healthy yet — check $REPO/ling-tiny.log"
   else
-    warn "fix: get Ling-3.0-tiny-Q4_K_M.gguf (Hugging Face) and a Vulkan llama-server, then:"
-    warn "  llama-server -a ling3.0-tiny -m <gguf> -ngl 99 -c 131072 --jinja --port 8090"
+    warn "fix: get Ling-3.0-tiny-Q4_K_M.gguf (Hugging Face) and docker (or LLAMA_SERVER=<llama-server>), then:"
+    warn "  LING_GGUF=<gguf> server/start-ling-tiny.sh"
     [ -z "${GGUF:-}" ] && warn "  (looked in ~/.models/ling3.0-tiny/ and ./models/ling3.0-tiny/)"
-    [ -z "${LLS:-}" ] && warn "  (no llama-server binary found - set one up on PATH)"
+    [ -z "$TINY_RUN" ] && warn "  (no docker and no llama-server binary found)"
   fi
 fi
 
@@ -415,14 +417,16 @@ fi
 if [ "$SIDECAR_ON" = 1 ] && command -v systemctl >/dev/null && systemctl --user status >/dev/null 2>&1; then
   UNIT_DIR="$HOME/.config/systemd/user"; mkdir -p "$UNIT_DIR"
   UNIT_GGUF="${GGUF:-$(ls "$HOME"/.models/ling3.0-tiny/*.gguf 2>/dev/null | head -1)}"
-  if [ -n "$UNIT_GGUF" ] && [ -n "${LLS:-}" ]; then
+  if [ -n "$UNIT_GGUF" ] && [ -n "$TINY_RUN" ]; then
     cat > "$UNIT_DIR/ling-tiny.service" <<UNIT
 [Unit]
 Description=Ling-3.0-tiny sidecar (llama.cpp)
 After=network.target
 
 [Service]
-ExecStart="$LLS" -a ling3.0-tiny -m "$UNIT_GGUF" -ngl 99 -c 131072 -b $UB_TINY -ub $UB_TINY --jinja --host 127.0.0.1 --port $TINY_PORT --metrics --sleep-idle-seconds 600
+Environment="LLAMA_SERVER=$LLS" "LING_GGUF=$UNIT_GGUF" "UBBATCH=$UB_TINY"
+ExecStart=/usr/bin/env bash "$REPO/server/start-ling-tiny.sh"
+ExecStopPost=-/usr/bin/env docker rm -f ling-tiny
 Restart=always
 RestartSec=5
 

@@ -59,8 +59,7 @@ console.log("  ok: git-commit guard ignores quoted mentions; long one-line messa
 else echo "  skip: commit guard check needs bun"; fi
 
 # [8] sidecar launchers all carry the tuned batch size; launcher respects /tune reserveTokens
-grep -q -- '-b $UB_TINY -ub $UB_TINY --jinja' setup.sh \
-  && [ "$(grep -c -- '-b $UB_TINY -ub $UB_TINY' setup.sh)" -ge 2 ] \
+[ "$(grep -c -- 'UBBATCH=$UB_TINY' setup.sh)" -ge 2 ] \
   && grep -q -- '-b $UBBATCH -ub $UBBATCH' server/start-ling-tiny.sh \
   && grep -q 'launcher-owned values' server/start-halogen.sh \
   && grep -q 'maxTokens: \[1024, 8192\]' extensions/harness-tune.ts \

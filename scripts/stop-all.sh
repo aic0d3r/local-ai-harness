@@ -34,7 +34,7 @@ if pkill -f 'bin/osmos-(api|serve)'; then
 fi
 [ -z "$out" ] && out="no engine was running. "
 if systemctl --user is-active --quiet ling-tiny.service 2>/dev/null; then systemctl --user stop ling-tiny.service && out+="ling-tiny stopped. "
-elif pkill -f 'llama-server -a ling3.0-tiny'; then out+="ling-tiny stopped. "; else out+="ling-tiny was not running. "; fi
+elif docker rm -f ling-tiny 2>/dev/null | grep -q . || pkill -f -- '-a ling3.0-tiny'; then out+="ling-tiny stopped. "; else out+="ling-tiny was not running. "; fi
 sleep 3
 gtt=$(cat /sys/class/drm/card*/device/mem_info_gtt_used 2>/dev/null | sort -n | tail -1)
 # >2 GiB still held with nothing running = a previous engine leaked it (halogen issue #79)
