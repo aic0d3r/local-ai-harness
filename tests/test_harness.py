@@ -615,6 +615,20 @@ assert subprocess.run(["bash", gl, "--print-model"], capture_output=True, text=T
 assert h.catalog_id("qwen3.8-27b-q8") == "qwen38-27b-q8" and h.catalog_id("qwen3.8-27b") == "qwen38-27b"  # tune results stay apart
 r = subprocess.run(["bash", gl], capture_output=True, text=True, env=ge)
 assert r.returncode == 1 and "download-qwen38-27b.sh" in r.stderr, r
+# --check (the upgrades' preflight): every Flash-Next shard, not just shard 1; Strata's Docker route checks the same shards
+fe = dict(ge, GUFO_FAMILY="flash-next", GUFO_WEIGHTS="stock", GUFO_QUANT="UD-Q4_K_XL")
+os.makedirs(f"{gd}/flash/UD-Q4_K_XL")
+for f in [f"UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-0000{i}-of-00004.gguf" for i in (1, 2, 3)] + ["mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf"]:
+    open(f"{gd}/flash/{f}", "w").close()
+se = dict(fe, HOME=gd, STRATA_DIR="", STRATA_IMAGE="ghcr.io/x/strata:t", STRATA_MODEL="flash-next", STRATA_WEIGHTS="stock")
+ss = os.path.join(os.path.dirname(gl), "start-strata.sh")
+r = subprocess.run(["bash", gl, "--check"], capture_output=True, text=True, env=fe)
+assert r.returncode == 1 and "00004-of-00004.gguf" in r.stderr and "download-stock.sh" in r.stderr, r
+r = subprocess.run(["bash", ss, "--check"], capture_output=True, text=True, env=se)
+assert r.returncode == 1 and r.stdout.strip().endswith("Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf"), r
+open(f"{gd}/flash/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf", "w").close()
+assert subprocess.run(["bash", gl, "--check"], capture_output=True, text=True, env=fe).returncode == 0
+assert subprocess.run(["bash", ss, "--check"], capture_output=True, text=True, env=se).returncode == 0
 assert h.G27_DRAFT in open(gl).read() and h.G27_DRAFT in open(os.path.join(os.path.dirname(gl), "..", "scripts", "download-qwen38-27b.sh")).read()
 # live monitor: halogen and Strata have one; Strata uses its own when its venv can run it, else our dashboard; others none
 assert h.monitor_cmd("halogen")[1].endswith("halogen-top.sh") and h.monitor_cmd("gufo") is None and h.monitor_cmd("vllm") is None

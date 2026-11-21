@@ -15,6 +15,10 @@ if [ -n "$IMAGE" ]; then
   AUTH=(-H "Authorization: Bearer $KEY")
   up(){ curl -sf -m 3 "${AUTH[@]}" "$URL/v1/models" >/dev/null 2>&1; }
   OLD=$(docker image inspect -f '{{index .RepoDigests 0}}' "$IMAGE" 2>/dev/null)
+  # a shard gone fails the new image and the old one alike: refuse before stopping anything
+  if ! MISS=$(bash "$REPO/server/start-strata.sh" --check); then
+    echo "FAIL: the model is missing files, so no image would load it - nothing stopped:"; echo "$MISS" | sed 's/^/      /'; exit 1
+  fi
   echo "[1/3] pulling the newest $IMAGE"
   docker pull "$IMAGE" || { echo "FAIL: docker pull failed (offline, or the tag moved) - nothing changed"; exit 1; }
   echo "[2/3] restarting it (server/start-strata.sh)"

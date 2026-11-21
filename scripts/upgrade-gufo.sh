@@ -27,6 +27,8 @@ fi
 # one big engine at a time: gufo and halogen share the GPU heap (device-lost if both run)
 [ -n "$(container_ids 8731 halogen)" ] && { echo "FAIL: halogen is running - stop it first (gufo and halogen share the GPU memory)"; exit 1; }
 
+# a model file gone fails every image, the rollback's too: refuse before stopping anything (start-gufo names the file)
+bash "$START" --check || { echo "FAIL: the model is missing files (above), so no image would load it - nothing stopped"; exit 1; }
 echo "[1/4] pulling $IMG:$TAG (pinned: $CUR)"
 docker pull "$IMG:$TAG" >/dev/null 2>&1 || { echo "FAIL: pull $IMG:$TAG"; exit 1; }
 DIGEST=$(docker image inspect -f '{{index .RepoDigests 0}}' "$IMG:$TAG" 2>/dev/null | cut -d@ -f2)

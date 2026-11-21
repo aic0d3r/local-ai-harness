@@ -23,8 +23,31 @@ print_weights() {
     echo stock
   fi
 }
+# the files osmos.json names that are not on disk (every shard of a -00001-of-N model, dangling links included), one a line
+missing_files() {
+  python3 - "$CFG" <<'PY'
+import json, os, re, sys
+c = json.load(open(sys.argv[1]))
+paths = [c[k] for k in ("model", "picks", "drafter", "overlay") if c.get(k)]
+m = re.search(r"-00001-of-(\d{5})\.gguf$", c.get("model") or "")
+if m:
+    paths += [c["model"][:m.start()] + f"-{i:05d}-of-{m.group(1)}.gguf" for i in range(2, int(m.group(1)) + 1)]
+missing = [p for p in paths if not os.path.exists(p)]
+print("\n".join(missing))
+sys.exit(1 if missing else 0)
+PY
+}
+# serve when every file is there; otherwise say which are not and return (the installer below fetches them again)
+serve_if_complete() {
+  local miss; miss=$(missing_files) && serve
+  echo "osmos: missing from the pack, the installer fetches it again: $(echo "$miss" | tr '\n' ' ')" >&2
+}
 [ "${1:-}" = --print-weights ] && { print_weights; exit 0; }
 [ "${1:-}" = --print-dir ] && { echo "$OSMOS_DIR"; exit 0; }  # the checkout: the update check reads its tag, upgrade-osmos.sh rebuilds it
+if [ "${1:-}" = --check ]; then  # upgrade-osmos.sh's preflight: the pack complete, before anything is stopped
+  [ -f "$CFG" ] || { echo "$CFG"; exit 1; }
+  missing_files; exit
+fi
 
 case "${1:-$WEIGHTS}" in
   stock|abliterated) W=${1:-$WEIGHTS} ;;
@@ -51,14 +74,12 @@ serve() {
 want_overlay=$([ "$W" = abliterated ] && echo yes || echo no)
 have_overlay=$([ "$(print_weights)" != stock ] && echo yes || echo no)
 if [ "$want_overlay" = "$have_overlay" ]; then
-  serve
-fi
-
+  serve_if_complete
 # a switch with the patch already on disk: set or drop osmos.json's "overlay" (and link the patch where the installer
 # would) instead of the installer, whose derived-shard check hashes the whole pack (~147 GB, minutes) and ignores
 # --trust-size (libosmos 0.7.6 layout._derive). The patch itself is still checked against its pinned size and SHA-256.
 # shortcut: repeats layout.lay's overlay step; drop this once libosmos honors --trust-size for derived shards.
-if python3 - "$CFG" "$OSMOS_DIR/tools/install/packs.json" "$OSMOS_MODELS" "$PACK" "$W" <<'PY'
+elif python3 - "$CFG" "$OSMOS_DIR/tools/install/packs.json" "$OSMOS_MODELS" "$PACK" "$W" <<'PY'
 import hashlib, json, os, sys
 cfg_path, manifest, models, pack, w = sys.argv[1:]
 cfg = json.load(open(cfg_path))
@@ -92,7 +113,7 @@ os.replace(tmp, cfg_path)
 PY
 then
   echo "osmos: switched to the $W weights (patch already on disk)" >&2
-  serve
+  serve_if_complete
 fi
 
 echo "osmos: switching to the $W weights (the installer fetches the 0.6 GB patch the first time)" >&2

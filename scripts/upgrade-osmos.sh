@@ -31,6 +31,11 @@ if [ "$NEWC" = "$OLD" ]; then echo "already on $CUR - nothing to do"; exit 0; fi
 if [ -n "$BRANCH" ] && ! git -C "$DIR" merge-base --is-ancestor "$OLD" "$NEWC"; then
   echo "FAIL: $DIR ($BRANCH) has commits that $TAG does not contain - update it by hand"; exit 1
 fi
+# a pack with a file gone (a cleaned HF cache, say) fails on every engine, the rollback's too: refuse before stopping it
+if ! MISSING=$(bash "$START" --check); then
+  echo "FAIL: the pack is missing files, so no version would start - nothing stopped:"; echo "$MISSING" | sed 's/^/      /'
+  echo "      run server/start-osmos.sh once (its installer fetches them again), then re-run this"; exit 1
+fi
 DIRTY=$(git -C "$DIR" status --porcelain --untracked-files=no)
 [ -n "$DIRTY" ] && echo "      keeping your local edits: $(echo "$DIRTY" | awk '{print $2}' | tr '\n' ' ')"
 

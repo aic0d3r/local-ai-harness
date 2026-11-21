@@ -59,7 +59,16 @@ if [ -z "${DIR:-}" ] && [ -z "$IMAGE" ]; then
 fi
 [ -n "${DIR:-}" ] || [ "${STRATA_SOURCE:-0}" = 1 ] && IMAGE=""  # a source install wins over the image
 
+# Flash-Next's GGUF for the saved weights (shard 1; the Docker route builds its pack from it) and its shards not on disk
+shard1() { GUFO_QUANT=UD-Q4_K_XL GUFO_WEIGHTS=$WEIGHTS bash "$HERE/start-gufo-flashnext.sh" --print-model; }
+missing_shards() {
+  local s1 n i f; s1=$(shard1); n=$(echo "$s1" | sed -nE 's/.*-00001-of-0*([0-9]+)\.gguf$/\1/p')
+  for i in $(seq 1 "${n:-1}"); do f=${s1/-00001-of-/-$(printf %05d "$i")-of-}; [ -f "$f" ] || echo "$f"; done
+}
+
 case "${1:-}" in
+  # upgrade-strata.sh's preflight: the shards the Docker route reads (a source install runs its finished pack)
+  --check) [ -n "$IMAGE" ] && [ "$OWN" = 0 ] && missing_shards | grep . && exit 1; exit 0 ;;
   --print-dir) echo "${DIR:-$DATA}"; exit 0 ;;
   --print-image) echo "$IMAGE"; exit 0 ;;
   --print-run)
@@ -124,10 +133,10 @@ if [ "$OWN" = 1 ]; then  # a catalog model Strata downloads itself (qwen36-q4 et
   [ -n "${SIZE:-}" ] || { echo "Strata has no image model for $MODEL: set it up with its own setup.sh" >&2; exit 1; }
   ARGS+=(-e "FAMILY=$FAM" -e "MODEL=$SIZE")
 else  # Flash-Next from the GGUF folder gufo already has, read-only; the pack is built in $DATA
-  SHARD1=$(GUFO_QUANT=UD-Q4_K_XL GUFO_WEIGHTS=$WEIGHTS bash "$HERE/start-gufo-flashnext.sh" --print-model)
-  if [ ! -f "$SHARD1" ]; then
-    if [ "$WEIGHTS" = abliterated ]; then echo "the abliterated weights are not on disk ($SHARD1): scripts/download-abliterated.sh gufo" >&2
-    else echo "the stock weights are not on disk ($SHARD1): scripts/download-stock.sh" >&2; fi
+  SHARD1=$(shard1); MISS=$(missing_shards | tr '\n' ' ')
+  if [ -n "$MISS" ]; then
+    if [ "$WEIGHTS" = abliterated ]; then echo "the abliterated weights are not all on disk (missing: $MISS): scripts/download-abliterated.sh gufo" >&2
+    else echo "the stock weights are not all on disk (missing: $MISS): scripts/download-stock.sh" >&2; fi
     exit 1
   fi
   if [ "$(cat "$DATA/harness-weights" 2>/dev/null)" != "$WEIGHTS" ]; then

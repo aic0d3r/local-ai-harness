@@ -82,4 +82,15 @@ check "exit 1, says it rolled back" '[ "$RC" = 1 ] && echo "$OUT" | grep -q "rol
 check "0.2.0 is serving again before the script exits" 'echo "$OUT" | grep -q "v0.2.0 is serving again" && curl -sf localhost:$PORT/health >/dev/null'
 check "the checkout and the binary are back on 0.2.0" '[ "$(git -C "$OSMOS_DIR" describe --tags)" = v0.2.0 ] && [ "$(ver)" = "osmos 0.2.0" ]'
 
+echo "== a pack with a file gone is refused before anything is stopped"
+P="$T/models/osmos-evo"; touch "$P/m-00001-of-00003.gguf" "$P/m-00002-of-00003.gguf"; ln -s "$T/nowhere" "$P/patch.gguf"
+echo "{\"model\": \"$P/m-00001-of-00003.gguf\", \"overlay\": \"$P/patch.gguf\"}" > "$P/osmos.json"
+OUT=$(bash "$REPO/server/start-osmos.sh" --check); RC=$?; WANT=$(printf '%s\n%s' "$P/patch.gguf" "$P/m-00003-of-00003.gguf")
+check "--check lists the dangling overlay and the missing shard, not the present ones" '[ "$RC" = 1 ] && [ "$OUT" = "$WANT" ]'
+OUT=$(run v0.3.0); RC=$?
+check "exit 1 naming the file" '[ "$RC" = 1 ] && echo "$OUT" | grep -q "missing files" && echo "$OUT" | grep -q "patch.gguf"'
+check "the old server was never stopped, nor the checkout moved" 'curl -sf localhost:$PORT/health >/dev/null && [ "$(git -C "$OSMOS_DIR" describe --tags)" = v0.2.0 ]'
+touch "$P/m-00003-of-00003.gguf"; rm "$P/patch.gguf"; touch "$P/patch.gguf"
+check "--check passes once every file is there" 'bash "$REPO/server/start-osmos.sh" --check'
+
 echo; [ "$fails" = 0 ] && echo "all checks passed" || { echo "$fails check(s) failed"; echo "--- last output:"; echo "$OUT" | tail -15; exit 1; }

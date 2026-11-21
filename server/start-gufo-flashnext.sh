@@ -41,12 +41,20 @@ DEF=$QUANT/Qwen3.8-Flash-Next-$QUANT-00001-of-0000$N.gguf
 [ "$WEIGHTS" = abliterated ] && DEF=orca-uncensored/Qwen3.8-Flash-Next-Uncensored-Gufo-00001-of-00005.gguf
 GUFO_MODEL=${GUFO_MODEL:-$DEF}
 [ "${1:-}" = --print-model ] && { echo "$ENGINE_DIR/$GUFO_MODEL"; exit 0; }
-if [ ! -f "$ENGINE_DIR/$GUFO_MODEL" ]; then
-  echo "gufo target missing: $ENGINE_DIR/$GUFO_MODEL" >&2
-  [ "$GUFO_MODEL" = "$DEF" ] && [ "$WEIGHTS" = abliterated ] \
-    && echo "get it: scripts/download-abliterated.sh gufo   (or run stock: GUFO_WEIGHTS=stock $0)" >&2
-  exit 1
+# every shard, not just the first: shard 1 is tiny and lands first, and a missing later one fails the load in the container
+SHARDS=("$GUFO_MODEL")
+if [[ $GUFO_MODEL =~ -00001-of-0*([0-9]+)\.gguf$ ]]; then
+  for i in $(seq 2 "${BASH_REMATCH[1]}"); do SHARDS+=("${GUFO_MODEL/-00001-of-/-$(printf %05d "$i")-of-}"); done
 fi
+for f in "${SHARDS[@]}"; do
+  [ -f "$ENGINE_DIR/$f" ] && continue
+  echo "gufo target missing: $ENGINE_DIR/$f" >&2
+  if [ "$GUFO_MODEL" = "$DEF" ]; then
+    if [ "$WEIGHTS" = abliterated ]; then echo "get it: scripts/download-abliterated.sh gufo   (or run stock: GUFO_WEIGHTS=stock $0)" >&2
+    else echo "get it: scripts/download-stock.sh" >&2; fi
+  fi
+  exit 1
+done
 MTP=mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf  # without it gufo fails the load but never exits (port stays dark)
 if [ ! -f "$ENGINE_DIR/$MTP" ]; then
   echo "gufo MTP head missing: $ENGINE_DIR/$MTP" >&2
@@ -56,6 +64,7 @@ if [ ! -f "$ENGINE_DIR/$MTP" ]; then
 fi
 MDIR=$ENGINE_DIR; MODEL_REL=$GUFO_MODEL; NAME=qwen3.8-flash-next; SPEC=(--speculative mtp --mtp-model "/models/$MTP")
 fi
+[ "${1:-}" = --check ] && exit 0  # upgrade-gufo.sh's preflight: every file above is on disk (each missing one exits 1, named)
 # pre-flight: gufo at 65k has never wedged, but at large ctx the same allocator
 # physics as halogen applies. recover mild fragmentation, fail fast otherwise.
 # ctx: GUFO_CTX, else what this hardware's spare memory buys for the quant (config/profiles.json ctx_tiers; 262144 = the model's
