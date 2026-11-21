@@ -1670,7 +1670,17 @@ def engine_have(engine):
     u = PROFILES["engines"].get(engine, {}).get("update")  # .get: a custom endpoint has no profile entry
     if not u:
         return ""
-    kind, *rest = u["have"].split()
+    # "A | B": the first source that tells (Strata: its Docker image, else its source checkout)
+    return next((v for v in (_have(engine, s.split()) for s in u["have"].split(" | ")) if v), "")
+
+
+def _have(engine, spec):
+    kind, *rest = spec
+    if kind == "image":  # the image our launcher runs (--print-image): its own version label, '' until it is pulled
+        img = subprocess.run(["bash", os.path.join(REPO, rest[0]), "--print-image"], capture_output=True, text=True).stdout.strip()
+        v = subprocess.run(["docker", "image", "inspect", "-f", '{{index .Config.Labels "org.opencontainers.image.version"}}', img],
+                           capture_output=True, text=True).stdout.strip() if img else ""
+        return "" if v == "<no value>" else v
     if kind == "pin":  # version pinned in our launcher: known even while the engine is down
         # "pin FILE DEFAULT_VAR PIN_NAME": the launcher's tracked DEFAULT_VAR=0.19.1, unless an upgrade stored a newer pin on top of it
         return pin_value(rest[2], re.search(rf"^{rest[1]}=([0-9.]+)", open(os.path.join(REPO, rest[0])).read(), re.M).group(1))

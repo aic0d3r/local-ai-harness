@@ -52,6 +52,13 @@ assert h.versioned_title("osmos", "osmos-osmos-evo").startswith("osmos b5432 · 
 h.engine_have = lambda e: (_ for _ in ()).throw(OSError("down"))
 assert h.installed_version("vllm") == "" and h.versioned_title("gufo", None) == "gufo · no model"
 h.engine_have = _have
+# "A | B" in profiles.json: the first source that tells (Strata: its Docker image's label, else its source checkout's tag)
+_src = h._have
+for img, d, want in (("0.2.13", "v0.2.9", "0.2.13"), ("", "v0.2.9", "v0.2.9"), ("", "", "")):
+    h._have = lambda e, s, i=img, dd=d: {"image": i, "dir": dd}[s[0]]
+    assert h.engine_have("strata") == want, (img, d)
+h._have = _src
+assert h.PROFILES["engines"]["llamacpp"]["update"]["have"].startswith("image ") and h.engine_update("llamacpp") == ""  # shown, never checked upstream
 assert h.engine_title("gufo", None) == "gufo · no model" and "/" not in h.engine_title("strata", "flash-next-iq3_s")
 q = h.bench("llamacpp", "Qwen3-8B", runs=2, quick=True)  # tune is this quick subset: one prefill cell, decode repeats
 assert set(q["median"]) == {"decode_code", "prefill_8192"} and q["quick"], q
