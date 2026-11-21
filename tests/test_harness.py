@@ -43,6 +43,15 @@ h.strix_container = real_strix
 t = h.tune("llamacpp", "Qwen3-8B")
 assert t["prefill_tps"] > 0 and t["decode_tps"] > 0 and t["protocol"] == h.BENCH_ID and t["samples"] == 3, t
 assert h.engine_title("osmos", "osmos-osmos-evo") == "osmos · DeepSeek-V4.1-Flash (osmos-evo)" and h.engine_title("llamacpp", "Qwen3-8B") == "strix-llama.cpp · Qwen3-8B" and h.engine_title("halogen", "flash-next") == "halogen · Qwen3.8-Flash-Next (halogen .hgn)"
+# setup shows the installed version beside the engine: 'v'-prefixed, blank when it cannot be told (a down HTTP engine raises)
+_have = h.engine_have
+for got, want in (("0.34.0", "v0.34.0"), ("v0.11.3", "v0.11.3"), ("", ""), ("llama.cpp b5432", "b5432")):
+    h.engine_have = lambda e, g=got: g
+    assert h.installed_version("gufo") == want, (got, h.installed_version("gufo"))
+assert h.versioned_title("osmos", "osmos-osmos-evo").startswith("osmos b5432 · ")
+h.engine_have = lambda e: (_ for _ in ()).throw(OSError("down"))
+assert h.installed_version("vllm") == "" and h.versioned_title("gufo", None) == "gufo · no model"
+h.engine_have = _have
 assert h.engine_title("gufo", None) == "gufo · no model" and "/" not in h.engine_title("strata", "flash-next-iq3_s")
 q = h.bench("llamacpp", "Qwen3-8B", runs=2, quick=True)  # tune is this quick subset: one prefill cell, decode repeats
 assert set(q["median"]) == {"decode_code", "prefill_8192"} and q["quick"], q

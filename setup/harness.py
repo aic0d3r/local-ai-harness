@@ -951,7 +951,8 @@ def engine_menu(running, esc=None):
     # an engine without a launcher is only looked for: say where, it is yours to start
     states = {e: "running" if e in running else "not running" if PROFILES["engines"][e].get("script") else f"not found on :{PROFILES['engines'][e]['port']}"
               for e in order}
-    w, ws = max(len(ename(e)) for e in order), max(map(len, states.values()))
+    vers = {e: installed_version(e) for e in order}
+    w, ws, wv = max(len(ename(e)) for e in order), max(map(len, states.values())), max(map(len, vers.values()))
     for e in order:
         mods = running[e]["models"] if e in running else []
         state = f"{states[e]:{ws}s}"
@@ -960,10 +961,10 @@ def engine_menu(running, esc=None):
         warn = e in BIG and holder and holder != e and e not in running
         stops += [e] * bool(warn)
         speeds.append(last_speed(e))
-        labels[f"{'*' if e == cur else ' '}{'o' if e in running else '-'} {ename(e):{w}s}  {state} | {speeds[-1]}{' !' if warn else ''}{'  (recommended)' if e == rec else ''}"] = e
+        labels[f"{'*' if e == cur else ' '}{'o' if e in running else '-'} {ename(e):{w}s}  {vers[e]:{wv}s}{'  ' if wv else ''}{state} | {speeds[-1]}{' !' if warn else ''}"] = e
     # what does not fit a row (gum cuts a long one off) is said once under the question
     every = [ename(e) for e in order]  # most engines lose the same: name the few that do not
-    notes = serves + [f"{'all but ' + ', '.join(x for x in every if x not in es) if len(every) > len(es) > len(every) / 2 else ', '.join(es)} "
+    notes = serves + [f"recommended here: {ename(rec)}"] + [f"{'all but ' + ', '.join(x for x in every if x not in es) if len(every) > len(es) > len(every) / 2 else ', '.join(es)} "
                       f"{'loses' if len(es) == 1 else 'lose'}: {v}" for v, es in loses.items()]
     if any(s != "not measured" for s in speeds):
         notes.append("t/s = prefill/decode on code, from ./harness tune" + ("; (old) = an older probe, re-run it" if any(s.endswith("(old)") for s in speeds) else ""))
@@ -1679,6 +1680,17 @@ def engine_have(engine):
     return json.load(http(f"http://127.0.0.1:{PROFILES['engines'][engine]['port']}{kind}"))[rest[0]]  # what the running server reports
 
 
+def installed_version(engine):
+    """engine_have for a menu row: 'v0.11.3', or '' when it has none, cannot be told, or the engine is down and only
+    its server reports it (llama-server, vLLM, Ollama)."""
+    try:
+        v = str(engine_have(engine) or "").split()
+    except Exception:
+        return ""
+    v = v[-1] if v else ""
+    return f"v{v}" if v[:1].isdigit() else v
+
+
 def engine_update(engine):
     """-> one line if a newer release of engine exists; '' when current, unknown or offline. Never installs."""
     u = PROFILES["engines"].get(engine, {}).get("update")
@@ -1818,6 +1830,12 @@ def engine_title(eng, mod):
     entry = catalog().get(mod or "") or (catalog()[catalog_id(mod)] if eng in ("gufo", "strata") and mod else {})  # gufo serves qwen3.8-27b-q8 for qwen38-27b-q8
     name = cfg.get("model_label") or (entry.get("label") or mod or "").split(" (")[0]  # catalog labels carry a parenthesis of notes
     return f"{ename(eng)} · {name or 'no model'}"
+
+
+def versioned_title(eng, mod):
+    """engine_title with the installed version after the engine (osmos v0.11.3 · DeepSeek-...), for the screens that show it."""
+    t, v = engine_title(eng, mod), installed_version(eng)
+    return t.replace(" · ", f" {v} · ", 1) if v else t
 
 
 def choices_items(eng=None):
@@ -2054,7 +2072,7 @@ def finish(eng, mod, no_tune, launch=False):
     items = choices_items(eng)
     head = f"== {'ready' if passed else 'NOT ready'} =="
     print("\n" + paint("1;32" if passed else "1;31", head))
-    print(summary_row("engine", [engine_title(eng, mod), f"(pi: {prov}/{mid})"], width))
+    print(summary_row("engine", [versioned_title(eng, mod), f"(pi: {prov}/{mid})"], width))
     print(summary_row("context", str(ctx), width))
     print(summary_row("speed", speed, width))
     mem = gufo_memory(mod) if eng == "gufo" else ""
@@ -2183,7 +2201,7 @@ def cmd_status(_):
         return print(f"engine custom {ep['url']} {'UP' if up else 'DOWN'}  model {p['model']}  provider {ep['provider']}  (a custom endpoint: not started, stopped or tuned by this harness)")
     port = PROFILES["engines"][p["engine"]]["port"]
     up = bool(served_models(port, p["engine"]))
-    print(f"engine {engine_title(p['engine'], p['model'])} :{port} {'UP' if up else 'DOWN'}  npu {p['npu']}")
+    print(f"engine {versioned_title(p['engine'], p['model'])} :{port} {'UP' if up else 'DOWN'}  npu {p['npu']}")
     print("speed:", speed_text(p["engine"], p["model"]) or "not measured yet (./harness tune)")
     if sidecar_pref() == "0":
         return print("sidecar: off (opted out; ./harness config turns it on)")
@@ -2335,7 +2353,7 @@ def cmd_config(a):
             notes.append(f"! osmos was last started on the other weights; {weights_pref()} applies on its next start")
         no_abl = eng in ("gufo", "strata", "llamacpp") and engine_model(eng) not in ABLITERATED
         items = {
-            f"engine        {engine_title(eng, p['model']) if eng else '-'}": "engine",
+            f"engine        {versioned_title(eng, p['model']) if eng else '-'}": "engine",
             **({f"model         {model_name(engine_model(eng))}": "model"}
                if eng in ("gufo", "strata", "llamacpp") else {}),  # only these load the model answer
             **({f"weights       {'stock' if no_abl else weights_pref()}  ({'this model has no abliterated build' if no_abl else 'every engine, next start'})": "weights"}
