@@ -196,7 +196,10 @@ osmos is for DeepSeek-V4.1-Flash only: the wizard shows that model for it (never
 models run on halogen, gufo or Strata.
 
 It has no NPU tools (guard, triage, dedup need halogen), and it will not fit beside another big engine: 91 GiB of GPU
-memory is the budget on a 128 GB box.
+memory is the budget on a 128 GB box. That budget is sized from the memory free when osmos starts, so close browsers and
+other big apps first: experts that do not fit are read from the SSD for every token (measured here: a budget 6 GiB
+smaller, 34 -> 24 t/s). The setup says so before each start. A remembered budget is sized again only when 4 GiB more
+is free than at its sizing (`server/osmos-budget.py`).
 
 **Updating.** `./setup.sh` / `./start.sh` tell you when a newer libosmos release exists (the check compares your checkout's
 tag with the latest GitHub release; `HARNESS_NO_UPDATE_CHECK=1` turns it off) and offer `scripts/upgrade-osmos.sh [tag]`.

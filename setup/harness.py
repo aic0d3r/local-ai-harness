@@ -1167,6 +1167,9 @@ def plan_start(engine, running, ask_start=True):
         print(f"{ename(engine)} is not running on :{c['port']}: {c.get('start', 'start it yourself, then pick it again')}")
         return None
     plan = {"stop": None, "download": False, "weights": None}
+    if engine == "osmos":  # its expert cache is sized from what is free at start: ~6 GiB less measured 34 -> 24 t/s
+        print("Tip: close browsers and other big apps before osmos starts. It caches\n"
+              "  experts in whatever memory is free, and every GiB it misses is read from the SSD, slowing decode.")
     if engine == "halogen":
         problems = halogen_preflight()
         if problems:
