@@ -103,6 +103,8 @@ The harness is tuned to spend as few tokens, and as little main-model time, as p
 | **semble search** | finds code by meaning instead of reading files to explore | 17/18 vs 13/18 top-3 hits, 2-3x faster queries, ~40x faster indexing than the NPU pipeline it replaced |
 | **Sidecar + NPU** | commits, compaction and repo maps run off the main model; screening and routing on the NPU | compaction ~24 s non-blocking vs ~52 s blocking; large commit diffs 18.5k to 7.1k tokens (2.5x faster) |
 | **Warm prompt cache** | diffs and transcripts never touch the main model's prefix | warm replay 0.01-0.05 s on halogen |
+| **Small, stable prompt prefix** | only read/bash/edit/write, codemode, ask_user_question (short guidance) and ddg are declared; serena, semble, subagent, triage and dedup_scan are called from codemode; no extension rewrites the system prompt mid-session | cold prompt 13,968 to 7,952 tokens, 31.4 to 17.5 s on osmos; a progress note no longer costs a ~30 s cache miss ([details](#prompt-prefix-and-tool-routing-2026-11-22)) |
+| **Search and symbol routing** (`APPEND_SYSTEM.md`) | semble first to find code; serena once the task is about a known symbol | semble: -22% wall time, -38% output tokens, 6/6 vs 5/6 correct; serena line: -16% wall time, -38% tool output read ([details](#prompt-prefix-and-tool-routing-2026-11-22)) |
 
 For device or browser testing, prefer text over pixels: `adb shell uiautomator dump` or an accessibility snapshot costs a
 few hundred tokens. When a screenshot is needed, crop to the area that matters
@@ -138,6 +140,58 @@ Real usage across 416 logged sessions (`~/.pi/agent/sessions`): `read` returned 
 mean 7,029 chars over 1,246 calls; serena navigation returned a mean 213-244 chars
 (`find_symbol`, `get_symbols_overview`) but ran only ~35 times, in 29 sessions. The saving exists;
 the agent rarely takes it.
+
+## Prompt prefix and tool routing (2026-11-22)
+
+osmos (DeepSeek-V4.1-Flash, `osmos-evo`), thinking off, Strix Halo. osmos reuses its cache only while the
+prompt's leading tokens are identical, and prefills at ~440 tok/s, so every token in the system prompt and the
+tool list is ~2.3 ms of wait on each cold turn (new session, or anything that changes the prefix).
+
+**Where the time went.** In plain chat sessions every turn logged `0 reused (none)` and took ~31 s. Causes:
+
+| cause | effect | fix |
+|---|---|---|
+| `progress-tracker` returned its resume note as a replacement `systemPrompt` | that turn's prefix differed: full re-read, and other sections dropped for the turn | checkpoint only: nothing injected (`pi -c` resumes the whole conversation) |
+| thinking level changed mid-session | osmos writes `Reasoning Effort: N` at the top of the prompt | none: pick the level at session start |
+| 25 tools declared (~8k tokens) | read again on every cold turn | 8 declared, the rest via codemode |
+
+**The prefix, before and after** (same session start, a 1-word message):
+
+| | tools declared | cold prompt | cold read |
+|---|---|---|---|
+| before | 25 | 13,968 tokens | 31.4 s |
+| after | 8 | 7,952 tokens | 17.5 s |
+| a turn after the progress note, before / after the fix | | 0 / 13,967 reused | 32.4 / 9.4 s |
+
+`ask_user_question` was kept with trimmed guidance (`config/ask-user-question.json`): ~2.7k chars of prompt instead of ~5.5k.
+
+**Semble first** (6 "where is X" questions on this repo, one fresh session each, order alternated; the rule
+in `APPEND_SYSTEM.md`):
+
+| | rg (default habit) | semble first |
+|---|---|---|
+| wall time | 472 s | **367 s** (-22%) |
+| model turns | 33 | **22** |
+| output tokens | 4,368 | **2,706** (-38%) |
+| correct | 5/6 | **6/6** |
+
+Most of the gap is one question rg answered wrong after 13 calls; without it semble is ~6% faster and uses ~22%
+fewer output tokens. The same rule placed in `AGENTS.md` was ignored (0 semble calls, 229 s, wrong answer); at the
+end of the system prompt (`APPEND_SYSTEM.md`) it was followed.
+
+**Serena for known symbols** (6 symbol questions: callers, a function body, an outline; Python/TypeScript only):
+
+| | without the serena line | with it |
+|---|---|---|
+| wall time | 296 s | **247 s** (-16%) |
+| tool-result text read | 37,450 chars | **23,260** (-38%) |
+| output tokens | 2,936 | **2,311** (-21%) |
+| correct | 5/6 | 5/6 |
+
+The gain came from narrower reads more than from serena calls (one per arm), so the rule is scoped: serena once the
+task names a symbol, not for search, docs, config, shell or languages without a language server.
+
+Limits: one run per question per arm, one model (osmos); not repeated on halogen or cloud models.
 
 ## Install & ops
 

@@ -112,6 +112,10 @@ and compaction stay on-device either way. All commands, daily use and uninstall:
 
 Every layer keeps tokens and calls off the main model. Locally that cuts prefill time; on a cloud model it cuts the bill.
 
+- **Small, stable prompt prefix:** 8 tools declared instead of 25 (the rest via codemode) and nothing rewrites the
+  system prompt mid-session: a cold turn on osmos 31.4 s to 17.5 s (13,968 to 7,952 tokens), cached turns stay cached.
+- **Search routing:** semble first for finding code (-22% wall time, -38% output tokens on osmos), serena once the task
+  is about a known symbol (-16% wall time, -38% tool output read).
 - **Symbol tools (serena):** a function body in 822 chars instead of 13,980 to read the file.
 - **Code search (semble):** 17/18 vs 13/18 top-3 hits, 2-3x faster queries than the NPU pipeline it replaced.
 - **Sidecar for commits and compaction:** large commit diffs 18.5k to 7.1k tokens; compaction ~24 s non-blocking vs ~52 s.
