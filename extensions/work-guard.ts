@@ -38,6 +38,8 @@ const emptyQuotes = (s: string) => s.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, '""')
 // exported for tests: does this bash command edit project source (as opposed to build/test/run)?
 export const blocksBashEdit = (cmd: string, cwd = ""): boolean => {
 	if (cwd.startsWith(TMPDIR) || cmd.includes(TMPDIR)) return false; // scratch work, wherever the session started
+	// a variable the same command fills from mktemp (H=$(mktemp -d); ... > $H/x.py) is a temp path: read as /tmp
+	for (const [, v] of cmd.matchAll(/\b(\w+)=\$\(mktemp\b/g)) cmd = cmd.replace(new RegExp(`\\$\\{?${v}\\}?(?=/)`, "g"), "/tmp");
 	const runsPython = /^\s*python3?\b/.test(cmd) || /(^|\||&&|;)\s*python3?\s/.test(cmd);
 	// text quoted in a sed pattern or a heredoc body is data, not an edit: only python actually being run may match that rule
 	const probe = runsPython ? cmd : stripHeredocs(cmd);

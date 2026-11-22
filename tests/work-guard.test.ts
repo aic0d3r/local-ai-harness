@@ -30,6 +30,11 @@ test("lets scratch work, reads and build/test commands through", () => {
 	expect(blocksBashEdit("cd /tmp; python3 - <<'PY'\nopen('p.py','w').write(s)\nPY", PROJ)).toBe(false);
 	expect(blocksBashEdit("cd /tmp && sed -i s/a/b/ scratch.py", PROJ)).toBe(false);
 	expect(blocksBashEdit("sed -i s/a/b/ x.go", "/tmp")).toBe(false);
+	// a mktemp'd variable is a temp dir; any other variable is not
+	expect(blocksBashEdit("H=$(mktemp -d); git show HEAD:setup/mcp.py > $H/mcp_old.py", PROJ)).toBe(false);
+	expect(blocksBashEdit("D=$(mktemp -d) && echo x >> ${D}/a.ts", PROJ)).toBe(false);
+	expect(blocksBashEdit("H=$(mktemp -d); echo x > $SRC/a.py", PROJ)).toBe(true);
+	expect(blocksBashEdit("echo x > $H/a.py", PROJ)).toBe(true);
 	expect(blocksBashEdit("cmd 2>&1 | tail -3", PROJ)).toBe(false);
 	expect(blocksBashEdit("node -e 'if (s.length > 72) { throw 1 }' 2>&1 | tail -5", PROJ)).toBe(false);
 	expect(blocksBashEdit("curl -s -d '{\"a\":1}' -o /dev/null url/v1/x", PROJ)).toBe(false);
