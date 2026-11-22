@@ -4,7 +4,8 @@
 #   scripts/upgrade-osmos.sh [tag]      (default: the latest release; starts osmos on it whether or not it was running)
 # The pack on disk (~141 GB) is never touched: a release only changes the engine, and its installer's layout changes are
 # opt-in (--ctx), so an existing pack's osmos.json stays valid. Your own uncommitted edits to tracked files stay in place:
-# git carries them over, and refuses the checkout (before anything is stopped) if the release changes the same lines.
+# they are merged onto the release (stash, checkout, pop); if the release changes the same lines the upgrade ends
+# before anything is stopped, with your edits and the checkout left as they were.
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 START="$REPO/server/start-osmos.sh"
@@ -39,6 +40,14 @@ fi
 DIRTY=$(git -C "$DIR" status --porcelain --untracked-files=no)
 [ -n "$DIRTY" ] && echo "      keeping your local edits: $(echo "$DIRTY" | awk '{print $2}' | tr '\n' ' ')"
 
+co(){ if [ -n "$BRANCH" ]; then git -C "$DIR" checkout -q -B "$BRANCH" "$1"; else git -C "$DIR" checkout -q "$1"; fi; }
+move(){  # check out $1 carrying local edits over (plain checkout refuses any file the release touches); on a conflict, undo
+  local here; here=$(git -C "$DIR" rev-parse HEAD)
+  [ -z "$(git -C "$DIR" status --porcelain --untracked-files=no)" ] && { co "$1"; return; }
+  git -C "$DIR" stash push -q || return 1
+  co "$1" && git -C "$DIR" stash pop -q && return 0
+  git -C "$DIR" reset -q --hard; co "$here"; git -C "$DIR" stash pop -q; return 1  # a failed pop keeps the stash
+}
 PIDS(){ pgrep -f "$DIR/bin/osmos-(api|serve)" 2>/dev/null; }
 stop(){
   local p; p=$(ss -ltnpH "sport = :$PORT" 2>/dev/null | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2)
@@ -65,8 +74,7 @@ wait_up(){  # /health is 503 while osmos loads its 91 GiB; a launcher that exits
 rollback(){
   echo "FAIL: $1 - rolling back to $CUR"
   stop
-  { [ -n "$BRANCH" ] && git -C "$DIR" checkout -q -B "$BRANCH" "$OLD" || git -C "$DIR" checkout -q "$OLD"; } 2>/dev/null \
-    && build "$LOG.rollback" || echo "      could not rebuild $CUR (log: $LOG.rollback)"
+  move "$OLD" >/dev/null 2>&1 && build "$LOG.rollback" || echo "      could not rebuild $CUR (log: $LOG.rollback)"
   start "$LOG.rollback-server"; local pid=$!
   echo "      restarting on $CUR (log: $LOG.rollback-server)"
   # wait for it: whoever sees this script exit (the wizard) must not start a second server on the same port
@@ -76,8 +84,7 @@ rollback(){
 
 echo "[1/5] checking out $TAG in $DIR (running: $CUR)"
 # before anything is stopped: a conflict with your local edits ends the upgrade with the old server still up
-if [ -n "$BRANCH" ]; then git -C "$DIR" checkout -q -B "$BRANCH" "$TAG"; else git -C "$DIR" checkout -q "$TAG"; fi \
-  || { echo "FAIL: git cannot check out $TAG over your local edits - commit or stash them, then re-run"; exit 1; }
+move "$TAG" || { echo "FAIL: $TAG changes the same lines as your local edits (kept, still on $CUR) - commit or stash them, then re-run"; exit 1; }
 echo "[2/5] stopping osmos, building $TAG (log: $LOG)"
 stop
 build "$LOG" || { tail -5 "$LOG"; rollback "build failed (log: $LOG)"; }
