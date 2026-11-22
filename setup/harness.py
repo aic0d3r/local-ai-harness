@@ -423,6 +423,130 @@ def gtt_gb():
     return sum(int(open(f).read()) for f in glob.glob("/sys/class/drm/card*/device/mem_info_gtt_used")) / 2**30
 
 
+def mem_pools():
+    """Bytes. unified: the GPU has no memory of its own (APU, Strix Halo; KFD local_mem_size 0), so GTT and the BIOS
+    carve-out (vram) both come out of system RAM; on a separate card vram is its own pool.
+    shortcut: AMD only, NVIDIA cards show RAM alone; add nvidia-smi when someone runs one."""
+    mi = {l.split(":")[0]: int(l.split()[1]) * 1024 for l in open("/proc/meminfo")}
+    cards = [c for c in glob.glob("/sys/class/drm/card[0-9]/device") if os.path.exists(f"{c}/mem_info_gtt_used")]
+    rd = lambda k: sum(int(open(f"{c}/mem_info_{k}").read()) for c in cards)
+    gpus = [open(p).read() for p in glob.glob("/sys/class/kfd/kfd/topology/nodes/*/properties")]
+    gpus = [p for p in gpus if not re.search(r"^simd_count 0$", p, re.M)]
+    return {"gpu": bool(cards), "unified": bool(gpus) and all(re.search(r"^local_mem_size 0$", p, re.M) for p in gpus),
+            "ram_total": mi["MemTotal"], "ram_free": mi["MemAvailable"],
+            "vram_total": rd("vram_total") if cards else 0, "vram_used": rd("vram_used") if cards else 0, "gtt_used": rd("gtt_used") if cards else 0}
+
+
+def proc_mem(pid):
+    """[ram, gtt, vram] bytes one process holds; gtt/vram None when its fds are not ours to read (a root container).
+    ram is anonymous + shared memory: an mmapped model file is page cache the kernel gives back anyway."""
+    try:
+        st = {l.split(":")[0]: int(l.split()[1]) * 1024 for l in open(f"/proc/{pid}/status") if l.startswith(("RssAnon", "RssShmem"))}
+    except OSError:
+        return [0, 0, 0]
+    out, seen = [sum(st.values()), 0, 0], set()
+    try:
+        fds = os.listdir(f"/proc/{pid}/fd")
+    except OSError:
+        return [out[0], None, None]
+    for fd in fds:
+        try:
+            if not os.readlink(f"/proc/{pid}/fd/{fd}").startswith("/dev/dri/"):
+                continue
+            kv = dict(l.split(":", 1) for l in open(f"/proc/{pid}/fdinfo/{fd}") if ":" in l)
+        except OSError:
+            continue  # closed meanwhile
+        cid = (kv.get("drm-pdev", "").strip(), kv.get("drm-client-id", fd).strip())
+        if cid in seen:  # one GPU client open on several fds counts once
+            continue
+        seen.add(cid)
+        for i, k in ((1, "gtt"), (2, "vram")):
+            v = kv.get(f"drm-total-{k}", kv.get(f"drm-memory-{k}", "0 KiB")).split()
+            out[i] += int(v[0]) * {"KiB": 1024, "MiB": 2**20, "GiB": 2**30}.get(v[1] if len(v) > 1 else "", 1)
+    return out
+
+
+def port_pids(port, engine=None):
+    """Host pids serving port: a container's whole process list, else the listener (ours only) and its children."""
+    cids = engine_containers(engine) if engine else subprocess.run(["docker", "ps", "-q", "--filter", f"publish={port}"], capture_output=True, text=True).stdout.split()
+    if cids:
+        return {int(p) for c in cids for p in subprocess.run(["docker", "top", c, "-eo", "pid"], capture_output=True, text=True).stdout.split()[1:]}
+    pids = {int(p) for p in re.findall(r"pid=(\d+)", subprocess.run(["ss", "-ltnpH", f"sport = :{port}"], capture_output=True, text=True).stdout)}
+    parent = {}
+    for s in glob.glob("/proc/[0-9]*/stat"):
+        try:
+            parent[int(s.split("/")[2])] = int(open(s).read().rsplit(")", 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            pass
+    while True:  # osmos-api starts osmos-serve, which holds the memory
+        more = {p for p, pp in parent.items() if pp in pids} - pids
+        if not more:
+            return pids
+        pids |= more
+
+
+def mem_usage(live, sidecar):
+    """[(label, [ram, gtt, vram], estimated)] for each running engine (live: engine -> port) and the sidecar.
+    A root container's GPU memory cannot be read without sudo: what readable processes do not account for is given to
+    those engines, one combined entry when there are several."""
+    m = mem_pools()
+    rows = [(ename(e), port_pids(port, e)) for e, port in live.items()] + ([("sidecar", port_pids(8090))] if sidecar else [])
+    rows = [(n, [proc_mem(p) for p in pids]) for n, pids in rows]
+    known = [n for n, ps in rows if all(p[1] is not None for p in ps)]
+    out = [(n, [sum(p[i] for p in ps) for i in range(3)], False) for n, ps in rows if n in known]
+    blind = [(n, ps) for n, ps in rows if n not in known]
+    if blind:
+        mine = [proc_mem(p) for p in own_pids()] if m["gpu"] else []
+        left = [max(0, m[k] - sum(p[i] or 0 for p in mine)) for i, k in ((1, "gtt_used"), (2, "vram_used"))]
+        out.append((" + ".join(n for n, _ in blind), [sum(p[0] for _, ps in blind for p in ps), *left], True))
+    return out, m
+
+
+def own_pids():
+    for p in glob.glob("/proc/[0-9]*"):
+        try:
+            if os.stat(p).st_uid == os.getuid():
+                yield int(p.split("/")[2])
+        except OSError:
+            pass  # exited meanwhile
+
+
+def mem_line(live, sidecar):
+    """'osmos :8091 106 GiB, sidecar 9 GiB  (8 of 121 GiB free' - the caller closes the bracket."""
+    use, m = mem_usage(live, sidecar)
+    names = {ename(e): f"{ename(e)} :{p}{'' if PROFILES['engines'][e].get('script') else ' (not ours)'}" for e, p in live.items()}
+    parts = [f"{' + '.join(names.get(n, n) for n in label.split(' + '))} {'~' if est else ''}{fmt_share(b, m)}" for label, b, est in use]
+    return f"{', '.join(parts) or 'nothing'}  ({fmt_free(m)}"
+
+
+def fmt_share(b, m):
+    G = 2**30
+    if m["unified"] or not m["gpu"]:
+        return f"{sum(b) / G:.0f} GiB"
+    return f"{b[2] / G:.0f} GiB VRAM + {(b[0] + b[1]) / G:.0f} GiB RAM"
+
+
+def mem_after_stop():
+    m = mem_pools()
+    held = m["gtt_used"] / 2**30
+    # >3 GiB GPU memory still held with no engine left = the one stopped leaked it (halogen issue #79)
+    leak = held > 3 and not running_engines() and not sidecar_up()
+    return fmt_free(m) + (f"; {held:.0f} GiB GPU memory still held with nothing running: reboot before the next engine start" if leak else "")
+
+
+def fmt_free(m):
+    """Room for the next engine. A small carve-out folds into RAM; a large one (BIOS set to 64-96 GiB) is GPU-only room
+    a RAM-heavy engine such as osmos cannot use, so it is named apart."""
+    G = 2**30
+    vfree, vt = (m["vram_total"] - m["vram_used"]) / G, m["vram_total"] / G
+    ram = f"{m['ram_free'] / G:.0f} of {m['ram_total'] / G:.0f} GiB"
+    if not m["gpu"] or (m["unified"] and vt <= 8):
+        return f"{ram} free"
+    if m["unified"]:
+        return f"{m['ram_free'] / G:.0f} GiB RAM, {vfree:.0f} of {vt:.0f} GiB GPU-reserved free"
+    return f"{vfree:.0f}/{vt:.0f} GiB VRAM, {m['ram_free'] / G:.0f}/{m['ram_total'] / G:.0f} GiB RAM free"
+
+
 def sidecar_up():
     try:
         http("http://127.0.0.1:8090/health")
@@ -1041,7 +1165,7 @@ def stop_engine(engine, running):
         if gtt_gb() < 3:
             break
         time.sleep(2)
-    print(f"  GPU memory in use now: {gtt_gb():.1f} GiB")
+    print(f"  {mem_after_stop()}")
     return True
 
 
@@ -2240,6 +2364,7 @@ def cmd_status(_):
     up = bool(served_models(port, p["engine"]))
     print(f"engine {versioned_title(p['engine'], p['model'])} :{port} {'UP' if up else 'DOWN'}  npu {p['npu']}")
     print("speed:", speed_text(p["engine"], p["model"]) or "not measured yet (./harness tune)")
+    print(f"memory: {mem_line({e['engine']: e['port'] for e in running_engines()}, sidecar_up())})")
     if sidecar_pref() == "0":
         return print("sidecar: off (opted out; ./harness config turns it on)")
     try:
@@ -2392,10 +2517,9 @@ def cmd_config(a):
         live = {e["engine"]: e["port"] for e in running_engines()}
         ours = [e for e in live if PROFILES["engines"][e].get("script")]  # vllm, ollama, lmstudio, your own llama-server: not ours to stop
         tiny = sidecar_up()
-        up = [f"{ename(e)} :{live[e]}{'' if e in ours else ' (not ours)'}" for e in live] + (["sidecar"] if tiny else [])
         items = {
             f"engine        {versioned_title(eng, p['model']) if eng else '-'}": "engine",
-            f"running       {', '.join(up) or 'nothing'}  ({gtt_gb():.0f} GiB GPU memory{', pick to stop' if ours or tiny else ''})": "running",
+            f"running       {mem_line(live, tiny)}{', pick to stop' if ours or tiny else ''})": "running",
             **({f"model         {model_name(engine_model(eng))}": "model"}
                if eng in ("gufo", "strata", "llamacpp") else {}),  # only these load the model answer
             **({f"weights       {'stock' if no_abl else weights_pref()}  ({'this model has no abliterated build' if no_abl else 'every engine, next start'})": "weights"}
@@ -2418,7 +2542,7 @@ def cmd_config(a):
                 for e in ours:
                     stop_engine(e, live)
                 stop_sidecar()
-                print(f"  stopped; GPU memory in use now: {gtt_gb():.1f} GiB")
+                print(f"  stopped; {mem_after_stop()}")
         elif k == "engine":
             eng, mod = pick_target(detect(), False, esc=BACK)
             if eng is BACK:

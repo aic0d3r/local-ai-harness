@@ -811,3 +811,22 @@ if old_sd is None:
 else:
     os.environ["STRATA_DATA"] = old_sd
 print("ok: Strata's Docker key reaches pi and the probes")
+
+# memory row: a root container's GPU memory is unreadable, so what our processes do not hold is given to it
+G = 2**30
+saved = {n: getattr(h, n) for n in ("mem_pools", "port_pids", "proc_mem", "own_pids")}
+h.mem_pools = lambda: {"gpu": True, "unified": True, "ram_total": 121 * G, "ram_free": 8 * G, "vram_total": 4 * G, "vram_used": 1 * G, "gtt_used": 90 * G}
+h.port_pids = lambda port, engine=None: {1} if engine else {2}  # 1 = the engine, 2 = the sidecar
+h.own_pids = lambda: iter([3])  # the desktop: 5 GiB GTT of the 90
+h.proc_mem = lambda pid: {1: [4 * G, None, None], 2: [1 * G, None, None], 3: [0, 5 * G, 0]}[pid]
+use, _ = h.mem_usage({"halogen": 8731}, True)
+assert use == [("halogen + sidecar", [5 * G, 85 * G, 1 * G], True)], use  # the kernel's own VRAM lands here too: hence the ~
+assert h.mem_line({"halogen": 8731}, True) == "halogen :8731 + sidecar ~91 GiB  (8 of 121 GiB free", h.mem_line({"halogen": 8731}, True)
+h.proc_mem = lambda pid: {1: [88 * G, 18 * G, 0], 2: [0, 0, 0]}[pid]  # osmos runs as us: read exactly
+assert h.mem_usage({"osmos": 8091}, False)[0] == [("osmos", [88 * G, 18 * G, 0], False)]
+m = dict(h.mem_pools(), unified=False, vram_total=24 * G, vram_used=20 * G, ram_total=64 * G, ram_free=50 * G)
+assert (h.fmt_free(m), h.fmt_share([2 * G, 0, 20 * G], m)) == ("4/24 GiB VRAM, 50/64 GiB RAM free", "20 GiB VRAM + 2 GiB RAM")
+assert h.fmt_free(dict(h.mem_pools(), vram_total=96 * G, vram_used=56 * G)) == "8 GiB RAM, 40 of 96 GiB GPU-reserved free"
+for n, f in saved.items():
+    setattr(h, n, f)
+print("ok: memory row on shared memory, a separate card and root containers")
