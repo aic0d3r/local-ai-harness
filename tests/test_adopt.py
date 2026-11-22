@@ -3,6 +3,7 @@ import hashlib, http.server, io, json, os, sys, tarfile, tempfile, threading, zi
 
 HOME = tempfile.mkdtemp()
 os.environ.update(HOME=HOME, USERPROFILE=HOME, PI_HOME=os.path.join(HOME, ".pi"))
+os.environ.pop("XDG_CONFIG_HOME", None)  # the ask_user_question config then lands in HOME/.config
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "setup"))
 import adopt
 
@@ -64,6 +65,12 @@ except ValueError:
 # agents: user-owned file never overwritten
 open(os.path.join(AGENT, "AGENTS.md"), "w").write("mine")
 assert "left untouched" in run(adopt.agents) and open(os.path.join(AGENT, "AGENTS.md")).read() == "mine"
+# the prompt-cost files: installed when absent (the ask config where the package reads it), then left alone
+assert os.path.isfile(os.path.join(AGENT, "APPEND_SYSTEM.md"))
+ask = os.path.join(HOME, ".config", "rpiv-ask-user-question", "config.json")
+assert json.load(open(ask))["guidance"]["description"]
+open(ask, "w").write("{}")
+assert "config.json exists" in run(adopt.agents) and open(ask).read() == "{}"
 
 # skills: a pi-side micro-interactions is the user's only copy unless ~/.agents/skills has one
 mine = os.path.join(AGENT, "skills", "micro-interactions")

@@ -1,0 +1,1 @@
+For 'where/how is X done' questions about code, search with semble first, through codemode: `await tools.mcp__semble__search({ query: "<behaviour or name>", repo: "<the absolute cwd>", top_k: 5 })`, then jump to the returned file:line. Use rg only for exact-string sweeps.

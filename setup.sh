@@ -344,7 +344,7 @@ fi
 # mcp.json points at ~/.local/bin/serena; nothing here installs it (the Windows installer does offer it)
 [ -x "$HOME/.local/bin/serena" ] || warn "serena not found at ~/.local/bin/serena: the symbol tools stay off. Install: uv tool install -p 3.13 serena-agent"
 
-echo "== 2c. global AGENTS.md =="
+echo "== 2c. global AGENTS.md, APPEND_SYSTEM.md, ask_user_question guidance =="
 # user-owned: write only when absent, never append to or overwrite an existing one
 python3 "$REPO/setup/adopt.py" agents
 fi

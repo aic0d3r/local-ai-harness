@@ -1,15 +1,20 @@
 # Agent notes (installed by the harness setup.sh; edit freely)
 
+## Codemode tools
+
+Serena, semble, `subagent`, `triage` and `dedup_scan` are codemode-only (their declarations stay out of
+the prompt, which every cold turn reads again): call them from a codemode script, e.g.
+`await tools.mcp__serena__find_symbol({ name_path_pattern: "x" })`; `describeTool(name)` gives the exact arguments.
+
 ## Code search — semble
 
-Semble (MCP `search` / `find_related`, or CLI `semble search "<query>" <path>`) is the default for
-"where/how is X done" questions and unfamiliar code: describe behavior or name an identifier, then
-jump to the returned file:line instead of grep+read. Both tools require `repo`: always pass the
-absolute project root (the cwd), never a file path. Use `--content docs|config|all` for non-code.
+Semble first for code search (the rule is in APPEND_SYSTEM.md). `search` and `find_related` require
+`repo`: always the absolute project root (the cwd), never a file path. `content: "docs"|"config"|"all"`
+for non-code.
 
 ## Serena — symbol-level work
 
-Call `mcp__serena__activate_project` once per project, then prefer Serena for symbols:
+Call `activate_project` once per project, then prefer Serena for symbols:
 `get_symbols_overview` (file structure), `find_symbol` (definitions), `find_referencing_symbols`
 (callers/impact), `replace_symbol_body` / `insert_after_symbol` (edits), `rename_symbol`
 (project-wide rename), `get_diagnostics_for_file` (type/syntax errors). Use grep only for

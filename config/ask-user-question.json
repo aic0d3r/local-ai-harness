@@ -1,0 +1,9 @@
+{
+  "guidance": {
+    "description": "Ask the user 1-4 structured multiple-choice questions when a decision blocks progress. 2-4 options each; a free-text row is added automatically (never author \"Other\"). Recommended option first, label ending \"(Recommended)\". multiSelect when several apply; optional markdown preview per option (single-select only).",
+    "promptSnippet": "Ask the user structured questions when requirements are ambiguous",
+    "promptGuidelines": [
+      "Use ask_user_question only when you cannot proceed without the user's decision; group all questions into one call."
+    ]
+  }
+}

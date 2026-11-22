@@ -337,14 +337,29 @@ def rtk_binary():
         warn("rtk not on PATH - add ~/.local/bin to PATH in your shell profile, or pi-rtk-optimizer warns 'rtk binary unavailable'")
 
 
+def ask_config_path():
+    """Where rpiv-ask-user-question reads its config: $XDG_CONFIG_HOME when absolute (its rpiv-config rule), else ~/.config."""
+    x = os.environ.get("XDG_CONFIG_HOME", "").strip()
+    base = x if os.path.isabs(x) else os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "rpiv-ask-user-question", "config.json")
+
+
 def agents():
-    """User-owned: write only when absent, never append to or overwrite an existing one."""
-    dst = os.path.join(AGENT, "AGENTS.md")
-    if os.path.isfile(dst):
-        ok(f"AGENTS.md exists (left untouched; see {os.path.join(REPO, 'config', 'AGENTS.md')} for semble/serena guidance to merge)")
-    elif os.path.isdir(AGENT):
-        shutil.copy(os.path.join(REPO, "config", "AGENTS.md"), dst)
-        ok("installed AGENTS.md (semble/serena guidance)")
+    """User-owned: write only when absent, never append to or overwrite an existing one.
+    APPEND_SYSTEM.md: semble first for code search (A/B on osmos: -22% wall time, -38% output tokens);
+    ask-user-question config: its guidance trimmed (~1.4k -> ~0.7k prompt tokens)."""
+    if not os.path.isdir(AGENT):
+        return
+    for src, dst, what in (("AGENTS.md", os.path.join(AGENT, "AGENTS.md"), "semble/serena guidance"),
+                           ("APPEND_SYSTEM.md", os.path.join(AGENT, "APPEND_SYSTEM.md"), "semble-first search rule"),
+                           ("ask-user-question.json", ask_config_path(), "ask_user_question's short guidance")):
+        name = os.path.basename(dst) if src != "ask-user-question.json" else dst
+        if os.path.isfile(dst):
+            ok(f"{name} exists (left untouched; see {os.path.join(REPO, 'config', src)} for the {what} to merge)")
+        else:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy(os.path.join(REPO, "config", src), dst)
+            ok(f"installed {name} ({what})")
 
 
 # ---------- all: what setup.sh --strata does, for a box without bash ----------
@@ -397,7 +412,7 @@ def run_all(eng, url):
     packages()
     print("== 2b. MCP servers (mcp.json) ==")
     mcp()
-    print("== 2c. global AGENTS.md ==")
+    print("== 2c. global AGENTS.md, APPEND_SYSTEM.md, ask_user_question guidance ==")
     agents()
     if eng == "strata":
         print("== 3. strata checks ==")
