@@ -65,6 +65,13 @@ except ValueError:
 # agents: user-owned file never overwritten
 open(os.path.join(AGENT, "AGENTS.md"), "w").write("mine")
 assert "left untouched" in run(adopt.agents) and open(os.path.join(AGENT, "AGENTS.md")).read() == "mine"
+# an unedited copy of an older shipped AGENTS.md is replaced; the current one is never listed as old
+old = b"# Agent notes (an older shipped version)\n"
+adopt.OLD_AGENTS.add(hashlib.sha256(old).hexdigest())
+open(os.path.join(AGENT, "AGENTS.md"), "wb").write(old)
+assert "updated AGENTS.md" in run(adopt.agents)
+assert open(os.path.join(AGENT, "AGENTS.md")).read() == open(os.path.join(adopt.REPO, "config", "AGENTS.md")).read()
+assert hashlib.sha256(open(os.path.join(adopt.REPO, "config", "AGENTS.md"), "rb").read()).hexdigest() not in adopt.OLD_AGENTS
 # the prompt-cost files: installed when absent (the ask config where the package reads it), then left alone
 assert os.path.isfile(os.path.join(AGENT, "APPEND_SYSTEM.md"))
 ask = os.path.join(HOME, ".config", "rpiv-ask-user-question", "config.json")

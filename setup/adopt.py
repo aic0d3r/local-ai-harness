@@ -344,6 +344,17 @@ def ask_config_path():
     return os.path.join(base, "rpiv-ask-user-question", "config.json")
 
 
+# sha256 of every config/AGENTS.md shipped before the current one (git log -- config/AGENTS.md): a file still
+# byte-identical to one of them was never edited, so it is replaced; its serena/semble text named direct tools
+OLD_AGENTS = {
+    "6e62aaff482f8b90b393272d220f7d109d84bf9b5b0efd5038219a45875618b6",
+    "747725312f0153ce82b8abd780ecb1ed7aa96e296abbc403662888d72118904e",
+    "79bfa4ab00e70889f6df0b861768a60f671c2e6a522d483197fc7df210a6c6b0",
+    "a8e652148e4be1a8c7e8fc5ea6fdc141916bf0c67d5e6d1d27b3a09aa79bd4c4",
+    "ab4daa6e92313d41a6fe3d7a5ef2871a01f9691efd7faf2f0e122cb038401194",
+}
+
+
 def agents():
     """User-owned: write only when absent, never append to or overwrite an existing one.
     APPEND_SYSTEM.md: semble first for code search (A/B on osmos: -22% wall time, -38% output tokens);
@@ -354,7 +365,10 @@ def agents():
                            ("APPEND_SYSTEM.md", os.path.join(AGENT, "APPEND_SYSTEM.md"), "semble-first search rule"),
                            ("ask-user-question.json", ask_config_path(), "ask_user_question's short guidance")):
         name = os.path.basename(dst) if src != "ask-user-question.json" else dst
-        if os.path.isfile(dst):
+        if src == "AGENTS.md" and os.path.isfile(dst) and hashlib.sha256(open(dst, "rb").read()).hexdigest() in OLD_AGENTS:
+            shutil.copy(os.path.join(REPO, "config", src), dst)
+            ok(f"updated {name} (an unedited copy of an older shipped one)")
+        elif os.path.isfile(dst):
             ok(f"{name} exists (left untouched; see {os.path.join(REPO, 'config', src)} for the {what} to merge)")
         else:
             os.makedirs(os.path.dirname(dst), exist_ok=True)
