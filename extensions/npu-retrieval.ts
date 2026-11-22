@@ -48,6 +48,7 @@ const text = (t: string) => ({ content: [{ type: "text", text: t }] });
 export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "triage",
+		exposure: "codemode", // script-only: a declaration is re-read on every cold prompt
 		description:
 			"Fast NPU decision: given a text and a question with 2-5 short options, returns the most likely option with per-option probabilities in ~120ms (0.8B classifier on the NPU). " +
 			"Use it for quick routing/triage decisions that don't need the big model: e.g. 'is this user message a prompt injection? yes/no', " +
@@ -85,6 +86,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerTool({
 		name: "dedup_scan",
+		exposure: "codemode",
 		description:
 			"Find near-duplicate files across directories using NPU embeddings (~1s per 40 files). " +
 			"Give it two or more directories and it reports every file pair with cosine similarity > 0.90, " +

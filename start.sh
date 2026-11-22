@@ -2,7 +2,7 @@
 # one command for daily use: bring the engine ./setup.sh picked back up (starts halogen, gufo or Strata
 # if it is down; asks before stopping another engine that holds the GPU memory), refresh the install
 # quietly, show an update notice, then drop into the pi TUI on that engine.
-#   ./start.sh [project-dir]
+#   ./start.sh [project-dir] [pi args...]   e.g. ./start.sh . -c  (continue the last session there)
 # no ./setup.sh run yet: it says so and exits (a pre-wizard halogen install, which has the NPU extension, still works).
 set -u
 D="${1:-$PWD}"
@@ -16,4 +16,4 @@ read -r PROV MID < <(python3 -c 'import json,sys; p=json.load(open(sys.argv[1]))
 cd "$D"
 # ponytail rules stay active; hide the redundant footer indicator (/ponytail status still works)
 export PONYTAIL_HIDE_STATUS=1
-exec pi --provider "${PROV:-halogen}" --model "${MID:-halogen-qwen3.8-flash-next}"
+exec pi --provider "${PROV:-halogen}" --model "${MID:-halogen-qwen3.8-flash-next}" "${@:2}"

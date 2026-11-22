@@ -5,15 +5,6 @@
       "args": ["start-mcp-server", "--project-from-cwd"],
       "exposure": "codemode",
       "toolExposure": {
-        "activate_project": "direct",
-        "find_symbol": "direct",
-        "get_symbols_overview": "direct",
-        "find_referencing_symbols": "direct",
-        "search_for_pattern": "direct",
-        "get_diagnostics_for_file": "direct",
-        "replace_symbol_body": "direct",
-        "insert_after_symbol": "direct",
-        "rename_symbol": "direct",
         "safe_delete_symbol": "hidden",
         "delete_memory": "hidden",
         "rename_memory": "hidden",
@@ -54,8 +45,8 @@
     "semble": {
       "command": "uvx",
       "args": ["--from", "semble[mcp]==0.6.2", "semble"],
-      "exposure": "hidden",
-      "toolExposure": { "search": "direct", "find_related": "direct", "*": "hidden" },
+      "exposure": "codemode",
+      "toolExposure": { "*": "codemode" },
       "description": "Semble instant semantic code search (local or remote git repos; replaced the NPU rag pipeline - A/B 17/18 vs 13/18, 2026-10-10)"
     }
   }

@@ -23,6 +23,13 @@ assert s["exposure"] == "codemode" and s["toolExposure"] == mcp.serena_exposure(
 assert "ddg" in get() and "semble" in get()
 assert os.path.exists(p + ".pre-mcp-migration")
 
+# the previous shipped layout (9 serena tools direct, semble direct) migrates to codemode only
+put({"serena": {"command": "x", "args": ["--project-from-cwd"], "exposure": "codemode", "toolExposure": dict(mcp.OLD_NINE)},
+     "ddg": {}, "semble": {"exposure": "hidden", "toolExposure": dict(mcp.OLD_SEMBLE)}})
+mcp.cmd_migrate(p)
+assert "direct" not in get()["serena"]["toolExposure"].values()
+assert get()["semble"] == {"exposure": "codemode", "toolExposure": {"*": "codemode"}}
+
 # a customised layout is left alone
 custom = {"find_symbol": "direct", "*": "hidden"}
 put({"serena": {"command": "x", "args": ["--project-from-cwd"], "exposure": "hidden", "toolExposure": custom}, "ddg": {}, "semble": {}})

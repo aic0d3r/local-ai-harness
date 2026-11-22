@@ -51,7 +51,10 @@ SEMBLE_COMMAND = "uvx"
 SEMBLE_ARGS = ["--from", "semble[mcp]==0.6.2", "semble"]
 SEMBLE_DESC = ("Semble instant semantic code search (local or remote git repos; replaced the NPU rag "
                "pipeline - A/B 17/18 vs 13/18, 2026-10-10)")
-SEMBLE_EXPOSURE = {"search": "direct", "find_related": "direct", "*": "hidden"}
+# serena and semble are script-only (codemode): their ~6k tokens of declarations were read again on every cold
+# prompt (~12 s at osmos's ~440 tok/s prefill); only the core tools and ddg are declared to the model
+SEMBLE_EXPOSURE = {"*": "codemode"}
+OLD_SEMBLE = {"search": "direct", "find_related": "direct", "*": "hidden"}
 
 DDG_COMMAND = "uvx"
 DDG_ARGS = ["--from", "duckduckgo-mcp-server[browser]==0.7.0", "duckduckgo-mcp-server"]
@@ -64,11 +67,12 @@ JINA_KEY = "~/.config/opencode/jina.key"
 
 
 def serena_exposure():
-    """Shipped serena map: 9 core tools direct, destructive/duplicate tools hidden, rest script-only."""
-    return {**CORE_DIRECT, **HIDDEN, "*": "codemode"}
+    """Shipped serena map: destructive/duplicate tools hidden, everything else script-only (codemode)."""
+    return {**HIDDEN, "*": "codemode"}
 
 
 # Exact layouts written by older setup.sh / config examples. Anything else is user customization.
+OLD_NINE = {**CORE_DIRECT, **HIDDEN, "*": "codemode"}  # shipped until 2026-11-22: 9 tools direct
 OLD_GENERATED = {**CORE_DIRECT, "*": "hidden"}
 OLD_16 = {
     "activate_project": "direct",
@@ -112,7 +116,7 @@ def semble_server():
     return {
         "command": SEMBLE_COMMAND,
         "args": list(SEMBLE_ARGS),
-        "exposure": "hidden",
+        "exposure": "codemode",
         "toolExposure": dict(SEMBLE_EXPOSURE),
         "description": SEMBLE_DESC,
     }
@@ -155,7 +159,7 @@ def canonical_servers():
 
 def cmd_write(path):
     save(path, {"mcpServers": canonical_servers()})
-    print("  wrote mcp.json (serena direct x9, ddg direct x3, jina disabled, semble direct x2)")
+    print("  wrote mcp.json (ddg direct x3; serena and semble via codemode; jina disabled)")
 
 
 def cmd_migrate(path):
@@ -171,11 +175,12 @@ def cmd_migrate(path):
             changed = True
             print("  serena: added --project-from-cwd (auto-activates the cwd project)")
         te = s.get("toolExposure")
-        if s.get("exposure") == "hidden" and (te == OLD_GENERATED or te == OLD_16):
+        if (s.get("exposure") == "hidden" and (te == OLD_GENERATED or te == OLD_16)) or (
+                s.get("exposure") == "codemode" and te == OLD_NINE):
             s["exposure"] = "codemode"
             s["toolExposure"] = serena_exposure()
             changed = True
-            print("  serena: migrated stale %d-direct hidden layout to 9 direct + codemode tail" % (len(te) - 1))
+            print("  serena: migrated a stale layout to codemode only (no tools declared directly)")
 
     if "ddg" not in servers:
         servers["ddg"] = ddg_server()
@@ -186,6 +191,11 @@ def cmd_migrate(path):
         servers["semble"] = semble_server()
         changed = True
         print("  semble: added to existing mcp.json")
+    elif servers["semble"].get("exposure") == "hidden" and servers["semble"].get("toolExposure") == OLD_SEMBLE:
+        servers["semble"]["exposure"] = "codemode"
+        servers["semble"]["toolExposure"] = dict(SEMBLE_EXPOSURE)
+        changed = True
+        print("  semble: migrated to codemode only")
 
     if changed:
         backup_once(path, ".pre-mcp-migration")
@@ -213,7 +223,7 @@ def cmd_refresh(path):
     sm = servers.setdefault("semble", {})
     sm.setdefault("command", SEMBLE_COMMAND)
     sm.setdefault("args", list(SEMBLE_ARGS))
-    sm["exposure"] = "hidden"
+    sm["exposure"] = "codemode"
     sm["toolExposure"] = dict(SEMBLE_EXPOSURE)
     sm.setdefault("description", SEMBLE_DESC)
 
@@ -236,7 +246,7 @@ def cmd_check(path):
         direct = sum(1 for v in te.values() if v == "direct")
         if s.get("exposure") == "hidden" and (te == OLD_GENERATED or te == OLD_16):
             print("serena MCP uses the old %d-direct hidden layout - ./setup.sh migrates it (or --refresh-mcp)" % direct)
-        elif te.get("*") != "codemode" or direct != len(CORE_DIRECT):
+        elif te.get("*") != "codemode" or direct:
             print("serena MCP exposure differs from the shipped config (%d direct, %s tail) - ./setup.sh --refresh-mcp"
                   % (direct, te.get("*") or "no wildcard"))
     if "ddg" not in servers:

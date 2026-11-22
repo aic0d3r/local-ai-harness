@@ -1,4 +1,4 @@
-// run: bun test tests/   (only a PROGRESS.md this harness wrote may be injected; continuation detection)
+// run: bun test tests/   (only a PROGRESS.md this harness wrote is read back; continuation detection)
 import { expect, test } from "bun:test";
 import * as fs from "node:fs";
 
@@ -26,7 +26,7 @@ test("a PROGRESS.md shipped in a repo is not ours; one we stamped is, until it c
 	expect(isOurs(f, mine + "edited by someone else")).toBe(false);
 });
 
-test("short continue-like prompts resume, long new tasks do not", () => {
+test("short continue-like prompts keep the task, long new tasks relabel", () => {
 	expect(isContinuation("continue")).toBe(true);
 	expect(isContinuation("Continue where we left off. " + "x".repeat(200))).toBe(true);
 	expect(isContinuation("please build a brand new thing for me " + "x".repeat(200))).toBe(false);

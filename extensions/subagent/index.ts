@@ -543,6 +543,7 @@ export default function (pi: ExtensionAPI) {
 	if (process.env.PI_SUBAGENT === "1") return;
 	pi.registerTool({
 		name: "subagent",
+		exposure: "codemode", // script-only: its ~450-token declaration is re-read on every cold prompt
 		label: "Subagent",
 		description: [
 			"Delegate tasks to specialized subagents with isolated context.",

@@ -123,11 +123,10 @@ Every lever and how it was measured: [BENCHMARKS.md](docs/BENCHMARKS.md#efficien
 
 ## Crash recovery
 
-Kill pi or the server mid-task, relaunch `./start.sh` in the same directory and say "continue": `progress-tracker` wrote a
-checkpoint and the fresh session picks it up. Verified across six scenarios, including `kill -9` at response 1, server
-death mid-task and 15-deep compaction chains (reliable to ~8-10 compactions). Limits: one pi task per repo (set
-`PI_PROGRESS_FILE` per task for parallel work), and a stale checkpoint is data, not instructions, so run `/progress-reset`
-when switching tasks. Checkpoints are kept under `~/.pi/agent/progress/`, not in your project folder.
+Kill pi or the server mid-task, then relaunch with `./start.sh <dir> -c` (pi's continue: the last session in that
+directory, whole) and say "continue". `progress-tracker` also writes a checkpoint (task, last state, changed files) to
+`~/.pi/agent/progress/` for you to read; it is not fed to the model, so it costs no context and no cache miss (set
+`PI_PROGRESS_FILE` per task for parallel work, `/progress-reset` to clear it).
 
 ## Strix Halo reference setup
 

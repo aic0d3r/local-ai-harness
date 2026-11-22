@@ -52,8 +52,8 @@ a checkpoint file under ~/.pi/agent/progress/ after ~10 responses):
       "List the 5 largest source files and write them to SMOKE.md"
 
 Resume test: kill the session mid-task (Ctrl-C / timeout), then run again with
-the same flags and prompt "Continue." - progress-tracker injects the task and
-last state automatically; recovery should beat a fresh run.
+the same flags plus `-c` and prompt "Continue." - pi restores the conversation;
+recovery should beat a fresh run.
 
 ## What is actually measured (2026-10-04, cache-on era)
 
@@ -61,7 +61,7 @@ Core three - these carry the measured value:
 
 | extension | measured saving |
 |---|---|
-| `progress-tracker.ts` | resume after crash/kill: recovery 455s vs 572s fresh baseline; auto-injects, so zero agent adoption needed |
+| `progress-tracker.ts` | checkpoint only since 2026-11-22: writes the task, last state and changed files to `~/.pi/agent/progress/`, injects nothing (its resume note replaced the system prompt and cost local engines a ~30 s prefix-cache miss; `pi -c` restores more). Was: recovery 455s vs 572s fresh |
 | semble MCP (`search`/`find_related`) | replaced NPU codebase_search 2026-10-10: A/B 17/18 vs 13/18 top-3 hit-rate, 0.55s p50 queries, 1.2s index builds; no NPU required |
 | `ling-tiny-compaction.ts` | summaries ~24s non-blocking vs ~52s blocking on the main model (decode-bound: tiny 122 t/s vs 27B ~45 t/s) |
 
