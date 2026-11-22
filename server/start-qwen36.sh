@@ -76,7 +76,7 @@ esac
 }
 # one engine at a time on the shared heap: a Strata (or another llama-server) on the same port must go first
 if [ -n "$(docker ps -q --filter "publish=$PORT")" ]; then
-  echo "  something already serves :$PORT in docker (stop it first: ./harness stop, or docker stop <name>)" >&2
+  echo "  something already serves :$PORT in docker (stop it first: ./harness config, running; or docker stop <name>)" >&2
   exit 1
 fi
 RENDER_GID=$(stat -c %g /dev/dri/renderD128 2>/dev/null || echo 44)

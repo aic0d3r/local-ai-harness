@@ -406,7 +406,7 @@ def identify(name, port):
     return True
 
 
-def detect():
+def running_engines():
     found = []
     for name, e in PROFILES["engines"].items():
         try:
@@ -415,6 +415,31 @@ def detect():
             continue
         if identify(name, e["port"]):
             found.append({"engine": name, "port": e["port"], "models": served_models(e["port"], name)})
+    return found
+
+
+def gtt_gb():
+    """GPU memory in use (GiB): what decides whether the next engine fits."""
+    return sum(int(open(f).read()) for f in glob.glob("/sys/class/drm/card*/device/mem_info_gtt_used")) / 2**30
+
+
+def sidecar_up():
+    try:
+        http("http://127.0.0.1:8090/health")
+        return True
+    except Exception:
+        return False
+
+
+def stop_sidecar():
+    """ling-tiny runs as a user service, or as a bare container / llama-server from an older start (as stop-all.sh stops it)."""
+    subprocess.run(["systemctl", "--user", "stop", "ling-tiny.service"], stderr=subprocess.DEVNULL)
+    subprocess.run(["docker", "rm", "-f", "ling-tiny"], capture_output=True)
+    subprocess.run(["pkill", "-f", "--", "-a ling3.0-tiny"], capture_output=True)
+
+
+def detect():
+    found = running_engines()
     ggufs = []
     for d in MODEL_DIRS:
         ggufs += glob.glob(os.path.join(os.path.expanduser(d), "**", "*.gguf"), recursive=True)[:20]
@@ -1012,12 +1037,11 @@ def stop_engine(engine, running):
     # the ling-tiny sidecar is a GPU llama-server holding ~8 GiB too (measured: GTT 9.7 -> 1.5 GiB when stopped);
     # it restarts on demand, so stopping it here frees the memory for the next engine
     subprocess.run(["systemctl", "--user", "stop", "ling-tiny.service"], stderr=subprocess.DEVNULL)
-    gtt = lambda: sum(int(open(f).read()) for f in glob.glob("/sys/class/drm/card*/device/mem_info_gtt_used")) / 2**30
     for _ in range(10):
-        if gtt() < 3:
+        if gtt_gb() < 3:
             break
         time.sleep(2)
-    print(f"  GPU memory in use now: {gtt():.1f} GiB")
+    print(f"  GPU memory in use now: {gtt_gb():.1f} GiB")
     return True
 
 
@@ -2365,8 +2389,13 @@ def cmd_config(a):
         if eng == "osmos" and (weights_file("osmos") != "stock") != (weights_pref() == "abliterated"):  # osmos.json = its last start
             notes.append(f"! osmos was last started on the other weights; {weights_pref()} applies on its next start")
         no_abl = eng in ("gufo", "strata", "llamacpp") and engine_model(eng) not in ABLITERATED
+        live = {e["engine"]: e["port"] for e in running_engines()}
+        ours = [e for e in live if PROFILES["engines"][e].get("script")]  # vllm, ollama, lmstudio, your own llama-server: not ours to stop
+        tiny = sidecar_up()
+        up = [f"{ename(e)} :{live[e]}{'' if e in ours else ' (not ours)'}" for e in live] + (["sidecar"] if tiny else [])
         items = {
             f"engine        {versioned_title(eng, p['model']) if eng else '-'}": "engine",
+            f"running       {', '.join(up) or 'nothing'}  ({gtt_gb():.0f} GiB GPU memory{', pick to stop' if ours or tiny else ''})": "running",
             **({f"model         {model_name(engine_model(eng))}": "model"}
                if eng in ("gufo", "strata", "llamacpp") else {}),  # only these load the model answer
             **({f"weights       {'stock' if no_abl else weights_pref()}  ({'this model has no abliterated build' if no_abl else 'every engine, next start'})": "weights"}
@@ -2381,7 +2410,16 @@ def cmd_config(a):
         k = items[choose("Change which setting?", list(items), False, esc="done", notes=notes)]  # Esc at the top closes quietly, like done
         if k == "done":
             return
-        if k == "engine":
+        if k == "running":
+            names = [ename(e) for e in ours] + (["the ling-tiny sidecar"] if tiny else [])
+            if not names:
+                print("  nothing the harness started is running")
+            elif ask_yn(f"Stop {', '.join(names)}? frees the GPU memory; a pi session using it loses its engine until ./start.sh", True):
+                for e in ours:
+                    stop_engine(e, live)
+                stop_sidecar()
+                print(f"  stopped; GPU memory in use now: {gtt_gb():.1f} GiB")
+        elif k == "engine":
             eng, mod = pick_target(detect(), False, esc=BACK)
             if eng is BACK:
                 continue  # Esc in a submenu: back to "Change which setting?", nothing changed
