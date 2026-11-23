@@ -1,6 +1,8 @@
 // harness-status: /usage runs scripts/usage-stats.py inside pi; a footer status shows halogen load.
 //   /usage [--all] [--top N]     (HARNESS_REPO overrides the repo path)
 // Footer: "halogen kv 14% · 1 run · 0 wait · 62 t/s" polled from :8731/metrics every 5s; hidden when unreachable.
+// Any other provider: "speed pf 1.2k/s · 41 t/s" timed client-side per reply (gufo, osmos, ollama... have no usable
+// /metrics), each reply appended to <agent dir>/harness-speed.jsonl for `./harness monitor`.
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -48,7 +50,7 @@ export default function harnessStatus(pi: ExtensionAPI) {
 	};
 
 	// footer + polling only while a halogen model is selected; other providers get nothing
-	const stop = (ctx: any) => { clearInterval(timer); timer = undefined; prev = rate = undefined; ctx.ui.setStatus("halogen", undefined); };
+	const stop = (ctx: any) => { clearInterval(timer); timer = undefined; prev = rate = undefined; ctx.ui.setStatus("halogen", undefined); ctx.ui.setStatus("speed", undefined); };
 	const sync = (provider: string | undefined, ctx: any) => {
 		stop(ctx);
 		if (provider !== "halogen") return;
@@ -67,6 +69,37 @@ export default function harnessStatus(pi: ExtensionAPI) {
 		ctx.ui.setStatus("sidecar", ctx.ui.theme.fg("muted", `sidecar ${s}`));
 	};
 	const scStop = (ctx: any) => { clearInterval(scTimer); scTimer = undefined; ctx.ui.setStatus("sidecar", undefined); };
+
+	// client-side speed: prefill = uncached prompt tokens / time to first stream event; decode = output / the rest.
+	// Time to first event includes queueing and network, so prefill reads a little low.
+	let t0 = 0, t1 = 0, deltas = 0;
+	// shortcut: the log is never rotated (~200 B per reply), rotate it if it ever matters
+	const speedLog = path.join(getAgentDir(), "harness-speed.jsonl");
+	pi.on("before_provider_request", async () => { t0 = Date.now(); t1 = 0; deltas = 0; });
+	// only real tokens: osmos sends an empty role chunk at 0.01s, long before prefill ends
+	pi.on("message_update", async (e: any) => {
+		if (!t0 || !String(e.assistantMessageEvent?.type).endsWith("_delta")) return;
+		deltas++;
+		t1 ||= Date.now();
+	});
+	pi.on("message_end", async (e: any, ctx: any) => {
+		const m = e.message;
+		if (m?.role !== "assistant" || !t0 || !t1 || m.provider === "halogen" || m.stopReason === "error" || m.stopReason === "aborted") return;
+		const u = m.usage ?? {}, t2 = Date.now(), pt = (u.input ?? 0) + (u.cacheWrite ?? 0);
+		const ttft = (t1 - t0) / 1000, dec = (t2 - t1) / 1000;
+		t0 = 0;
+		// a reply that arrived in one burst (osmos sends a whole tool call in one chunk) hides where prefill ended: no rates
+		const streamed = deltas >= 3 && dec >= 0.25;
+		const pf = streamed && pt >= 256 ? pt / ttft : undefined; // tiny uncached tails make a meaningless rate
+		const tps = streamed && u.output >= 16 ? u.output / dec : undefined;
+		const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(Math.round(n)));
+		// size and wait beside the rate: short agent-turn prefills read far below ./harness tune's 8K figure (osmos: a 562-token prompt still streams 12 GB of experts)
+		if (pf || tps) ctx.ui.setStatus("speed", `speed ${[pf ? `pf ${k(pf)}/s (${k(pt)} tok, ${ttft.toFixed(1)}s)` : "", tps ? `${k(tps)} t/s` : ""].filter(Boolean).join(" · ")}`);
+		try {
+			fs.appendFileSync(speedLog, JSON.stringify({ t: new Date(t2).toISOString(), provider: m.provider, model: m.model, prompt: pt, cached: u.cacheRead ?? 0,
+				ttft: +ttft.toFixed(2), out: u.output ?? 0, decode_s: +dec.toFixed(2), deltas, pf_tps: pf && +pf.toFixed(0), tps: tps && +tps.toFixed(1) }) + "\n");
+		} catch {}
+	});
 
 	pi.on("session_start", async (_e: any, ctx: any) => {
 		sync(ctx.model?.provider, ctx);

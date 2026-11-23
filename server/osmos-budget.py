@@ -16,12 +16,12 @@ import glob, hashlib, json, os, re, sys, time
 
 AGENT = os.environ.get("PI_CODING_AGENT_DIR") or os.path.join(os.environ.get("PI_HOME") or os.path.expanduser("~/.pi"), "agent")
 MODE = os.path.join(AGENT, "harness-osmos-budget")  # remember (default) | auto
+SIDECAR = os.path.join(AGENT, "harness-sidecar")    # "0" = the ling-tiny sidecar is off (setup.sh's answer)
 CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "local-ai-harness")  # harness.py's LOGDIR
 STATE = os.path.join(CACHE, "osmos-budget.json")
 RUN = os.path.join(CACHE, "osmos-run.json")
 GiB = 1 << 30
 HEADROOM = 1 * GiB      # libosmos fit.h FIT_HEADROOM: what a sizing leaves free past the build
-RAM_KEPT = 8 * GiB      # fit.h FIT_RAM_FREE: the RAM a sizing keeps free unless osmos.json's fill_gib says another
 MORE_ROOM = 4 * GiB     # this much more free than at the sizing: size again rather than leave it unused
 SIZED = re.compile(r"the budget sized to this GPU: ([\d.]+) GiB \(([\d.]+) GiB left free")
 
@@ -31,6 +31,16 @@ def mode():
         return open(MODE).read().strip() or "remember"
     except OSError:
         return "remember"
+
+
+def fill_default():
+    """fill_gib for a pack that sets none. 4 over osmos's own 8 measured +6% decode, +3.5% prefill on osmos-evo
+    (0.15.1, 128 GB Strix Halo, 2026-11-23: budget 94.82 -> 98.73 GiB); the sidecar needs ~6 GiB when it wakes, so 8 unless it is off."""
+    try:
+        off = open(SIDECAR).read().strip() == "0"
+    except OSError:
+        off = False
+    return 4 if off else 8
 
 
 def room(cfg):
@@ -43,13 +53,16 @@ def room(cfg):
         except OSError:
             continue
     avail = int(re.search(r"MemAvailable:\s+(\d+)", open("/proc/meminfo").read()).group(1)) * 1024
-    kept = int(cfg.get("fill_gib", RAM_KEPT / GiB) * GiB)
+    kept = int(cfg.get("fill_gib", fill_default()) * GiB)
     return min(gpu, max(0, avail - kept) + HEADROOM)
 
 
 def key(cfg_path, osmos_dir):
     """The remembered budget is this config's on this build of osmos: weights, context, fill or a rebuild change it."""
-    h = hashlib.sha1(open(cfg_path, "rb").read())
+    raw = open(cfg_path, "rb").read()
+    h = hashlib.sha1(raw)
+    if "fill_gib" not in json.loads(raw):
+        h.update(f"fill{fill_default()}".encode())  # the injected fill sizes differently: its own remembered budget
     for b in ("osmos-serve", "osmos-api"):
         try:
             st = os.stat(os.path.join(osmos_dir, "bin", b))
@@ -87,14 +100,16 @@ def decide(saved, now):
 
 def pick(cfg_path, osmos_dir):
     cfg = json.load(open(cfg_path))
-    if mode() == "auto" or cfg.get("budget_gib") or cfg.get("drafted_budget_gib"):
-        return cfg_path, None  # sizing asked for, or a budget the user set in osmos.json: theirs
-    budget, why = decide(load().get(key(cfg_path, osmos_dir)), room(cfg))
-    if budget is None:
+    run = {**cfg, "fill_gib": cfg.get("fill_gib", fill_default())}  # a fill_gib in osmos.json is the user's: kept
+    why = None
+    if not (mode() == "auto" or cfg.get("budget_gib") or cfg.get("drafted_budget_gib")):  # else sizing asked for, or the user's budget
+        budget, why = decide(load().get(key(cfg_path, osmos_dir)), room(run))
+        if budget is not None:
+            run["drafted_budget_gib" if cfg.get("drafter") else "budget_gib"] = budget
+    if run == cfg:
         return cfg_path, why
-    cfg["drafted_budget_gib" if cfg.get("drafter") else "budget_gib"] = budget
     os.makedirs(os.path.dirname(RUN), exist_ok=True)
-    json.dump(cfg, open(RUN, "w"), indent=2)
+    json.dump(run, open(RUN, "w"), indent=2)
     return RUN, why
 
 
@@ -148,4 +163,18 @@ if __name__ == "__main__":
         assert decide(s, 99 * GiB)[0] is None                    # past it: size again
         assert decide(s, 105 * GiB)[0] is None                   # much more room: size again to use it
         assert decide({**s, "left_gib": 1.0}, 100 * GiB - 1)[0] is None  # no spare at all: any less is too little
+        import tempfile
+        d = tempfile.mkdtemp()
+        SIDECAR, RUN, STATE, MODE = (os.path.join(d, n) for n in ("sidecar", "run.json", "state.json", "mode"))
+        assert fill_default() == 8  # sidecar never asked: it may wake, keep osmos's own 8
+        open(SIDECAR, "w").write("0")
+        assert fill_default() == 4
+        c = os.path.join(d, "osmos.json")
+        json.dump({"model": "m"}, open(c, "w"))
+        k4 = key(c, d)
+        assert pick(c, d)[0] == RUN and json.load(open(RUN))["fill_gib"] == 4 and "fill_gib" not in json.load(open(c))
+        open(SIDECAR, "w").write("1")
+        assert key(c, d) != k4 and json.load(open(pick(c, d)[0]))["fill_gib"] == 8  # sidecar on: its own budget, 8
+        json.dump({"model": "m", "fill_gib": 6}, open(c, "w"))
+        assert pick(c, d)[0] == c  # the user's own fill_gib, nothing to add: their file as it is
         print("ok")

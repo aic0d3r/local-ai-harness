@@ -11,7 +11,7 @@
   ./harness update-check [engine]       one line if the active engine has a newer release (when the check is on)
   ./harness config                      change one saved answer (sidecar, voice, update check, engine, sudo hints)
   ./harness detect                      print what was found (json)
-  ./harness monitor [engine] [--url U]  live dashboard: Strata's own `strata monitor`, else scripts/halogen-top.sh
+  ./harness monitor [engine] [--url U]  live dashboard: Strata's own `strata monitor`, halogen-top.sh, else per-reply speeds pi logs
   ./harness recommend [--json]          best engine, weights quant and context for this hardware, and why
 
 Profiles live in config/profiles.json. Stdlib only. Never kills or restarts servers it did not launch.
@@ -1919,8 +1919,44 @@ def cmd_monitor(a):
     eng = a.engine or (active() or {}).get("engine") or next((x["engine"] for x in detect()["engines"]), "halogen")
     argv = monitor_cmd(eng, a.url, a.once)
     if not argv:
-        sys.exit(f"no live monitor for {ename(eng)} (halogen and Strata have one)")
+        return speed_tail(a.once)
     os.execvp(argv[0], argv)
+
+
+SPEED_LOG = os.path.join(AGENT, "harness-speed.jsonl")  # extensions/harness-status writes one line per reply
+
+
+def speed_row(r):
+    pf = f"{r['pf_tps']:>6} t/s" if r.get("pf_tps") else "     -    "
+    tps = f"{r['tps']:>5} t/s" if r.get("tps") else "    -    "
+    return (f"{r['t'][11:19]}  prefill {pf} ({r['prompt']:>6} new, {r['cached']:>6} cached, {r['ttft']:>5}s)  "
+            f"decode {tps} ({r['out']:>5} tok)  {r['model']}")
+
+
+def speed_tail(once=False):
+    """Engines without a metrics endpoint: per-reply speeds pi measured client-side; the last 10, then follow."""
+    print(f"per-reply speed timed by pi (prefill includes queueing, so it reads a little low): {SPEED_LOG}")
+    if not os.path.exists(SPEED_LOG):
+        print("no replies logged yet: start pi (./start.sh ~/your-project) and send a prompt")
+        if once:
+            return
+        open(SPEED_LOG, "a").close()
+    with open(SPEED_LOG) as f:
+        lines, follow = f.readlines()[-10:], not once
+        try:
+            while True:
+                for line in lines:
+                    try:
+                        print(speed_row(json.loads(line)), flush=True)
+                    except (ValueError, KeyError, TypeError):
+                        pass  # a line cut mid-write or from an older format
+                if not follow:
+                    return
+                lines = [line] if (line := f.readline()) else []
+                if not lines:
+                    time.sleep(1)
+        except KeyboardInterrupt:
+            pass
 
 
 def saved_engine():
@@ -2240,8 +2276,9 @@ def finish(eng, mod, no_tune, launch=False):
     if mem:
         print(summary_row("memory", mem, width))
     print(summary_row("start", "./start.sh ~/your-project", width))
-    if eng in ("halogen", "strata"):
-        print(summary_row("monitor", "./harness monitor (live speed, memory and requests; Ctrl-C to quit)", width))
+    print(summary_row("monitor", "./harness monitor (live speed, memory and requests; Ctrl-C to quit)" if eng in ("halogen", "strata")
+                      else "./harness monitor (prefill and decode of each reply, timed by pi; also in pi's footer)", width))
+    print(summary_row("measure", "./harness tune (1 min quick probe) · ./harness bench (comparable bench-v1 runs)", width))
     print(summary_row("choices", [f"{it} ·" for it in items[:-1]] + [items[-1], "(change: ./harness config)"], width))
     print(summary_row("check", "./setup.sh --doctor (status: ./harness status)", width))
     if not passed:
@@ -2631,9 +2668,9 @@ def main():
         if n == "recommend":
             p.add_argument("--json", action="store_true")
         if n == "monitor":
-            p.add_argument("engine", nargs="?", help="default: the active engine (halogen or strata)")
+            p.add_argument("engine", nargs="?", help="default: the active engine")
             p.add_argument("--url", help="server root, e.g. a remote Strata (default: this box)")
-            p.add_argument("--once", action="store_true", help="Strata only: print one snapshot and exit")
+            p.add_argument("--once", action="store_true", help="print one snapshot and exit (Strata, and the per-reply log of other engines)")
         if n == "endpoint":
             p.add_argument("url", help="http://host:port (or https://host/prefix); /v1 is added")
             p.add_argument("--name", help=f"the pi provider's name (default: {CUSTOM})")

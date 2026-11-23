@@ -83,7 +83,8 @@ also works after setup: startup defaults point at the engine you chose, and exis
 | `./harness status` | engine up/down, model, NPU, saved tuning, sidecar state |
 | `./harness config` | menu of saved answers (engine, sidecar, voice, update check, sudo hints); change one, applied right away |
 | `./harness tune` | re-run the speed probe and re-size the limits |
-| `./harness monitor` | the live dashboard for the active engine (see [Operations](OPS.md#watching-speed-prefill--decode)) |
+| `./harness monitor` | live speed for the active engine: halogen and Strata dashboards, on any other engine the prefill/decode of each pi reply (see [Operations](OPS.md#watching-speed-prefill--decode)) |
+| `./harness bench` | fixed-protocol speed benchmark (`bench-v1`, 2K/8K/32K), saved to `harness-bench.json`; compare only with other `bench` runs |
 | `./harness verify` | ask the active engine for a live reply over HTTP; exit 0 only if it answered (the doctor's ready check) |
 | `./harness report` | what a bug report needs, as plain text to paste into an issue: versions, hardware, engine, model, context, measured speed, the doctor's failures. No prompts, keys or paths; home folder and user name redacted (`--no-doctor` skips the doctor run) |
 | `./setup.sh --doctor` | read-only health check of the whole install; exits 1 if any check fails (`--refusals` also checks the running model for over-refusal on 19 one-line tasks) |

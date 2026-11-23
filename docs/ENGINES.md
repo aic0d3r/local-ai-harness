@@ -201,6 +201,23 @@ other big apps first: experts that do not fit are read from the SSD for every to
 smaller, 34 -> 24 t/s). The setup says so before each start. A remembered budget is sized again only when 4 GiB more
 is free than at its sizing (`server/osmos-budget.py`).
 
+**RAM kept free (`fill_gib`).** osmos keeps 8 GiB of RAM free beside its budget by default. The harness starts it with
+`fill_gib` 4 when the ling-tiny sidecar is off, and keeps 8 when it is on (the sidecar needs ~6 GiB when it wakes). A `fill_gib`
+in the pack's `osmos.json` is yours and always wins. The harness writes its value into the run copy of the config, never into
+`osmos.json`. Measured here (osmos-evo stock, libosmos 0.15.1, 2026-11-23, nothing else using the engine; 4 cold 8K prompts and
+12 code decodes per setting):
+
+| `fill_gib` | budget | prefill 8K | decode | SSD read per 8K prompt | MemAvailable |
+| --- | --- | --- | --- | --- | --- |
+| 8 (osmos default) | 94.82 GiB | 430-434 t/s | 27.6-28.0 t/s | 44.6 GB | 8.3 GiB |
+| 4 | 98.73 GiB | 446-453 t/s | 29.4-30.0 t/s | 38.5 GB | 4.1 GiB |
+| 3 | 99.30 GiB | 445-452 t/s | 30.1-30.3 t/s | 37.9 GB | 3.3 GiB |
+
+About +1.5% decode per GiB of budget. Below 4 the gain is small and the margin for anything you open later is gone.
+`max_context` 512K instead of 1M frees only ~1 GiB (KV is not reserved for the whole window), so it is not worth halving the context.
+Short agent-turn prefills read far below these figures: prefill runs in 4,096-token chunks, and a 562-token prompt still streams
+12 GB of experts (see [OPS.md](OPS.md#watching-speed-prefill--decode)).
+
 **Updating.** `./setup.sh` / `./start.sh` tell you when a newer libosmos release exists (the check compares your checkout's
 tag with the latest GitHub release; `HARNESS_NO_UPDATE_CHECK=1` turns it off) and offer `scripts/upgrade-osmos.sh [tag]`.
 It checks the release out in the checkout, rebuilds (`make`, `make serve`, `make api`; with `NPU=1` when the existing build

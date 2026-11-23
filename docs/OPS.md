@@ -23,7 +23,29 @@ against the real window) and scales `compaction.reserveTokens` (60k at 262k, 10k
 
 ## Watching speed (prefill / decode)
 
-Three official surfaces, no built-in web UI in the image (`/`, `/gui`, `/dashboard` are 404):
+| Engine | Live, while the agent works | A number to compare |
+| --- | --- | --- |
+| halogen | `./harness monitor` (halogen-top.sh) and the `halogen` footer in pi | `./harness tune` (1 min) / `./harness bench` (`bench-v1`) |
+| Strata | `./harness monitor` (`strata monitor`, else halogen-top.sh `--strata`) | same |
+| gufo, osmos, llama.cpp, Ollama, LM Studio, vLLM, custom | the `speed` footer in pi and `./harness monitor` (per-reply log) | same (`tune`/`bench` skip a custom endpoint) |
+
+On engines without a usable `/metrics` (gufo has none), pi times each reply itself: prefill = prompt
+tokens the server did not have cached / time to first streamed token, decode = output tokens / the rest. One line per
+reply goes to `~/.pi/agent/harness-speed.jsonl`, which `./harness monitor` follows (`--once`: the last 10). The time to the
+first token includes queueing and the network, so prefill reads a little low. While subagents run at the same time, a reply's rate
+is its share, not the engine's total. Drafted decode depends on the text (code drafts better than prose), and an engine that
+does not report cached tokens counts the whole prompt as new. Replies with under 256 new prompt tokens or 16 output tokens get no rate, and neither do replies that arrived in one burst
+(osmos sends a whole tool call in one chunk, so where prefill ended is unknowable from the client). Checked against osmos's own
+`timings` through a logging proxy (2026-11-22, pi RPC mode, 4 replies): prefill 89-94 vs 91-96 t/s, decode 23.1-25.8 vs 22.7-25.3 t/s.
+
+The footer shows the size and the wait beside the rate (`pf 94/s (566 tok, 6.8s)`) because short prefills read far below
+`./harness tune`'s 8K figure. That is the engine, not the measurement. On osmos-evo the experts that do not fit the memory budget
+stream from the SSD, and a few hundred tokens already touch most of them. Measured here (2026-11-22, cold prompts, `/sys/block/nvme0n1/stat`):
+50 tokens 2.1 s / 5.4 GB read, 562 tokens 3.5 s / 12.3 GB, 2,135 tokens 7.0 s / 17.6 GB, 4,580 tokens 12.5 s / 28.1 GB (prefill works
+in 4,096-token chunks, ~7 s each). So an agent turn that adds 500 tokens pays most of a full chunk: ~130 t/s at 566 tokens,
+~300 at 2K, ~440 at 8K, ~500 at 21K.
+
+Halogen's own surfaces, no built-in web UI in the image (`/`, `/gui`, `/dashboard` are 404):
 
 - **per request** — every response (and the last streamed chunk) carries a `timings` object:
   `prompt_per_second`, `predicted_per_second`, `cache_n`, `draft_n_accepted`.

@@ -38,7 +38,7 @@ for p in extensions prompts skills themes settings.json models.json mcp.json; do
 [ -f "$HOME/.config/systemd/user/ling-tiny.service" ] && TAR_ARGS+=(-C "$HOME/.config/systemd/user" ling-tiny.service)
 # every state file the harness writes into the agent dir (wizard answers, tuning, markers, logs); one list for backup and removal
 STATE=(harness-profile.json harness-tuned.json harness-extras.json harness-sidecar harness-agent harness-update-check harness-update-stamp
-       harness-hints-shown harness-repo harness-ubatch harness-events.jsonl setup.log
+       harness-hints-shown harness-repo harness-ubatch harness-events.jsonl harness-speed.jsonl setup.log
        harness-weights harness-model harness-quant harness-pick.json harness-pins harness-models-dir hud.log progress-stamps.json)
 for f in "${STATE[@]}"; do [ -f "$AG/$f" ] && TAR_ARGS+=(-C "$AGPARENT" "$AGREL/$f"); done
 [ -f "$AG/rag-index.py" ] && TAR_ARGS+=(-C "$AGPARENT" "$AGREL/rag-index.py") # own -C: tar applies earlier -C to later members
