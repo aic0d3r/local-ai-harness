@@ -13,7 +13,9 @@ Use `./setup.sh --no-halogen` for the pi wiring on this path, or wire it by hand
 [halo-box/strix-llama.cpp](https://github.com/halo-box/strix-llama.cpp) publishes both routes: release zips
 (`llama-b<build>-ubuntu-vulkan-x64.zip`, `-ubuntu-rocm-gfx1151-x64.zip`, ROCm 10.1 bundled) and container images --
 `ghcr.io/halo-box/strix-llama.cpp:server-vulkan` (1.3 GB, Mesa RADV bundled, entrypoint `/app/llama-server`) and
-`:server-rocm`. `server/start-qwen36.sh` runs the Vulkan image for Qwen3.6-35B-A3B, so nothing is built here:
+`:server-rocm`. `server/start-qwen36.sh` runs the Vulkan image (pinned by digest: `server-vulkan-b13600`, Halobox v1.1.0 +
+11 commits) for Qwen3.6-35B-A3B, so nothing is built here. Release zips: v1.1.0 is build `b1069`
+(`llama-b1069-ubuntu-vulkan-x64.zip` / `-ubuntu-rocm-gfx1151-x64.zip`); they keep the execute bit now, no `chmod +x`.
 
 ```bash
 ./harness use llamacpp        # starts server/start-qwen36.sh on :8080 and wires pi
@@ -23,6 +25,23 @@ Measured on this box (2026-11-16, `bench-v1`, 131072 ctx, one engine at a time):
 prefill with the model's own MTP head** (`--spec-type draft-mtp --spec-draft-n-max 2`, 85-88% of drafts accepted),
 59.8 / 1,017 for the same model without the draft, 51.7 / 601 on the Strata image, and gufo cannot load the
 architecture at all. `docs/BENCHMARKS.md` has the full table.
+
+The v1.1.0 image (2026-11-23, `bench-v1`, 3 runs, 8K depth, back to back with the old `27ffff9f`): 83.1 t/s code / 78.5
+prose decode, 2,155 t/s prefill, against 82.9 / 76.1 / 2,169 on the old image - the same speed. The Ling-3.0-tiny sidecar
+also held (a ~51.6K-token summarize: 1,353 t/s prefill, 106 decode vs 1,325 / 104). Most of v1.1.0's Vulkan speed work
+(#252-#289) was already in the old image; what is new for us is the Flash-Next + MTP long-context load fix (#304),
+slot sampler reuse (#274) and the upstream sync.
+
+**ROCm** (`LLAMACPP_BACKEND=rocm`, the same build's `server-rocm-b13600` image): slower here. Qwen3.6 decoded 70.0 t/s
+(83.1 on Vulkan) at the same 2,136 t/s prefill and used twice the CPU. Kept as an opt-in for comparison, not a default.
+
+**Flash-Next** on this image drafts with its MTP head (`mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf`, the one
+`scripts/download-stock.sh` puts beside the shards) and runs halo-box's recipe `-lzm on-direct`, 3 drafts.
+`FLASHNEXT_MTP=0` turns both off. Not measured here yet; watch memory on the first load (halo-box issue #206: shared
+MTP head + `-lzm on-direct` used much more memory on some builds).
+
+**Inkling 2 Mini is not served here**: on this image it decoded 20 t/s and prefilled 324 t/s (IQ4_NL, Vulkan), its graph
+split 194 ways, and the ROCm image kept ~16 CPU cores busy. It runs on osmos instead ([Engines](ENGINES.md#osmos-deepseek-v41-flash-from-the-ssd-1m-context-strix-halo)).
 
 Build from source if you want to change the build itself (halo-box's zips and the image above ship their own Mesa; the
 container measured faster than the local `qwen4exp` build did here).

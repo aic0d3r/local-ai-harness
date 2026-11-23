@@ -176,7 +176,7 @@ assert "\033[" not in h.summary_row("choices", items, 52)  # piped (this run) st
 run = {"strata": {"engine": "strata", "port": 1, "models": ["m"]}}
 assert h.engine_menu(run) == "llamacpp"  # no tty: first entry, which is the saved current engine
 run2 = dict(run)
-assert h.heap_holder({"gufo": 1}) == "gufo" and h.heap_holder(run) == "strata" and h.heap_holder({"vllm": 1}) is None
+assert h.heap_holder({"gufo": 1, "halogen": 1}) == ["gufo", "halogen"] and h.heap_holder(run) == ["strata"] and h.heap_holder({"vllm": 1}) == []
 assert h.start_engine("vllm", run) is False  # no launcher: prints how to start it
 # quiet install: full setup.sh output goes to setup.log, the exit code still decides success
 fake = tempfile.mkdtemp()
@@ -236,7 +236,35 @@ for i in range(1, 5):
     open(f"{fn_dir}/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-0000{i}-of-00004.gguf", "w").close()
 assert "download-abliterated.sh llamacpp" in subprocess.run(["bash", lc], capture_output=True, text=True, env=fn_env).stderr
 assert subprocess.run(["bash", lc, "--print-lora"], capture_output=True, text=True, env=dict(fn_env, LLAMACPP_FAMILY="qwen36-q4")).stdout == ""
+# what reaches docker run (a fake docker on PATH echoes it): Flash-Next drafts with its MTP head once it is beside the shards
+fake_bin = os.path.join(fn_dir, "bin"); os.makedirs(fake_bin)
+open(f"{fake_bin}/docker", "w").write('#!/bin/sh\n[ "$1" = ps ] || echo "$@"\n'); os.chmod(f"{fake_bin}/docker", 0o755)
+fd_env = dict(fn_env, LLAMACPP_WEIGHTS="stock", PATH=f"{fake_bin}:{os.environ['PATH']}")
+args = subprocess.run(["bash", lc], capture_output=True, text=True, env=fd_env).stdout
+assert "draft-mtp" not in args and "-c 262144" in args, args  # no MTP head on disk: no draft
+open(f"{fn_dir}/mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf", "w").close()
+args = subprocess.run(["bash", lc], capture_output=True, text=True, env=fd_env).stdout
+assert "-md /models/mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf --spec-type draft-mtp --spec-draft-n-max 3 -lzm on-direct" in args, args
+assert "draft-mtp" not in subprocess.run(["bash", lc], capture_output=True, text=True, env=dict(fd_env, FLASHNEXT_MTP="0")).stdout
+assert "sha256:1eaf1f2e" in subprocess.run(["bash", lc], capture_output=True, text=True, env=dict(fd_env, LLAMACPP_BACKEND="rocm")).stdout
 shutil.rmtree(fn_dir)
+# Inkling 2 Mini runs on osmos: the saved model picks its inkling-2-mini pack, anything else DeepSeek's osmos-evo, OSMOS_PACK wins
+so = os.path.join(h.REPO, "server", "start-osmos.sh")
+ink_agent = tempfile.mkdtemp()
+pack = lambda **e: subprocess.run(["bash", so, "--print-pack"], capture_output=True, text=True, env=dict(os.environ, PI_CODING_AGENT_DIR=ink_agent, **e)).stdout.strip()  # noqa: E731
+assert pack() == "osmos-evo"
+open(f"{ink_agent}/harness-model", "w").write("inkling2-mini\n")
+assert pack() == "inkling-2-mini" and pack(OSMOS_PACK="osmos-evo-1017") == "osmos-evo-1017"
+shutil.rmtree(ink_agent)
+assert h.catalog_id("osmos-inkling-2-mini") == "inkling2-mini" and h.engine_title("osmos", "osmos-inkling-2-mini") == "osmos · Inkling 2 Mini"
+assert h.engine_title("osmos", "osmos-osmos-evo") == "osmos · DeepSeek-V4.1-Flash (osmos-evo)"
+assert h.entries.model_profile("osmos-inkling-2-mini", h.PROFILES)["compat"] == {"thinkingFormat": "openai"}  # not DeepSeek's profile
+real_model = open(h.MODEL_FILE).read() if os.path.exists(h.MODEL_FILE) else "qwen38-27b\n"
+open(h.MODEL_FILE, "w").write("inkling2-mini\n")
+assert h.osmos_inkling() and "Inkling 2 Mini" in h.choices_line("osmos") and "weights" not in h.choices_line("osmos")
+open(h.MODEL_FILE, "w").write("deepseek\n")
+assert not h.osmos_inkling() and "DeepSeek-V4.1-Flash" in h.choices_line("osmos") and "weights" in h.choices_line("osmos")
+open(h.MODEL_FILE, "w").write(real_model)
 assert h.catalog_id("qwen3.8-flash-next-ud-q4_k_xl") == "flash-next" and h.catalog_id("qwen3.8-flash-next-iq3_xxs") == "flash-next-iq3_xxs"
 assert "weights" in h.choices_line("gufo") and "weights" in h.choices_line("halogen")  # Q4 has an abliterated build too
 assert h.hw_key("gufo", "m", "stock", "qwen38-27b") != h.hw_key("gufo", "m", "abliterated", "qwen38-27b") == h.hw_key("gufo", "m", "abliterated", "qwen38-27b")
@@ -389,14 +417,14 @@ asked, saved = [], {n: getattr(h, n) for n in ("engine_menu", "plan_start", "ask
 h.engine_menu = lambda r, esc=None: "halogen"
 h.ask_route = lambda esc=None: None  # the model-first menu is tested below
 h.ask_weights = lambda e, back=False: False
-h.plan_start = lambda e, r, ask_start=True: asked.append(ask_start) or {"stop": None, "download": False}
+h.plan_start = lambda e, r, ask_start=True: asked.append(ask_start) or {"stop": [], "download": False}
 real_stdin, h.sys.stdin = h.sys.stdin, types.SimpleNamespace(isatty=lambda: True)
 for want in (True, False):
     h.pick_engine({"engines": []}, False, on_pick=lambda e: want)
 # new weights default while halogen runs: restart = a start plan that stops halogen first; declined = keep it running
 h.ask_weights, h.ask_yn = (lambda e, back=False: True), (lambda q, d=False: True)
 hal = {"engines": [{"engine": "halogen", "port": 8731, "models": ["m"]}]}
-assert h.pick_engine(hal, False)[1]["stop"] == "halogen" and asked[-1] is False
+assert h.pick_engine(hal, False)[1]["stop"] == ["halogen"] and asked[-1] is False
 h.ask_yn = lambda q, d=False: False
 assert h.pick_engine(hal, False) == ("halogen", None)
 asked.pop()
@@ -447,7 +475,10 @@ assert h.ask_route() == ("gufo", "flash-next") and h.model_pref() == "flash-next
 open(h.MODEL_FILE, "w").write("flash-next-iq3_s\n")
 assert h.ask_route() == ("gufo", "flash-next") and h.model_pref() == "flash-next-iq3_s"
 h.choose = lambda q, o, y, esc=None, notes=(): next(x for x in o if "DeepSeek" in x)
-assert h.ask_route() == ("osmos", None) and h.model_pref() == "flash-next-iq3_s"
+# osmos serves two packs now: the DeepSeek route saves its model, so a saved Inkling answer does not start Inkling for it
+assert h.ask_route() == ("osmos", "deepseek") and h.model_pref() == "deepseek" and not h.osmos_inkling()
+h.choose = lambda q, o, y, esc=None, notes=(): next(x for x in o if "Inkling" in x)
+assert h.ask_route() == ("osmos", "inkling2-mini") and h.osmos_inkling()
 h.choose = lambda q, o, y, esc=None, notes=(): o[-1]
 assert h.ask_route() is h.ENGINE_MENU
 # Esc in the quant menu returns to the model menu, not out of it
@@ -512,7 +543,7 @@ h.ask_yn = lambda q, d=False: True
 h.stock_ready = lambda *a: True
 assert not h.plan_start("gufo", {}).get("stock")
 for n, f in saved.items(): setattr(h, n, f)
-assert h.heap_holder({"strata": 1}) == "strata" and "tabbyapi" not in h.PROFILES["engines"]
+assert h.heap_holder({"strata": 1}) == ["strata"] and "tabbyapi" not in h.PROFILES["engines"]
 # an NVIDIA box lists strata before the Strix-oriented engines (menu order on a fresh box)
 real_hw, real_choose = h.hardware, h.choose
 h.hardware = lambda: {"cpus": 8, "ram_gb": 64, "gpu": "nvidia", "npu": False}
@@ -618,6 +649,16 @@ h.subprocess.run = real_run
 h.g27_ready = lambda m="qwen38-27b": True
 assert not h.plan_start("gufo", {}).get("g27")
 assert h.plan_start("strata", {})["stock"] == "UD-Q4_K_XL"  # 27B is gufo's: Strata falls back to Flash-Next
+# Inkling 2 Mini on osmos: a pack not laid out yet (--check fails) is fetched by libosmos's installer (start-osmos.sh --install)
+open(h.MODEL_FILE, "w").write("inkling2-mini\n")
+ran = []
+h.subprocess.run = lambda a, **k: ran.append(a[1:]) or types.SimpleNamespace(returncode=int(a[-1] == "--check"), stdout="stock")
+plan = h.plan_start("osmos", {})
+assert plan["osmos_pack"] and "Inkling 2 Mini pack" in asked[-2] and "~20 GB" in asked[-2] and not plan.get("stock"), (plan, asked)
+assert h.prepare_start(plan, {}) and ran[-1][-1] == "--install" and ran[-1][0].endswith("start-osmos.sh"), ran
+h.subprocess.run = lambda a, **k: types.SimpleNamespace(returncode=0, stdout="stock")
+assert not h.plan_start("osmos", {}).get("osmos_pack")  # laid out already
+h.subprocess.run = real_run
 for n, f in saved.items(): setattr(h, n, f)
 # Strata launcher by model: the catalog's run script is used whatever the weights answer says, a missing one is named, an unknown model means Flash-Next
 open(f"{sd}/run-iq3_s.sh", "w").write("#!/bin/sh\necho iq3\n")

@@ -14,9 +14,9 @@
 # 14/19 vs 16/19) — this flag is burn-out protection, not a quality knob.
 #
 # No template file: Flash-Next uses its embedded chat template (--jinja handles the
-# kwargs). Engine: halo-box/strix-llama.cpp (the Strix Halo fork: Vulkan or ROCm release zips, or the
-# v0.7.4.1 (0.7.4+ = throughput parity + greedy repeatability fixes; the release
-# payload's bundled RADV beats system Mesa on prefill).
+# kwargs). Engine: halo-box/strix-llama.cpp (the Strix Halo fork), the Halobox v1.1.0 release zip
+# llama-b1069-ubuntu-vulkan-x64.zip (or -rocm-gfx1151-x64.zip; executable as unpacked); its bundled
+# RADV beats system Mesa on prefill.
 #
 # Memory: the ~91GB model lives in GTT, not just VRAM. Never force --fit off:
 # on an undersized heap it forces full offload into memory that isn't there and

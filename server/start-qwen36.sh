@@ -7,8 +7,9 @@
 #   gufo                       cannot load qwen35moe at all
 # The drafter is the model's own MTP layer (blk.40.nextn.* in the GGUF), so no second model and no extra download:
 # --spec-type draft-mtp is llama.cpp's MTP path (upstream PR #22673) and --spec-draft-n-max 2 was the best of 2 / 3 here.
-# Image: ghcr.io/halo-box/strix-llama.cpp:server-vulkan, the Vulkan build of github.com/halo-box/strix-llama.cpp (the
-# Strix Halo fork that absorbed the older strix-halo-llamacpp work); it bundles Mesa RADV, so the host needs only the amdgpu driver.
+# Image: ghcr.io/halo-box/strix-llama.cpp:server-vulkan-b13600 (Halobox v1.1.0 + 11 commits), the Vulkan build of github.com/halo-box/strix-llama.cpp (the Strix Halo fork that absorbed the older
+# strix-halo-llamacpp work); it bundles Mesa RADV, so the host needs only the amdgpu driver. LLAMACPP_BACKEND=rocm runs
+# the same build's ROCm image instead (v1.1.0 notes: faster prefill, slower decode than Vulkan on Strix Halo).
 # The GGUF: $QWEN36_GGUF, else a known models folder, else the copy Strata's Docker volume already downloaded (no move).
 #   QWEN36_IMAGE, QWEN36_CTX (default 131072), QWEN36_SPEC (draft tokens, default 2), QWEN36_BATCH (default 2048),
 #   PORT (default 8080), QWEN36_ALT_MODEL (serve another GGUF file name, for the 27B/Flash-Next llama.cpp route)
@@ -27,7 +28,9 @@ PORT=${PORT:-8080}
 CTX=${QWEN36_CTX:-131072}
 SPEC=${QWEN36_SPEC:-2}
 BATCH=${QWEN36_BATCH:-2048}
-IMAGE=${QWEN36_IMAGE:-ghcr.io/halo-box/strix-llama.cpp@sha256:27ffff9fc686f3c26a91b66af5a1be33bd7892bb24745d9a3869f9bbe1a9a19c}
+VULKAN_IMAGE=ghcr.io/halo-box/strix-llama.cpp@sha256:30370c206723e1c110052e7f1a82cbbf71ca1c7dd865aeca3461df394bc03cc1  # server-vulkan-b13600
+ROCM_IMAGE=ghcr.io/halo-box/strix-llama.cpp@sha256:1eaf1f2e7b2a7c02d4b8fd559dd7f65a81fdd6968b8ed08af492cb1559be5bd1    # server-rocm-b13600
+[ "${LLAMACPP_BACKEND:-vulkan}" = rocm ] && IMAGE=${QWEN36_IMAGE:-$ROCM_IMAGE} || IMAGE=${QWEN36_IMAGE:-$VULKAN_IMAGE}
 
 find_gguf() {
   [ -n "${QWEN36_GGUF:-}" ] && { echo "$QWEN36_GGUF"; return; }
@@ -57,9 +60,15 @@ if [ "$FAMILY" = flash-next ]; then
     EXTRA+=(--lora "/models/$(basename "$LORA")")
   fi
   # Flash-Next burns its whole output budget thinking without a server default (server/start-flashnext.sh); pi sends its own
-  # shortcut: no MTP draft and no vision projector yet (neither checked with this image on Flash-Next), add them after ./harness tune
+  # shortcut: no vision projector yet (not checked with this image on Flash-Next), add it after ./harness tune
   EXTRA+=(--reasoning-effort medium --reasoning-budget 2048)
   GGUF_NAME=${GGUF#"$ROOT"/}; MOUNT=$ROOT; NAME=qwen3.8-flash-next; CTX=${QWEN36_CTX:-262144}; SPEC_ARGS=()
+  # the MTP head scripts/download-stock.sh puts beside the shards (gufo's); v1.1.0 (#304) stopped the long-context load
+  # abort with a draft. -lzm on-direct is halo-box's own Flash-Next recipe. FLASHNEXT_MTP=0 turns both off.
+  MTP=mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf
+  if [ "${FLASHNEXT_MTP:-1}" = 1 ] && [ -f "$ROOT/$MTP" ]; then
+    SPEC_ARGS=(-md "/models/$MTP" --spec-type draft-mtp --spec-draft-n-max "${QWEN36_SPEC:-3}" -lzm on-direct)
+  fi
 else
   GGUF=$(find_gguf); MOUNT=$(dirname "$GGUF"); NAME=${QWEN36_NAME:-qwen36-q4}
   SPEC_ARGS=(--spec-type draft-mtp --spec-draft-n-max "$SPEC")

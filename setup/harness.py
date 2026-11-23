@@ -146,6 +146,11 @@ def model_pref():
         return DEFAULT_MODEL
 
 
+def osmos_inkling():
+    """osmos serves its inkling-2-mini pack (server/start-osmos.sh reads the same saved answer), not DeepSeek; stock only."""
+    return engine_model("osmos") == "inkling2-mini"
+
+
 def engine_model(engine):
     """The model the saved answer means for this engine: the answer when this engine can load it, else Flash-Next
     (halogen always serves its own Flash-Next checkpoint)."""
@@ -1083,12 +1088,11 @@ def last_speed(engine):
     return f"{t[-1]['prefill_tps']}/{t[-1]['decode_tps']} t/s{old}"
 
 
-BIG = ("halogen", "gufo", "strata", "osmos")  # big engines: one GPU memory heap (VRAM on NVIDIA), and gufo/strata also share :8080
 
 
 def heap_holder(running):
-    """The big engines share one GPU memory heap: whichever is up blocks the others."""
-    return next((e for e in BIG if e in running), None)
+    """Every engine we ship a launcher for that is up: only one stays loaded, so starting another stops these first."""
+    return [e for e in running if PROFILES["engines"].get(e, {}).get("script")]
 
 
 def engine_menu(running, esc=None):
@@ -1111,7 +1115,7 @@ def engine_menu(running, esc=None):
         state = f"{states[e]:{ws}s}"
         serves += [f"{ename(e)} serves {mods[0]}"] if mods else []  # a served id is up to ~30 columns: a note, not part of the row
         loses.setdefault(PROFILES["engines"][e].get("loses", "?"), []).append(ename(e))
-        warn = e in BIG and holder and holder != e and e not in running
+        warn = bool(PROFILES["engines"][e].get("script") and holder and e not in running)
         stops += [e] * bool(warn)
         speeds.append(last_speed(e))
         labels[f"{'*' if e == cur else ' '}{'o' if e in running else '-'} {ename(e):{w}s}  {vers[e]:{wv}s}{'  ' if wv else ''}{state} | {speeds[-1]}{' !' if warn else ''}"] = e
@@ -1122,7 +1126,7 @@ def engine_menu(running, esc=None):
     if any(s != "not measured" for s in speeds):
         notes.append("t/s = prefill/decode on code, from ./harness tune" + ("; (old) = an older probe, re-run it" if any(s.endswith("(old)") for s in speeds) else ""))
     if stops:
-        notes.append(f"! = stops {ename(holder)} first: they share GPU memory")
+        notes.append(f"! = stops {', '.join(map(ename, holder))} first: only one engine stays loaded")
     choice = choose("Which engine? (* = current, o = running)", list(labels), False, esc, notes)
     return BACK if choice is BACK else labels[choice]
 
@@ -1225,7 +1229,7 @@ def weights_labels(engine):
 
 def ask_weights(engine, back=False):
     """Which weights the engine loads by default; current answer first. -> True if the answer changed, or BACK."""
-    if engine not in WEIGHTS_ASK or not sys.stdin.isatty():
+    if engine not in WEIGHTS_ASK or not sys.stdin.isatty() or engine == "osmos" and osmos_inkling():
         return False
     m = engine_model(engine)
     own = engine in ("gufo", "strata", "llamacpp") and m not in ABLITERATED  # a model without an abliterated build (Qwen3.6, Strata's packs)
@@ -1318,7 +1322,7 @@ def plan_start(engine, running, ask_start=True):
     if not c.get("script"):
         print(f"{ename(engine)} is not running on :{c['port']}: {c.get('start', 'start it yourself, then pick it again')}")
         return None
-    plan = {"stop": None, "download": False, "weights": None}
+    plan = {"stop": [], "download": False, "weights": None}
     if engine == "osmos":  # its expert cache is sized from what is free at start: ~6 GiB less measured 34 -> 24 t/s
         print("Tip: close browsers and other big apps before osmos starts. It caches\n"
               "  experts in whatever memory is free, and every GiB it misses is read from the SSD, slowing decode.")
@@ -1327,9 +1331,9 @@ def plan_start(engine, running, ask_start=True):
         if problems:
             print(f"halogen cannot start on this box yet (nothing was downloaded):" + "".join(f"\n  \u2717 {p}" for p in problems))
             return None
-    holder = heap_holder(running)
-    if holder and holder != engine and engine in BIG:
-        if not ask_yn(f"Stop {ename(holder)}? it holds the GPU memory {ename(engine)} needs; the ling-tiny sidecar stops too"):
+    holder = [e for e in heap_holder(running) or [] if e != engine]
+    if holder:
+        if not ask_yn(f"Stop {', '.join(map(ename, holder))}? only one engine stays loaded, {ename(engine)} needs the GPU memory; the ling-tiny sidecar stops too"):
             return None
         plan["stop"] = holder
     if engine == "halogen" and not os.path.isfile(halogen_ckpt()):
@@ -1387,6 +1391,12 @@ def plan_start(engine, running, ask_start=True):
                       f"~{gb} GB of {catalog()[m]['download_gb']} still to fetch (target, DFlash2 draft, vision projector), {free} GB free, resumable"):
             return None
         plan["g27"], plan["g27_gb"] = m, gb
+    if engine == "osmos" and osmos_inkling() and subprocess.run(["bash", os.path.join(REPO, c["script"]), "--check"], capture_output=True).returncode:
+        free = shutil.disk_usage(os.path.expanduser("~")).free // 2**30
+        if not ask_yn(f"Download osmos's Inkling 2 Mini pack? the release's weights + its drafter, ~{catalog()[m]['download_gb']} GB, {free} GB free, "
+                      "fetched and checked by libosmos's installer"):
+            return None
+        plan["osmos_pack"] = True
     gb = weights_download_gb(engine) if engine in WEIGHTS_ENGINES and not own and weights_pref() != "stock" else 0
     if gb:
         free = shutil.disk_usage(os.path.expanduser("~")).free // 2**30
@@ -1394,7 +1404,7 @@ def plan_start(engine, running, ask_start=True):
                       f"~{gb} GB, {free} GB free, resumable"):
             return None
         plan["weights"], plan["weights_gb"] = engine, gb
-    if engine == "osmos" and weights_pref() == "abliterated" and weights_file(engine) == "stock":
+    if engine == "osmos" and not osmos_inkling() and weights_pref() == "abliterated" and weights_file(engine) == "stock":
         print("  osmos switches to the abliterated patch on start: libosmos reuses it if on disk, else fetches it (0.6 GB)")
     if ask_start and not ask_yn(f"Start {ename(engine)}? runs {c['script']} in the background, log {engine_log(engine)}", True):
         return None
@@ -1404,8 +1414,8 @@ def plan_start(engine, running, ask_start=True):
 def prepare_start(plan, running):
     """The parts of a start plan an upgrade also needs first: stop the memory holder, download. Runs once (clears them)."""
     stop, dl, wd = plan["stop"], plan["download"], plan.get("weights")
-    plan["stop"], plan["download"], plan["weights"] = None, False, None
-    if stop and not stop_engine(stop, running):
+    plan["stop"], plan["download"], plan["weights"] = [], False, None
+    if any(not stop_engine(e, running) for e in stop or []):
         return False
     if dl and subprocess.run(["bash", os.path.join(REPO, "scripts", "download-halogen.sh"), "--yes"]).returncode:
         return False
@@ -1414,6 +1424,8 @@ def prepare_start(plan, running):
     g27 = plan.pop("g27", False)
     plan.pop("g27_gb", None)
     if g27 and subprocess.run(["bash", os.path.join(REPO, "scripts", "download-qwen38-27b.sh"), "--yes"], env=dict(os.environ, GUFO_FAMILY=g27)).returncode:
+        return False
+    if plan.pop("osmos_pack", False) and subprocess.run(["bash", os.path.join(REPO, PROFILES["engines"]["osmos"]["script"]), "--install"]).returncode:
         return False
     sq = plan.pop("stock", False)
     if sq and subprocess.run(["bash", os.path.join(REPO, "scripts", "download-stock.sh"), "--yes"], env=dict(os.environ, GUFO_QUANT=sq)).returncode:
@@ -1552,7 +1564,7 @@ def pick_engine(d, yes, want=None, on_pick=None, esc=None):
             plan = plan_start(eng, {k: v for k, v in running.items() if k != eng}, ask_start=False) or not_started(eng, esc)
             if plan is BACK:
                 return BACK, None
-            plan["stop"] = eng
+            plan["stop"].append(eng)
             return eng, plan
         if c.get("script") and not any(x["port"] == c["port"] for x in d["engines"]):
             # named but down: ask what the wizard asks (stop the memory holder, download) and start it, instead of telling the user to do it by hand
@@ -1596,7 +1608,7 @@ def pick_engine(d, yes, want=None, on_pick=None, esc=None):
             break
         print(f"  {ename(eng)} not started; pick again, or Esc at the first menu to {'go back' if esc is BACK else 'quit'}")
     if restart:
-        plan["stop"] = eng  # prepare_start stops it, start_engine brings it back on the new weights
+        plan["stop"].append(eng)  # prepare_start stops it, start_engine brings it back on the new weights
     return eng, plan
 
 
@@ -2049,8 +2061,9 @@ def engine_title(eng, mod):
     """`engine · model` for people: an engine that serves one model names it (osmos: DeepSeek-V4.1-Flash (osmos-evo)), the rest name
     the model they run. The raw id stays what the server and pi use."""
     cfg = PROFILES["engines"].get(eng, {})
-    entry = catalog().get(mod or "") or (catalog()[catalog_id(mod)] if eng in ("gufo", "strata") and mod else {})  # gufo serves qwen3.8-27b-q8 for qwen38-27b-q8
-    name = cfg.get("model_label") or (entry.get("label") or mod or "").split(" (")[0]  # catalog labels carry a parenthesis of notes
+    entry = catalog().get(mod or "") or (catalog()[catalog_id(mod)] if eng in ("gufo", "strata", "osmos") and mod else {})  # gufo serves qwen3.8-27b-q8 for qwen38-27b-q8
+    pack = eng == "osmos" and eng in entry.get("engines", ())  # osmos-inkling-2-mini: a pack named in the catalog; else its DeepSeek model_label
+    name = (pack and entry["label"].split(" (")[0]) or cfg.get("model_label") or (entry.get("label") or mod or "").split(" (")[0]  # catalog labels carry a parenthesis of notes
     return f"{ename(eng)} · {name or 'no model'}"
 
 
@@ -2063,9 +2076,10 @@ def versioned_title(eng, mod):
 def choices_items(eng=None):
     """Every saved answer as its own item. An engine that serves one model only (osmos: DeepSeek-V4.1-Flash) names it, so the
     saved preference for the Qwen engines is not shown as what osmos runs."""
-    model = PROFILES["engines"].get(eng or "", {}).get("model_label") or model_pref()
-    # the weights answer means nothing to a gufo/Strata/llama.cpp model without an abliterated build (the 27B, Qwen3.6)
-    weights = [] if eng in ("gufo", "strata", "llamacpp") and engine_model(eng) not in ABLITERATED else [f"weights {weights_pref()}"]
+    ink = eng == "osmos" and osmos_inkling()
+    model = model_name("inkling2-mini") if ink else PROFILES["engines"].get(eng or "", {}).get("model_label") or model_pref()
+    # the weights answer means nothing to a model without an abliterated build (the 27B, Qwen3.6, Inkling)
+    weights = [] if ink or eng in ("gufo", "strata", "llamacpp") and engine_model(eng) not in ABLITERATED else [f"weights {weights_pref()}"]
     return [f"model {model}", *weights, f"sidecar {'off' if sidecar_pref() == '0' else 'on'}",
             f"voice {'on' if jget(EXTRAS, {}).get('voice') else 'off'}", f"update check {'on' if update_pref() == '1' else 'off'}"]
 
@@ -2365,11 +2379,12 @@ def cmd_setup(a):
     if not a.yes and sys.stdin.isatty():
         steps = [("skip pi wiring (engine + sidecar only)" if no_pi() else f"install/update pi extensions, providers, skills{'' if verbose else f' (details: {SETUP_LOG})'}"),
                  choices_line(eng)] + (
-            [f"stop {ename(plan['stop'])} and the ling-tiny sidecar"] if plan and plan["stop"] else []) + (
+            [f"stop {', '.join(map(ename, plan['stop']))} and the ling-tiny sidecar"] if plan and plan["stop"] else []) + (
             ["download halogen (~124 GB, resumable)"] if plan and plan["download"] else []) + (
             [f"install Strata with {catalog()[engine_model('strata')]['label']} (its setup downloads ~{catalog()[engine_model('strata')]['download_gb']} GB, resumable)" if engine_model("strata") != DEFAULT_MODEL else
              f"install Strata for the {weights_pref()} weights (" + ("orca-uncensored in place" if weights_pref() == "abliterated" else "shared stock UD-Q4_K_XL in place") + ")"] if plan and plan.get("install") == "strata" else []) + (
             [f"download {catalog()[plan['g27']]['label'].split(' (')[0]} (~{plan.get('g27_gb', catalog()[plan['g27']]['download_gb'])} GB, resumable)"] if plan and plan.get("g27") else []) + (
+            [f"download osmos's Inkling 2 Mini pack (~{catalog()['inkling2-mini']['download_gb']} GB)"] if plan and plan.get("osmos_pack") else []) + (
             [f"download the stock {plan['stock']} (~{quant_gb(plan['stock'])} GB, resumable)"] if plan and plan.get("stock") else []) + (
             [f"download the abliterated {ename(eng)} weights (~{plan.get('weights_gb')} GB, resumable)"] if plan and plan.get("weights") else []) + (
             [f"upgrade {ename(eng)} (restart, rolls back on failure)"] if upgrade else []) + (
@@ -2387,7 +2402,7 @@ def cmd_setup(a):
         print(f"serena: enabled language servers {added} in .serena/project.yml (restart serena to load them)")
     stopped = plan and plan.get("stop")
     if plan and not prepare_start(plan, {x["engine"]: x for x in d["engines"]}):
-        sys.exit(f"\n! a step before starting {ename(eng)} failed (output above); nothing was started." + (f" {ename(stopped)} was stopped for it: ./start.sh brings the saved engine back." if stopped else "")
+        sys.exit(f"\n! a step before starting {ename(eng)} failed (output above); nothing was started." + (f" {', '.join(map(ename, stopped))} was stopped for it: ./start.sh brings the saved engine back." if stopped else "")
                  + " Re-run ./setup.sh to resume: downloads continue where they stopped.")
     if upgrade:  # a gufo upgrade needs halogen already stopped; the upgraders start/restart the server themselves
         print(f"\n== upgrading {ename(eng)} ==")
@@ -2571,11 +2586,11 @@ def cmd_config(a):
         notes = []
         if eng and eng != CUSTOM:  # a row stays short (80 columns); the numbers go under the question
             notes.append(f"{ename(eng)} speed (./harness tune): {speed_text(eng, p.get('model')) or 'not measured yet'}")
-        if own:
+        if own and eng != "osmos":  # osmos's model (DeepSeek or Inkling) comes from the model menu
             notes.append(f"{ename(eng)} runs {engine_title(eng, p.get('model')).split(' · ', 1)[1]} only; pick gufo, Strata or strix-llama.cpp under engine to choose a model")
-        if eng == "osmos" and (weights_file("osmos") != "stock") != (weights_pref() == "abliterated"):  # osmos.json = its last start
+        if eng == "osmos" and not osmos_inkling() and (weights_file("osmos") != "stock") != (weights_pref() == "abliterated"):  # osmos.json = its last start
             notes.append(f"! osmos was last started on the other weights; {weights_pref()} applies on its next start")
-        no_abl = eng in ("gufo", "strata", "llamacpp") and engine_model(eng) not in ABLITERATED
+        no_abl = eng in ("gufo", "strata", "llamacpp") and engine_model(eng) not in ABLITERATED or eng == "osmos" and osmos_inkling()
         live = {e["engine"]: e["port"] for e in running_engines()}
         ours = [e for e in live if PROFILES["engines"][e].get("script")]  # vllm, ollama, lmstudio, your own llama-server: not ours to stop
         tiny = sidecar_up()

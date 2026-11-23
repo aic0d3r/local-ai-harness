@@ -16,7 +16,7 @@
                  "script": "server/start-gufo-flashnext.sh", "loses": "NPU tools (guard, triage, dedup)",
                  "update": { "have": "pin server/start-gufo-flashnext.sh DEFAULT_VERSION GUFO_VERSION", "latest": "ghcr:gufo-org/toolboxes/gufo-runtime",
                              "how": "scripts/upgrade-gufo.sh (restarts gufo, checks it, pins on success, rolls back on failure)" } },
-    "llamacpp": { "port": 8080,  "probe": "/health",     "provider": "llamacpp","npu": false, "managed": false, "name": "strix-llama.cpp", "loses": "NPU tools (guard, triage, dedup)", "note": "halo-box's strix-llama.cpp fork in Docker (Strix Halo only, Vulkan), told apart from a plain llama-server by its llamacpp-<port> container; server/start-qwen36.sh serves Qwen3.6-35B-A3B with its MTP draft, or Flash-Next (stock GGUF, abliterated = + LoRA) when that is the saved model. Pinned by image digest: no upstream update check (the version is only shown). See docs/LLAMACPP.md", "script": "server/start-qwen36.sh",
+    "llamacpp": { "port": 8080,  "probe": "/health",     "provider": "llamacpp","npu": false, "managed": false, "name": "strix-llama.cpp", "loses": "NPU tools (guard, triage, dedup)", "note": "halo-box's strix-llama.cpp fork in Docker (Strix Halo only, Vulkan), told apart from a plain llama-server by its llamacpp-<port> container; server/start-qwen36.sh serves Qwen3.6-35B-A3B with its MTP draft, or Flash-Next (stock GGUF + its MTP head, abliterated = + LoRA) when that is the saved model; LLAMACPP_BACKEND=rocm runs the ROCm image. Pinned by image digest: no upstream update check (the version is only shown). See docs/LLAMACPP.md", "script": "server/start-qwen36.sh",
                  "update": { "have": "image server/start-qwen36.sh" } },
     "llama-server": { "port": 8080, "probe": "/health", "provider": "llama-server", "npu": false, "managed": false, "name": "llama.cpp", "loses": "NPU tools (guard, triage, dedup)",
                  "note": "a llama-server you run yourself (upstream llama.cpp, any GPU); detected, never started by this harness",
@@ -35,7 +35,7 @@
       "ctx": 1048576,
       "loses": "NPU tools (guard, triage, dedup)",
       "model_label": "DeepSeek-V4.1-Flash (osmos-evo)",
-      "note": "osmos-api (libosmos), used for DeepSeek-V4.1-Flash only (its packs, 1M context); the Qwen models run on halogen, gufo or Strata. It does not report its context window, so `ctx` is the pack's max_context in osmos.json - edit both together",
+      "note": "osmos-api (libosmos), used for DeepSeek-V4.1-Flash (osmos-evo pack) and Inkling 2 Mini (inkling-2-mini pack, when that is the saved model), both 1M context; the Qwen models run on halogen, gufo or Strata. It does not report its context window, so `ctx` is the pack's max_context in osmos.json - edit both together",
       "script": "server/start-osmos.sh",
       "ready": "/health",
       "weights_labels": {
@@ -70,6 +70,13 @@
       {"engine": "strata", "why": "51.7 t/s decode, 601 t/s prefill (measured): its image starts 4 slots, which caps the MoE prompt chunk at 1024; its MTP loads but proposes no drafts on this file"}
     ]
   },
+  "inkling2": {
+      "label": "Inkling 2 Mini (26B looped MoE, vision)", "short": "26B MoE, vision",
+      "model": "inkling2-mini",
+      "engines": [
+        {"engine": "osmos", "why": "~45.7 t/s decode drafted, ~1,018 t/s prefill, 1M context, the release's own weights (osmos 0.15.0 README, not measured here); strix-llama.cpp measured 20 t/s / 324 and fell back to the CPU"}
+      ]
+    },
   "qwen38-27b": {
       "label": "Qwen3.8-27B (dense, vision)", "short": "dense, vision",
       "model": "qwen38-27b",
@@ -79,7 +86,7 @@
     },
     "deepseek": {
       "label": "DeepSeek-V4.1-Flash (1M context, streams from the SSD)", "short": "1M ctx, SSD",
-      "model": null,
+      "model": "deepseek",
       "engines": [
         {"engine": "osmos", "why": "36-42 t/s decode, 430-490 t/s prefill, 1M context (measured at 70 W, osmos-evo)"}
       ]
@@ -107,6 +114,8 @@
     "qwen36-q4": { "label": "Qwen3.6-35B-A3B, UD-Q4_K_XL (small MoE, runs on 32 GB RAM)", "engines": ["llamacpp", "strata"], "strata": ["qwen36", "UD-Q4_K_XL"], "run": "run-qwen36-ud-q4_k_xl.sh", "ram_gb": 32, "download_gb": 24 },
     "qwen36-q6": { "label": "Qwen3.6-35B-A3B, UD-Q6_K_XL", "engines": ["strata"], "strata": ["qwen36", "UD-Q6_K_XL"], "run": "run-qwen36-ud-q6_k_xl.sh", "ram_gb": 44, "download_gb": 34 },
     "qwen36-q8": { "label": "Qwen3.6-35B-A3B, Q8_0", "engines": ["strata"], "strata": ["qwen36", "Q8_0"], "run": "run-qwen36-q8_0.sh", "ram_gb": 52, "download_gb": 39 },
+    "inkling2-mini": { "label": "Inkling 2 Mini (osmos's inkling-2-mini pack: the release's NVFP4/MXFP8 weights + its drafter, 1M context)", "engines": ["osmos"], "download_gb": 20 },
+    "deepseek": { "label": "DeepSeek-V4.1-Flash (osmos's osmos-evo pack)", "engines": ["osmos"] },
     "qwen38-27b": { "label": "Qwen3.8 27B dense, UD-Q4_K_XL + DFlash2 draft (gufo, Strix Halo; 16.4 GiB target, the faster one)", "engines": ["gufo"], "download_gb": 20 },
     "qwen38-27b-q8": { "label": "Qwen3.8 27B dense, UD-Q8_K_XL + DFlash2 draft (gufo, Strix Halo; 29.3 GiB target, closer to the full model, ~40% slower decode in gufo's benchmarks)", "engines": ["gufo"], "download_gb": 34 }
   },
@@ -122,6 +131,14 @@
                   "chatTemplateKwargs": { "reasoning_effort": { "$var": "thinking.effort" }, "enable_thinking": { "$var": "thinking.enabled" } } },
       "thinkingLevelMap": { "minimal": null, "low": "low", "medium": "medium", "high": "xhigh", "xhigh": null, "max": null },
       "samplingParams": { "temperature": 1.0, "top_p": 0.95, "top_k": 20, "min_p": 0.0 }
+    },
+    "inkling2": {
+      "match": "inkling",
+      "reasoning": true,
+      "maxTokens": 4096,
+      "compat": { "thinkingFormat": "openai" },
+      "thinkingLevelMap": { "off": "none", "minimal": "minimal", "low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh", "max": "max" },
+      "samplingParams": { "temperature": 1.0 }
     },
     "osmos-deepseek": {
    "match": "osmos-",

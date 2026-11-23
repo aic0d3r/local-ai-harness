@@ -19,7 +19,8 @@ llama.cpp).
 
 **Which engine for which model (Strix Halo).** Setup asks the model first and takes the first usable engine of its route
 (`routes` in `config/profiles.json`, each with the numbers behind the order and whether they were measured here or only reported):
-Flash-Next: halogen (NPU + 110 GB RAM) > gufo > Strata; Qwen3.8-27B: gufo (DFlash2 draft) > strix-llama.cpp; DeepSeek-V4.1-Flash: osmos.
+Flash-Next: halogen (NPU + 110 GB RAM) > gufo > Strata; Qwen3.8-27B: gufo (DFlash2 draft) > strix-llama.cpp; DeepSeek-V4.1-Flash: osmos;
+Inkling 2 Mini: osmos.
 The 27B order is measured here (2026-11-18, `bench-v1`, UD-Q4_K_XL + DFlash2, 262k ctx, back to back): gufo 0.32.0 decodes
 40.2 t/s code / 30.2 prose / 28.0 at 8K / 21.6 at 32K and prefills 453-464 (401 at 32K); halo-box llama.cpp with
 `start-qwen38.sh`'s flags (4 drafts, ub 4096, f16 KV) 34.0 / 27.9 / 27.0 / 23.0 and 408-413 (360). halo-box's own 27B recipe
@@ -198,8 +199,18 @@ harness handles for it:
   libosmos's own installer (`--abliterated`), which fetches only the patch and sets `overlay` in `osmos.json`;
   the launch then waits for `/health`, because osmos lists its model while it is still loading its ~95-100 GiB budget.
 
-osmos is for DeepSeek-V4.1-Flash only: the wizard shows that model for it (never your saved Qwen choice), and the Qwen
-models run on halogen, gufo or Strata.
+osmos serves DeepSeek-V4.1-Flash, or **Inkling 2 Mini** when that is the saved model (the model menu's Inkling row):
+`server/start-osmos.sh` then runs libosmos's `inkling-2-mini` pack (`--print-pack` says which; `OSMOS_PACK` overrides).
+That pack is Thinking Machines' release itself - its NVFP4 / MXFP8 experts and BF16 dense weights, 19.6 GB, all in GPU
+memory - with its own 0.4 GB drafter and a 1M context, served as `osmos-inkling-2-mini`. The first start asks, then has
+libosmos's installer fetch and check it (`start-osmos.sh --install`, ~20 GB). Stock only: there is no abliterated build, so
+the weights question is skipped. libosmos's README (0.15.0, not measured here): 45.7 / 42.2 t/s drafted decode on code /
+prose, 28.8 plain, 1,018 t/s prefill at ~3K, 1,045 at 37K, 775 at 131K; KL 2.9e-3 against upstream llama.cpp's own run.
+Sampled at temperature 1.0 (the release's setting: greedy looped on one tool call in long agent sessions); pi's profile
+`models.inkling2` sends that and the reasoning effort by name (`none` ... `max`). strix-llama.cpp ran the same model at
+20 t/s / 324 t/s prefill with a 194-way graph split ([LLAMACPP.md](LLAMACPP.md)). AMD's Loom (`hrx-loom`, tech preview)
+publishes faster numbers (44 t/s plain, 58.5 drafted on code, ~1,600-1,850 prefill) measured with a CPU-spinning
+completion wait; not wired here yet. The Qwen models run on halogen, gufo or Strata.
 
 It has no NPU tools (guard, triage, dedup need halogen), and it will not fit beside another big engine: its expert budget
 is ~95-100 GiB on a 128 GB box (99.69 GiB here on 0.15.1 with `fill_gib` 4), plus ~18 GiB of GPU buffers. That budget is sized from the memory free when osmos starts, so close browsers and

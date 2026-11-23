@@ -15,11 +15,12 @@
 # template supports it; the flag makes the server retain instead of strip). Also available:
 # --reasoning-budget N as a server-side hard thinking cap (-1 unrestricted, 0 off, N>0 cap).
 #
-# Requires: halo-box/strix-llama.cpp (DFlash2 and the ROCmFPx quant types live there now); validate the
+# Requires: halo-box/strix-llama.cpp (DFlash2 and the ROCmFPx quant types live there now; Halobox v1.1.0 =
+# llama-b1069-ubuntu-vulkan-x64.zip, executable as unpacked); validate the
 # model trio again on whatever build you install (2026-09-06: 27B trio low/med/high at parity — 16/13/15 static, 38-min artifact-complete high)
 # (greedy repeatability: stale-KV between requests + a top-k race above ~2k prompt
-# tokens, both also in upstream, fixed there; throughput at parity). The bundled
-# RADV from the v0.7.x payload beats system Mesa on dense prefill — point
+# tokens, both also in upstream, fixed there; throughput at parity). The
+# release zip's bundled RADV beats system Mesa on dense prefill — point
 # DRIVER_DIR at it if you have it.
 #
 # Target quant: default is UD-Q4_K_XL-v3 (current daily driver; the Q4-Q8 PPL plateau
