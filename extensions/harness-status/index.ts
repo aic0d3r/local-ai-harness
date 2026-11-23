@@ -8,6 +8,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { profile, sidecarOn } from "../harness-profile/index.ts";
+import { otherOwner } from "./session-lock.ts";
 
 const BASE = process.env.HALOGEN_URL || "http://127.0.0.1:8731";
 // setup.sh writes the repo path to <agent dir>/harness-repo
@@ -101,7 +102,18 @@ export default function harnessStatus(pi: ExtensionAPI) {
 		} catch {}
 	});
 
+	// one session, two pi processes (Paseo's background agent plus `pi -c` in a terminal) both append to the same session
+	// file and run the same work twice: warn the second one
+	let lock: string | undefined;
+	const lockFor = (f: string) => path.join(getAgentDir(), "session-locks", `${path.basename(f)}.pid`);
 	pi.on("session_start", async (_e: any, ctx: any) => {
+		const f = ctx.sessionManager?.getSessionFile?.();
+		if (f) {
+			lock = lockFor(f);
+			const other = otherOwner(lock);
+			if (other) ctx.ui.notify(`This session is also open in pi pid ${other} (Paseo or another terminal?). Both write the same session file and repeat the same work: close one (kill ${other}).`, "warning");
+			try { fs.mkdirSync(path.dirname(lock), { recursive: true }); fs.writeFileSync(lock, String(process.pid)); } catch {}
+		}
 		sync(ctx.model?.provider, ctx);
 		scStop(ctx);
 		if (!sidecarOn()) return;
@@ -110,5 +122,9 @@ export default function harnessStatus(pi: ExtensionAPI) {
 		scTimer.unref?.();
 	});
 	pi.on("model_select", async (e: any, ctx: any) => sync(e.model?.provider, ctx));
-	pi.on("session_shutdown", async (_e: any, ctx: any) => { stop(ctx); scStop(ctx); });
+	pi.on("session_shutdown", async (_e: any, ctx: any) => {
+		stop(ctx); scStop(ctx);
+		try { if (lock && fs.readFileSync(lock, "utf8").trim() === String(process.pid)) fs.unlinkSync(lock); } catch {}
+		lock = undefined;
+	});
 }
