@@ -86,10 +86,10 @@ export default function harnessStatus(pi: ExtensionAPI) {
 		} catch {}
 		(globalThis as any)[FOOTER_LABEL] = text && { provider, text };
 	};
-	const sync = (provider: string | undefined, ctx: any) => {
+	const sync = (provider: string | undefined, model: string | undefined, ctx: any) => {
 		stop(ctx);
 		label(provider, ctx);
-		if (provider !== "halogen") return void ctx.ui.setStatus("speed", lastSpeed(provider));
+		if (provider !== "halogen") return void ctx.ui.setStatus("speed", lastSpeed(provider, model));
 		void poll(ctx);
 		timer = setInterval(() => void poll(ctx), 5000);
 		timer.unref?.();
@@ -114,19 +114,25 @@ export default function harnessStatus(pi: ExtensionAPI) {
 	// size and wait beside the rate: short agent-turn prefills read far below ./harness tune's 8K figure (osmos: a 562-token prompt still streams 12 GB of experts)
 	const speedText = (pf: number | undefined, pt: number, ttft: number, tps: number | undefined) =>
 		`speed ${[pf ? `pf ${k(pf)}/s (${k(pt)} tok, ${ttft.toFixed(1)}s)` : "", tps ? `${k(tps)} t/s` : ""].filter(Boolean).join(" · ")}`;
-	// a model switch or restart clears the line: show the provider's last measured reply again instead of nothing
-	const lastSpeed = (provider: string | undefined) => {
+	// a model switch or restart clears the line: show this model's last measured reply again, with its age, instead of nothing
+	const lastSpeed = (provider: string | undefined, model: string | undefined) => {
 		let lines: string[] = [];
 		try { lines = fs.readFileSync(speedLog, "utf8").trim().split("\n"); } catch {}
 		for (let i = lines.length - 1; i >= 0; i--) {
 			try {
 				const r = JSON.parse(lines[i]);
-				if (r.provider === provider && (r.pf_tps || r.tps)) return speedText(r.pf_tps, r.prompt, r.ttft, r.tps);
+				if (r.provider !== provider || r.model !== model || !(r.pf_tps || r.tps)) continue;
+				const min = (Date.now() - Date.parse(r.t)) / 60_000;
+				return `${speedText(r.pf_tps, r.prompt, r.ttft, r.tps)} · ${min < 60 ? `${Math.round(min)}m` : min < 2880 ? `${Math.round(min / 60)}h` : `${Math.round(min / 1440)}d`} ago`;
 			} catch {} // a torn line from a crash mid-append
 		}
 		return undefined;
 	};
-	pi.on("before_provider_request", async () => { t0 = Date.now(); t1 = 0; deltas = 0; });
+	// pi skips before_provider_request for built-in cloud providers (anthropic): turn_start starts the clock for every model,
+	// before_provider_request narrows it where it fires; a stale t0 from a side request once logged a 77 s "prefill"
+	const start = async () => { t0 = Date.now(); t1 = 0; deltas = 0; };
+	pi.on("turn_start", start);
+	pi.on("before_provider_request", start);
 	// only real tokens: osmos sends an empty role chunk at 0.01s, long before prefill ends
 	pi.on("message_update", async (e: any) => {
 		if (!t0 || !String(e.assistantMessageEvent?.type).endsWith("_delta")) return;
@@ -168,14 +174,14 @@ export default function harnessStatus(pi: ExtensionAPI) {
 			if (other) ctx.ui.notify(`This session is also open in pi pid ${other} (Paseo or another terminal?). Both write the same session file and repeat the same work: close one (kill ${other}).`, "warning");
 			try { fs.mkdirSync(path.dirname(lock), { recursive: true }); fs.writeFileSync(lock, String(process.pid)); } catch {}
 		}
-		sync(ctx.model?.provider, ctx);
+		sync(ctx.model?.provider, ctx.model?.id, ctx);
 		scStop(ctx);
 		if (!sidecarOn()) return;
 		void scPoll(ctx);
 		scTimer = setInterval(() => void scPoll(ctx), 10_000);
 		scTimer.unref?.();
 	});
-	pi.on("model_select", async (e: any, ctx: any) => sync(e.model?.provider, ctx));
+	pi.on("model_select", async (e: any, ctx: any) => sync(e.model?.provider, e.model?.id, ctx));
 	pi.on("session_shutdown", async (_e: any, ctx: any) => {
 		stop(ctx); scStop(ctx);
 		try { if (lock && fs.readFileSync(lock, "utf8").trim() === String(process.pid)) fs.unlinkSync(lock); } catch {}
