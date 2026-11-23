@@ -23,6 +23,16 @@ assert p["anthropic"]["modelOverrides"]["claude-x"]["inputLimits"] == lim, p  # 
 assert "zai" not in p, p  # text-only model untouched
 assert (tmp / "agent/models.json.pre-image-limits").exists()
 
+# a re-run (every start) keeps a limit already set, the user's own included; an explicit size overwrites
+d = json.loads(mj.read_text())
+mine = {"images": {"resize": {"maxWidth": 1568, "maxHeight": 1568}}}
+d["providers"]["anthropic"]["modelOverrides"]["claude-x"]["inputLimits"] = mine
+mj.write_text(json.dumps(d))
+subprocess.run(["python3", script], env=env, check=True)
+assert json.loads(mj.read_text())["providers"]["anthropic"]["modelOverrides"]["claude-x"]["inputLimits"] == mine
+subprocess.run(["python3", script, "540x1200"], env=env, check=True)
+assert json.loads(mj.read_text())["providers"]["anthropic"]["modelOverrides"]["claude-x"]["inputLimits"] == lim
+
 before = mj.read_text()
 subprocess.run(["python3", script], env={**env, "PI_IMAGE_MAX": "off"}, check=True)
 assert mj.read_text() == before

@@ -28,10 +28,10 @@ providers = data.setdefault("providers", {})
 for prov, mid in models:
     p = providers.setdefault(prov, {})
     custom = next((m for m in p.get("models", []) if m.get("id") == mid), None)
-    if custom is not None:  # models defined here take inputLimits directly
-        custom["inputLimits"] = limits
-    else:  # built-in / extension models take it through modelOverrides
-        p.setdefault("modelOverrides", {}).setdefault(mid, {})["inputLimits"] = limits
+    # models defined here take inputLimits directly; built-in / extension models through modelOverrides
+    target = custom if custom is not None else p.setdefault("modelOverrides", {}).setdefault(mid, {})
+    if sys.argv[1:2] or "inputLimits" not in target:  # every start re-runs this: a limit already set (maybe the user's) stays unless a size is given
+        target["inputLimits"] = limits
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "setup"))
 import jsonio

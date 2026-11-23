@@ -125,7 +125,7 @@ def scrape():
     return m, h, cache
 
 
-EVENTS = os.path.expanduser("~/.pi/agent/harness-events.jsonl")
+EVENTS = os.path.join(os.environ.get("PI_CODING_AGENT_DIR") or os.path.join(os.environ.get("PI_HOME") or os.path.expanduser("~/.pi"), "agent"), "harness-events.jsonl")
 NPU_STATE = "/sys/class/accel/accel0/device/power_state"
 
 

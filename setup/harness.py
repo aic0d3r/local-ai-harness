@@ -806,6 +806,10 @@ def apply(engine, model_id, tuned=None):
     new = build_entry(engine, model_id, ctx, tuned)
     if old and engine == "halogen":  # setup.sh provisions the halogen provider; never overwrite it
         new = old
+    elif old:  # the user's other models and own key stay; only this model's entry and the URL are ours
+        key = new["apiKey"] if engine_key(engine) or old.get("apiKey") in (None, "", "dummy") else old["apiKey"]
+        new = {**old, "baseUrl": new["baseUrl"], "api": new["api"], "apiKey": key,
+               "models": new["models"] + [x for x in old.get("models", []) if x.get("id") != model_id]}
     m.setdefault("providers", {})[prov] = new
     # compaction/branch-summary look the sidecar up in the model registry; setup.sh only adds it on
     # the halogen path, so without this every other engine silently fell back to main-model summaries

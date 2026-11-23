@@ -40,10 +40,13 @@ assert os.path.isfile(os.path.join(EXT, "npu-retrieval.ts"))  # with halogen the
 class H(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def do_GET(self):
+        if NEED and self.headers.get("Authorization") != f"Bearer {NEED}":
+            self.send_response(401); self.end_headers(); return
         b = json.dumps({"data": [{"id": "m1", "context_length": 65536, "architecture": {"input_modalities": ["text", "image"]}}]}).encode()
         self.send_response(200); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
 
 
+NEED = None
 srv = http.server.HTTPServer(("127.0.0.1", 0), H)
 threading.Thread(target=srv.serve_forever, daemon=True).start()
 url = f"http://127.0.0.1:{srv.server_port}"
@@ -55,6 +58,14 @@ m["apiKey"] = "secret"
 json.dump({"providers": {"strata": m}}, open(os.path.join(AGENT, "models.json"), "w"))
 assert "left untouched" in run(adopt.provider, url, "strata")
 assert json.load(open(os.path.join(AGENT, "models.json")))["providers"]["strata"]["apiKey"] == "secret"
+# Strata in Docker serves only with its key: the probe sends it and the new provider stores it
+NEED = "k1"
+os.environ["STRATA_DATA"] = tempfile.mkdtemp()
+open(os.path.join(os.environ["STRATA_DATA"], "harness-key"), "w").write("k1\n")
+os.remove(os.path.join(AGENT, "models.json"))
+run(adopt.provider, url, "strata")
+m = json.load(open(os.path.join(AGENT, "models.json")))["providers"]["strata"]
+assert m["apiKey"] == "k1" and m["models"][0]["id"] == "m1", m
 srv.shutdown()
 open(os.path.join(AGENT, "models.json"), "w").write("{broken")  # a parse error must not be overwritten
 try:

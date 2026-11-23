@@ -26,7 +26,8 @@ export default function toolTrim(pi: ExtensionAPI) {
 	for (const e of ["session_start", "session_compact", "session_tree", "session_switch", "session_fork"]) pi.on(e as any, async () => { reads = new Map(); nudged = new Set(); });
 
 	pi.on("tool_result", async (event: any) => {
-		if (process.env.TOOL_TRIM_DISABLED || event.isError && event.toolName === "read") return;
+		// a call from a codemode script: its result goes to the script, not into the model's context
+		if (process.env.TOOL_TRIM_DISABLED || event.parentToolCallId || event.isError && event.toolName === "read") return;
 		const blocks: any[] = event.content ?? [];
 		if (!blocks.length || blocks.some((b) => b.type !== "text")) return; // images etc: untouched
 		const before = blocks.map((b) => b.text).join("\n");

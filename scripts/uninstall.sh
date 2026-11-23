@@ -4,6 +4,7 @@
 # container/checkpoint, mcp.json, the sidecar GGUF
 # (prints the rm command instead).
 set -uo pipefail
+umask 077  # the backup holds models.json, which can carry API keys: owner only
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 # decide BEFORE defaulting PI_HOME: an explicit PI_HOME means a sandbox install
 SANDBOX=${PI_HOME:+1}

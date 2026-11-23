@@ -1,5 +1,5 @@
 // run: bun test tests/   (tool-trim core: short output untouched, head and tail always kept, noise collapsed)
-import { expect, test } from "bun:test";
+import { expect, mock, test } from "bun:test";
 import { BOUNDED, clean, LIMITS, trim } from "../extensions/tool-trim/core.ts";
 
 const lines = (n: number) => Array.from({ length: n }, (_, i) => `line ${i}`).join("\n");
@@ -32,6 +32,17 @@ test("one huge line is capped, not dropped", () => {
 	const r = trim("x".repeat(5000), "/tmp/x");
 	expect(r.text.length).toBeLessThan(2200);
 	expect(r.text).toContain("line cut, 5000 chars");
+});
+
+test("a codemode script's own read is left alone: its result goes to the script, not the model", async () => {
+	mock.module("@earendil-works/pi-coding-agent", () => ({ getAgentDir: () => "/tmp" }));
+	const { default: toolTrim } = await import("../extensions/tool-trim/index.ts");
+	const on: Record<string, Function> = {};
+	toolTrim({ on: (e: string, f: Function) => (on[e] = f) } as any);
+	const read = (extra = {}) => on.tool_result({ toolName: "read", input: { path: "a.txt" }, content: [{ type: "text", text: "x".repeat(3000) }], ...extra });
+	await read();
+	expect(await read({ parentToolCallId: "p1" })).toBeUndefined();
+	expect((await read())?.content[0].text).toContain("unchanged since your earlier read");
 });
 
 test("commands that bound their own output are skipped", () => {

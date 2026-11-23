@@ -26,6 +26,13 @@ test("tidyMessage splits long subject", () => {
 	expect(m.split("\n")[0].length).toBeLessThanOrEqual(72);
 });
 
+test("tidyMessage falls back to a word break when there is no sentence or clause boundary", () => {
+	const m = tidyMessage("Add retry logic to the HTTP client so transient network failures on upload requests recover quickly");
+	const [subject, , body] = m.split("\n");
+	expect(subject.length).toBeLessThanOrEqual(72);
+	expect(`${subject} ${body}`).toBe("Add retry logic to the HTTP client so transient network failures on upload requests recover quickly");
+});
+
 test("tidyMessage cuts at a clause boundary, not mid-phrase", () => {
 	const m = tidyMessage("Add prefill speed to harness-status footer and drop the idle zero run text");
 	expect(m.split("\n")[0]).toBe("Add prefill speed to harness-status footer");

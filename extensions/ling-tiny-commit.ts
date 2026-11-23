@@ -38,7 +38,7 @@ export const tidyMessage = (msg: string): string => {
 		const head = subject.slice(0, 73);
 		const cut =
 			head.search(/[.!?]\s/) + 1 ||
-			[Math.max(head.lastIndexOf(", and "), head.lastIndexOf(" and "), head.lastIndexOf(", not "), head.lastIndexOf("; ")) + 1] ||
+			Math.max(head.lastIndexOf(", and "), head.lastIndexOf(" and "), head.lastIndexOf(", not "), head.lastIndexOf("; ")) + 1 ||
 			subject.lastIndexOf(" ", 72);
 		if (cut > 0) {
 			body = [subject.slice(cut).trim(), body].filter(Boolean).join("\n\n");
@@ -112,7 +112,7 @@ export default function (pi: ExtensionAPI) {
 		const [{ stdout: stat }, { stdout: diff }, { stdout: untracked }] = await Promise.all([
 			git(["diff", base, "--stat"]),
 			git(["diff", "-U1", base]),
-			git(["ls-files", "--others", "--exclude-standard"]),
+			git(["ls-files", "--others", "--exclude-standard", ":/"]), // :/ = the whole repo, like the diff, even from a subfolder
 		]);
 
 		let untrackedBlock = "";
@@ -154,7 +154,7 @@ ${fullDiff}
 				const { code } = await git(["check-ignore", "-q", p]);
 				if (code !== 0) excludes.push(`:(exclude)${p}`);
 			}
-			const { code: aCode, stderr: aErr } = await git(["add", "-A", "--", ".", ...excludes]);
+			const { code: aCode, stderr: aErr } = await git(["add", "-A", "--", ":/", ...excludes]);
 			if (aCode !== 0) return notify(`git add failed: ${aErr}`, "error");
 			const { code: cCode, stdout: cOut, stderr: cErr } = await git(["commit", "-m", commitMessage]);
 			if (cCode !== 0) return notify(`git commit failed: ${cErr || cOut}`, "error");

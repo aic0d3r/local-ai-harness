@@ -112,8 +112,13 @@ def provider(url, eng):
     path = os.path.join(AGENT, "models.json")
     m = read_json(path, {})
     mid, ctx, inp = "qwen3.8-flash-next", 131072, ["text"]  # text-only guess when the server is down
+    key = None
+    if eng == "strata":  # Strata's Docker image serves only with its key: the same file the wizard reads
+        from harness import strata_key
+        key = strata_key()
     try:
-        d = json.load(urllib.request.urlopen(url + "/v1/models", timeout=3))["data"][0]
+        req = urllib.request.Request(url + "/v1/models", headers={"Authorization": f"Bearer {key}"} if key else {})
+        d = json.load(urllib.request.urlopen(req, timeout=3))["data"][0]
         mid, ctx = d["id"], d.get("meta", {}).get("n_ctx") or d.get("context_length", ctx)  # gufo reports context_length
         inp = d.get("architecture", {}).get("input_modalities", inp)
     except Exception:
@@ -124,6 +129,8 @@ def provider(url, eng):
     else:
         # the same builder as the wizard: reasoning, chat-template, sampling and thinking levels come from config/profiles.json
         P[eng] = entries.build_provider(url + "/v1", eng, mid, int(ctx), inp)  # set the apiKey by hand if the engine runs with one
+        if key:
+            P[eng]["apiKey"] = key
         print(f"  added provider: {eng}")
     print(f"  model id: {mid}")
     write_json(path, m, 1)

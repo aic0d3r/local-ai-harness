@@ -72,6 +72,14 @@ m = json.load(open(f"{AGENT}/models.json"))["providers"]["llamacpp"]["models"][0
 assert (prov, mid, ctx) == ("llamacpp", "Qwen3-8B", 32768) and m["maxTokens"] == 4096 and "chatTemplateKwargs" in m["compat"]
 assert json.load(open(f"{AGENT}/harness-profile.json"))["npu"] is False
 assert "llamacpp-tiny" in json.load(open(f"{AGENT}/models.json"))["providers"]  # sidecar reachable by registry lookups
+# a provider the user extended by hand keeps its other models and own key
+_mj = json.load(open(f"{AGENT}/models.json"))
+_mj["providers"]["llamacpp"]["models"].append({"id": "mine"})
+_mj["providers"]["llamacpp"]["apiKey"] = "sk-mine"
+json.dump(_mj, open(f"{AGENT}/models.json", "w"))
+h.apply("llamacpp", "Qwen3-8B", {"maxTokens": 4096})
+_p = json.load(open(f"{AGENT}/models.json"))["providers"]["llamacpp"]
+assert [x["id"] for x in _p["models"]] == ["Qwen3-8B", "mine"] and _p["apiKey"] == "sk-mine", _p
 # Strata shares :8080 and also serves /props (seen on Strata 0.1.44) but no owned_by=llamacpp
 STRATA = True
 h.PROFILES["engines"]["strata"]["port"] = srv.server_port
