@@ -30,6 +30,11 @@ export const swapModel = (line: string, provider: string, id: string, text: stri
 	}
 	return line;
 };
+// the engine's model_label + weights stand in for the model they name (halogen's one, osmos's DeepSeek); a pack the engine
+// serves beside it keeps the name /model lists it under, with no weights answer (inkling-2-mini runs the release weights only)
+// shortcut: inkling is the only such pack; a per-model profiles.json lookup when osmos serves a second
+export const footerLabel = (m: { id: string; name: string }, e: { model_label: string }, weights: string) =>
+	/inkling/i.test(m.id) ? m.name : `${e.model_label} · ${weights}`;
 const proto: any = FooterComponent.prototype;
 if (!proto[FOOTER_LABEL]) {
 	proto[FOOTER_LABEL] = true;
@@ -77,19 +82,19 @@ export default function harnessStatus(pi: ExtensionAPI) {
 
 	// footer + polling only while a halogen model is selected; other providers get nothing
 	const stop = (ctx: any) => { clearInterval(timer); timer = undefined; prev = rate = undefined; ctx.ui.setStatus("halogen", undefined); ctx.ui.setStatus("speed", undefined); };
-	// pi's footer shows the served id (osmos: osmos-osmos-evo); a one-model engine's profiles.json model_label + weights reads better
-	const label = (provider: string | undefined, _ctx: any) => {
+	// pi's footer shows the served id (osmos: osmos-osmos-evo); the engine's profiles.json model_label reads better (footerLabel)
+	const label = (m: any) => {
 		let text: string | undefined;
 		try {
 			const e = JSON.parse(fs.readFileSync(path.join(REPO, "config/profiles.json"), "utf8")).engines?.[profile().engine];
-			if (provider === profile().provider && e?.model_label) text = `${e.model_label} · ${weights()}`;
+			if (m?.provider === profile().provider && e?.model_label) text = footerLabel(m, e, weights());
 		} catch {}
-		(globalThis as any)[FOOTER_LABEL] = text && { provider, text };
+		(globalThis as any)[FOOTER_LABEL] = text && { provider: m.provider, text };
 	};
-	const sync = (provider: string | undefined, model: string | undefined, ctx: any) => {
+	const sync = (m: any, ctx: any) => {
 		stop(ctx);
-		label(provider, ctx);
-		if (provider !== "halogen") return void ctx.ui.setStatus("speed", lastSpeed(provider, model));
+		label(m);
+		if (m?.provider !== "halogen") return void ctx.ui.setStatus("speed", lastSpeed(m?.provider, m?.id));
 		void poll(ctx);
 		timer = setInterval(() => void poll(ctx), 5000);
 		timer.unref?.();
@@ -174,14 +179,14 @@ export default function harnessStatus(pi: ExtensionAPI) {
 			if (other) ctx.ui.notify(`This session is also open in pi pid ${other} (Paseo or another terminal?). Both write the same session file and repeat the same work: close one (kill ${other}).`, "warning");
 			try { fs.mkdirSync(path.dirname(lock), { recursive: true }); fs.writeFileSync(lock, String(process.pid)); } catch {}
 		}
-		sync(ctx.model?.provider, ctx.model?.id, ctx);
+		sync(ctx.model, ctx);
 		scStop(ctx);
 		if (!sidecarOn()) return;
 		void scPoll(ctx);
 		scTimer = setInterval(() => void scPoll(ctx), 10_000);
 		scTimer.unref?.();
 	});
-	pi.on("model_select", async (e: any, ctx: any) => sync(e.model?.provider, e.model?.id, ctx));
+	pi.on("model_select", async (e: any, ctx: any) => sync(e.model, ctx));
 	pi.on("session_shutdown", async (_e: any, ctx: any) => {
 		stop(ctx); scStop(ctx);
 		try { if (lock && fs.readFileSync(lock, "utf8").trim() === String(process.pid)) fs.unlinkSync(lock); } catch {}

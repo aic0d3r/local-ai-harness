@@ -67,6 +67,7 @@ Model-first setup on Strix Halo and more engines: osmos (DeepSeek-V4.1-Flash), S
 - `./harness tune` counted chunks as tokens (osmos showed 6.0 t/s instead of 40.8); it now uses the server's token count.
 - `halogen-top.sh` was a SyntaxError on Python < 3.12; several `bench/` scripts crashed or touched the real home.
 - `--halogen --voice` took `--voice` as a path; the sidecar model is no longer downloaded without `llama-server`.
+- pi's footer showed `DeepSeek-V4.1-Flash (osmos-evo) · stock` on osmos whichever model was selected, Inkling 2 Mini included: the label was the engine's `model_label`, read once per provider. The footer now names the selected model: the inkling-2-mini pack keeps the name `/model` lists it under, with no weights answer (release weights only); the engine's own model (DeepSeek, halogen) reads as before.
 
 ## 2.1.0 - 2026-11-11
 
