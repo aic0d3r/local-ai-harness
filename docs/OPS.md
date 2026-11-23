@@ -31,7 +31,8 @@ against the real window) and scales `compaction.reserveTokens` (60k at 262k, 10k
 
 On engines without a usable `/metrics` (gufo has none), pi times each reply itself: prefill = prompt
 tokens the server did not have cached / time to first streamed token, decode = output tokens / the rest. One line per
-reply goes to `~/.pi/agent/harness-speed.jsonl`, which `./harness monitor` follows (`--once`: the last 10). The time to the
+reply goes to `~/.pi/agent/harness-speed.jsonl`, which `./harness monitor` follows for the active engine, each rated reply in the
+footer's format (`--once`: the last 10). The time to the
 first token includes queueing and the network, so prefill reads a little low. While subagents run at the same time, a reply's rate
 is its share, not the engine's total. Drafted decode depends on the text (code drafts better than prose), and an engine that
 does not report cached tokens counts the whole prompt as new. Replies with under 256 new prompt tokens or 16 output tokens get no rate, and neither do replies that arrived in one burst

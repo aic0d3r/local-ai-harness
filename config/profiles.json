@@ -125,7 +125,7 @@
     },
     "osmos-deepseek": {
    "match": "osmos-",
-   "name": "osmos deepseek",
+   "name": "DeepSeek-V4.1-Flash (osmos-evo)",
    "reasoning": true,
    "maxTokens": 4096,
    "samplingParams": {

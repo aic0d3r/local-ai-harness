@@ -657,10 +657,10 @@ os.makedirs(f"{md}/.venv/bin"); os.symlink(sys.executable, f"{md}/.venv/bin/pyth
 sp = h.PROFILES["engines"]["strata"]["port"]  # the mock above moved it
 assert h.monitor_cmd("strata", once=True)[1:] == [f"{md}/strata.py", "monitor", "--url", f"http://127.0.0.1:{sp}", "--once"]
 assert h.monitor_cmd("strata", "http://nas:8080", True)[4] == "http://nas:8080"
-# engines without one tail the per-reply speeds harness-status logs; a reply too short to rate shows a dash
+# engines without one tail the per-reply speeds harness-status logs, as pi's footer shows them; a reply too short to rate is skipped
 r = {"t": "2026-01-01T12:34:56.000Z", "model": "m", "prompt": 9000, "cached": 40000, "ttft": 7.5, "out": 300, "pf_tps": 1200, "tps": 41.2}
-assert "12:34:56" in h.speed_row(r) and "1200 t/s" in h.speed_row(r) and "41.2 t/s" in h.speed_row(r)
-assert "prefill      -" in h.speed_row({**r, "pf_tps": None})
+assert h.speed_row(r) == "12:34:56  speed pf 1.2k/s (9.0k tok, 7.5s) · 41 t/s", h.speed_row(r)
+assert h.speed_row({**r, "pf_tps": None}) == "12:34:56  speed 41 t/s" and h.speed_row({k: v for k, v in r.items() if k not in ("pf_tps", "tps")}) is None
 h.SPEED_LOG = os.path.join(tempfile.mkdtemp(), "s.jsonl")
 open(h.SPEED_LOG, "w").write(json.dumps(r) + "\n{cut mid-wri\n")
 h.speed_tail(once=True)  # prints the good row, skips the broken one, returns

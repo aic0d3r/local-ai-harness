@@ -6,7 +6,8 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, FooterComponent, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { truncateToWidth } from "@earendil-works/pi-tui";
 import { profile, sidecarOn, weights } from "../harness-profile/index.ts";
 import { otherOwner } from "./session-lock.ts";
 
@@ -15,6 +16,30 @@ const BASE = process.env.HALOGEN_URL || "http://127.0.0.1:8731";
 const recorded = (() => { try { return fs.readFileSync(path.join(getAgentDir(), "harness-repo"), "utf8").trim(); } catch { return ""; } })();
 const REPO = process.env.HARNESS_REPO || recorded || path.join(os.homedir(), "coding", "local-ai-harness");
 const metric = (txt: string, k: string) => { const m = txt.match(new RegExp(`^${k.replace(":", ":")}\\s+([0-9.eE+-]+)`, "m")); return m ? Number(m[1]) : undefined; };
+
+// pi's footer prints model.id on the right and offers no hook for it: wrap its render once and swap "(provider) id" for the label.
+// The label lives on globalThis so a /reload updates it without wrapping twice.
+const FOOTER_LABEL = Symbol.for("harness-status.footer-label");
+export const swapModel = (line: string, provider: string, id: string, text: string, width: number) => {
+	for (const old of [`(${provider}) ${id}`, id]) {
+		const i = line.lastIndexOf(old);
+		if (i < 0) continue;
+		// eat the padding in front so the right edge stays put; truncate when it is not enough
+		const pad = line.slice(0, i).match(/ *$/)![0].length, eat = Math.max(0, Math.min(text.length - old.length, pad - 2));
+		return truncateToWidth(line.slice(0, i - eat) + text + line.slice(i + old.length), width, "");
+	}
+	return line;
+};
+const proto: any = FooterComponent.prototype;
+if (!proto[FOOTER_LABEL]) {
+	proto[FOOTER_LABEL] = true;
+	const render = proto.render;
+	proto.render = function (this: any, width: number) {
+		const lines: string[] = render.call(this, width), l = (globalThis as any)[FOOTER_LABEL], m = this.session?.state?.model;
+		if (l && m?.provider === l.provider && lines[1]) lines[1] = swapModel(lines[1], m.provider, m.id, l.text, width);
+		return lines;
+	};
+}
 
 export default function harnessStatus(pi: ExtensionAPI) {
 	let timer: ReturnType<typeof setInterval> | undefined;
@@ -53,18 +78,18 @@ export default function harnessStatus(pi: ExtensionAPI) {
 	// footer + polling only while a halogen model is selected; other providers get nothing
 	const stop = (ctx: any) => { clearInterval(timer); timer = undefined; prev = rate = undefined; ctx.ui.setStatus("halogen", undefined); ctx.ui.setStatus("speed", undefined); };
 	// pi's footer shows the served id (osmos: osmos-osmos-evo); a one-model engine's profiles.json model_label + weights reads better
-	const label = (provider: string | undefined, ctx: any) => {
+	const label = (provider: string | undefined, _ctx: any) => {
 		let text: string | undefined;
 		try {
 			const e = JSON.parse(fs.readFileSync(path.join(REPO, "config/profiles.json"), "utf8")).engines?.[profile().engine];
 			if (provider === profile().provider && e?.model_label) text = `${e.model_label} · ${weights()}`;
 		} catch {}
-		ctx.ui.setStatus("model", text && ctx.ui.theme.fg("muted", text));
+		(globalThis as any)[FOOTER_LABEL] = text && { provider, text };
 	};
 	const sync = (provider: string | undefined, ctx: any) => {
 		stop(ctx);
 		label(provider, ctx);
-		if (provider !== "halogen") return;
+		if (provider !== "halogen") return void ctx.ui.setStatus("speed", lastSpeed(provider));
 		void poll(ctx);
 		timer = setInterval(() => void poll(ctx), 5000);
 		timer.unref?.();
@@ -86,6 +111,22 @@ export default function harnessStatus(pi: ExtensionAPI) {
 	let t0 = 0, t1 = 0, deltas = 0;
 	// shortcut: the log is never rotated (~200 B per reply), rotate it if it ever matters
 	const speedLog = path.join(getAgentDir(), "harness-speed.jsonl");
+	const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(Math.round(n)));
+	// size and wait beside the rate: short agent-turn prefills read far below ./harness tune's 8K figure (osmos: a 562-token prompt still streams 12 GB of experts)
+	const speedText = (pf: number | undefined, pt: number, ttft: number, tps: number | undefined) =>
+		`speed ${[pf ? `pf ${k(pf)}/s (${k(pt)} tok, ${ttft.toFixed(1)}s)` : "", tps ? `${k(tps)} t/s` : ""].filter(Boolean).join(" · ")}`;
+	// a model switch or restart clears the line: show the provider's last measured reply again instead of nothing
+	const lastSpeed = (provider: string | undefined) => {
+		let lines: string[] = [];
+		try { lines = fs.readFileSync(speedLog, "utf8").trim().split("\n"); } catch {}
+		for (let i = lines.length - 1; i >= 0; i--) {
+			try {
+				const r = JSON.parse(lines[i]);
+				if (r.provider === provider && (r.pf_tps || r.tps)) return speedText(r.pf_tps, r.prompt, r.ttft, r.tps);
+			} catch {} // a torn line from a crash mid-append
+		}
+		return undefined;
+	};
 	pi.on("before_provider_request", async () => { t0 = Date.now(); t1 = 0; deltas = 0; });
 	// only real tokens: osmos sends an empty role chunk at 0.01s, long before prefill ends
 	pi.on("message_update", async (e: any) => {
@@ -103,9 +144,7 @@ export default function harnessStatus(pi: ExtensionAPI) {
 		const streamed = deltas >= 3 && dec >= 0.25;
 		const pf = streamed && pt >= 256 ? pt / ttft : undefined; // tiny uncached tails make a meaningless rate
 		const tps = streamed && u.output >= 16 ? u.output / dec : undefined;
-		const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(Math.round(n)));
-		// size and wait beside the rate: short agent-turn prefills read far below ./harness tune's 8K figure (osmos: a 562-token prompt still streams 12 GB of experts)
-		if (pf || tps) ctx.ui.setStatus("speed", `speed ${[pf ? `pf ${k(pf)}/s (${k(pt)} tok, ${ttft.toFixed(1)}s)` : "", tps ? `${k(tps)} t/s` : ""].filter(Boolean).join(" · ")}`);
+		if (pf || tps) ctx.ui.setStatus("speed", speedText(pf, pt, ttft, tps));
 		try {
 			fs.appendFileSync(speedLog, JSON.stringify({ t: new Date(t2).toISOString(), provider: m.provider, model: m.model, prompt: pt, cached: u.cacheRead ?? 0,
 				ttft: +ttft.toFixed(2), out: u.output ?? 0, decode_s: +dec.toFixed(2), deltas, pf_tps: pf && +pf.toFixed(0), tps: tps && +tps.toFixed(1) }) + "\n");

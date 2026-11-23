@@ -1919,7 +1919,7 @@ def cmd_monitor(a):
     eng = a.engine or (active() or {}).get("engine") or next((x["engine"] for x in detect()["engines"]), "halogen")
     argv = monitor_cmd(eng, a.url, a.once)
     if not argv:
-        return speed_tail(a.once)
+        return speed_tail(a.once, PROFILES["engines"].get(eng, {}).get("provider", eng))
     os.execvp(argv[0], argv)
 
 
@@ -1927,29 +1927,38 @@ SPEED_LOG = os.path.join(AGENT, "harness-speed.jsonl")  # extensions/harness-sta
 
 
 def speed_row(r):
-    pf = f"{r['pf_tps']:>6} t/s" if r.get("pf_tps") else "     -    "
-    tps = f"{r['tps']:>5} t/s" if r.get("tps") else "    -    "
-    return (f"{r['t'][11:19]}  prefill {pf} ({r['prompt']:>6} new, {r['cached']:>6} cached, {r['ttft']:>5}s)  "
-            f"decode {tps} ({r['out']:>5} tok)  {r['model']}")
+    """One reply as pi's footer shows it ('12:34:56  speed pf 1.2k/s (9.0k tok, 7.5s) · 41 t/s'), None when it has no rate
+    (one burst, or too short): the footer skips those too. Keep in step with speedText in extensions/harness-status."""
+    if not (r.get("pf_tps") or r.get("tps")):
+        return None
+    k = lambda n: f"{n / 1000:.1f}k" if n >= 1000 else str(int(n + 0.5))  # noqa: E731
+    parts = ([f"pf {k(r['pf_tps'])}/s ({k(r['prompt'])} tok, {r['ttft']:.1f}s)"] if r.get("pf_tps") else []) + (
+        [f"{k(r['tps'])} t/s"] if r.get("tps") else [])
+    return f"{r['t'][11:19]}  speed {' · '.join(parts)}"
 
 
-def speed_tail(once=False):
-    """Engines without a metrics endpoint: per-reply speeds pi measured client-side; the last 10, then follow."""
-    print(f"per-reply speed timed by pi (prefill includes queueing, so it reads a little low): {SPEED_LOG}")
+def speed_tail(once=False, provider=None):
+    """Engines without a metrics endpoint: per-reply speeds pi measured client-side for provider (None: all); the last 10,
+    then follow."""
+    print(f"{provider or 'every'} reply speed timed by pi (prefill includes queueing, so it reads a little low): {SPEED_LOG}")
     if not os.path.exists(SPEED_LOG):
         print("no replies logged yet: start pi (./start.sh ~/your-project) and send a prompt")
         if once:
             return
         open(SPEED_LOG, "a").close()
     with open(SPEED_LOG) as f:
-        lines, follow = f.readlines()[-10:], not once
+        def row(line):
+            try:
+                r = json.loads(line)
+                return speed_row(r) if provider in (None, r.get("provider")) else None
+            except (ValueError, KeyError, TypeError):
+                return None  # a line cut mid-write or from an older format
+        lines, follow = [x for x in f.readlines() if row(x)][-10:], not once
         try:
             while True:
                 for line in lines:
-                    try:
-                        print(speed_row(json.loads(line)), flush=True)
-                    except (ValueError, KeyError, TypeError):
-                        pass  # a line cut mid-write or from an older format
+                    if s := row(line):
+                        print(s, flush=True)
                 if not follow:
                     return
                 lines = [line] if (line := f.readline()) else []
