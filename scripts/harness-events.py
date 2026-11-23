@@ -10,13 +10,13 @@ def window(session):
     # +60s: compaction/commit events land just after the last message entry
     from datetime import datetime, timedelta
     end = (datetime.fromisoformat(max(ts).replace("Z", "+00:00")) + timedelta(seconds=60)).isoformat().replace("+00:00", "Z")
-    return lines[0].get("cwd"), min(ts), end
+    return lines[0].get("cwd"), min(ts), end, lines[0].get("id")
 
-def summarize(events, cwd, start, end):
-    # shortcut: matches by cwd + time window, so two concurrent sessions in one dir are merged; add a session id if that matters
+def summarize(events, cwd, start, end, sid=None):
+    # events carry the session id (sid) since harness-profile tags them; older ones without it match by cwd + time window
     by = defaultdict(list)
     for e in events:
-        if e.get("cwd") == cwd and start <= e.get("t", "") <= end:
+        if e.get("cwd") == cwd and start <= e.get("t", "") <= end and e.get("sid") in (None, sid):
             by[e["c"]].append(e)
     out, fails = [], 0
     for c, es in sorted(by.items()):
@@ -49,11 +49,15 @@ if __name__ == "__main__":
         assert fails == 1 and len(out) == 2, out
         assert "~41,000 tok" in out[0] and "FAILED 1 (HTTP 400)" in out[0], out[0]
         assert "1 unsure" in out[1], out[1]
+        # a second session in the same dir and window is left out once events carry session ids
+        ev2 = [{**ev[0], "sid": "a"}, {**ev[0], "sid": "b"}, ev[0]]
+        out, _ = summarize(ev2, "/r", "2026-01-01T00:00:00Z", "2026-01-01T00:01:00Z", "a")
+        assert out[0].startswith("compaction       2x"), out
         print("selftest ok"); sys.exit(0)
-    cwd, start, end = window(sys.argv[1])
+    cwd, start, end, sid = window(sys.argv[1])
     try: events = [json.loads(l) for l in open(sys.argv[2]) if l.strip()]
     except FileNotFoundError: events = []
-    out, fails = summarize(events, cwd, start, end)
+    out, fails = summarize(events, cwd, start, end, sid)
     print("harness  sidecar + NPU work in this session")
     print("\n".join("  " + l for l in out) if out else "  (no events - extensions not installed/updated, or none fired)")
     sys.exit(1 if fails else 0)

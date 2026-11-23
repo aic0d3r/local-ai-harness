@@ -1950,26 +1950,38 @@ def speed_tail(once=False, provider=None):
         if once:
             return
         open(SPEED_LOG, "a").close()
-    with open(SPEED_LOG) as f:
-        def row(line):
-            try:
-                r = json.loads(line)
-                return speed_row(r) if provider in (None, r.get("provider")) else None
-            except (ValueError, KeyError, TypeError):
-                return None  # a line cut mid-write or from an older format
-        lines, follow = [x for x in f.readlines() if row(x)][-10:], not once
+    def row(line):
         try:
-            while True:
-                for line in lines:
-                    if s := row(line):
-                        print(s, flush=True)
-                if not follow:
-                    return
-                lines = [line] if (line := f.readline()) else []
-                if not lines:
-                    time.sleep(1)
-        except KeyboardInterrupt:
-            pass
+            r = json.loads(line)
+            return speed_row(r) if provider in (None, r.get("provider")) else None
+        except (ValueError, KeyError, TypeError):
+            return None  # a line cut mid-write or from an older format
+    f = open(SPEED_LOG)
+    every = f.readlines()
+    lines, follow, seen = [x for x in every if row(x)][-10:], not once, every[-1] if every else None
+    try:
+        while True:
+            for line in lines:
+                if s := row(line):
+                    print(s, flush=True)
+            if not follow:
+                return
+            lines = [line] if (line := f.readline()) else []
+            if lines:
+                seen = line
+            elif os.path.exists(SPEED_LOG) and os.stat(SPEED_LOG).st_ino != os.fstat(f.fileno()).st_ino:
+                # harness-status rotated the log (renamed a trimmed copy in): carry on after the last line read
+                f.close()
+                f = open(SPEED_LOG)
+                every = f.readlines()
+                lines = every[every.index(seen) + 1:] if seen in every else every
+                seen = every[-1] if every else seen
+            else:
+                time.sleep(1)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        f.close()
 
 
 def saved_engine():

@@ -8,7 +8,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { type ExtensionAPI, FooterComponent, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth } from "@earendil-works/pi-tui";
-import { profile, sidecarOn, weights } from "../harness-profile/index.ts";
+import { profile, sidecarOn, weights, ev } from "../harness-profile/index.ts";
 import { otherOwner } from "./session-lock.ts";
 
 const BASE = process.env.HALOGEN_URL || "http://127.0.0.1:8731";
@@ -49,7 +49,7 @@ export default function harnessStatus(pi: ExtensionAPI) {
 	pi.registerCommand("usage", {
 		description: "MCP / skill / extension usage report (scripts/usage-stats.py); pass --all for lifetime",
 		handler: async (args: string, ctx: any) => {
-			try { fs.appendFileSync(path.join(getAgentDir(), "harness-events.jsonl"), JSON.stringify({ t: new Date().toISOString(), cwd: process.cwd(), c: "harness-status", k: "usage" }) + "\n"); } catch {}
+			ev({ c: "harness-status", k: "usage" });
 			const r = await pi.exec("python3", [path.join(REPO, "scripts/usage-stats.py"), ...(args ?? "").split(/\s+/).filter(Boolean)], { cwd: REPO, timeout: 30_000 });
 			ctx.ui.notify((r.stdout || r.stderr || "no output").trim(), r.code === 0 ? "info" : "error");
 		},
@@ -109,7 +109,6 @@ export default function harnessStatus(pi: ExtensionAPI) {
 	// client-side speed: prefill = uncached prompt tokens / time to first stream event; decode = output / the rest.
 	// Time to first event includes queueing and network, so prefill reads a little low.
 	let t0 = 0, t1 = 0, deltas = 0;
-	// shortcut: the log is never rotated (~200 B per reply), rotate it if it ever matters
 	const speedLog = path.join(getAgentDir(), "harness-speed.jsonl");
 	const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(Math.round(n)));
 	// size and wait beside the rate: short agent-turn prefills read far below ./harness tune's 8K figure (osmos: a 562-token prompt still streams 12 GB of experts)
@@ -146,6 +145,12 @@ export default function harnessStatus(pi: ExtensionAPI) {
 		const tps = streamed && u.output >= 16 ? u.output / dec : undefined;
 		if (pf || tps) ctx.ui.setStatus("speed", speedText(pf, pt, ttft, tps));
 		try {
+			// ~200 B per reply and lastSpeed reads it all: past 1 MiB keep the newest 2,500 lines, renamed in whole (./harness monitor reopens on a new inode)
+			if ((fs.statSync(speedLog, { throwIfNoEntry: false })?.size ?? 0) > 1 << 20) {
+				const tmp = `${speedLog}.${process.pid}.tmp`;
+				fs.writeFileSync(tmp, fs.readFileSync(speedLog, "utf8").split("\n").slice(-2501).join("\n"));
+				fs.renameSync(tmp, speedLog);
+			}
 			fs.appendFileSync(speedLog, JSON.stringify({ t: new Date(t2).toISOString(), provider: m.provider, model: m.model, prompt: pt, cached: u.cacheRead ?? 0,
 				ttft: +ttft.toFixed(2), out: u.output ?? 0, decode_s: +dec.toFixed(2), deltas, pf_tps: pf && +pf.toFixed(0), tps: tps && +tps.toFixed(1) }) + "\n");
 		} catch {}

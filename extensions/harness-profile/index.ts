@@ -8,7 +8,7 @@ import * as path from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 /** One JSON line per sidecar/NPU/guard event in <agent dir>/harness-events.jsonl (scripts/usage-stats.py, session-audit.sh read it). Never throws. */
-export const ev = (o: object) => { try { fs.appendFileSync(path.join(getAgentDir(), "harness-events.jsonl"), JSON.stringify({ t: new Date().toISOString(), cwd: process.cwd(), ...o }) + "\n"); } catch {} };
+export const ev = (o: object) => { try { fs.appendFileSync(path.join(getAgentDir(), "harness-events.jsonl"), JSON.stringify({ t: new Date().toISOString(), cwd: process.cwd(), sid: (globalThis as any).__harnessSid, ...o }) + "\n"); } catch {} };
 
 export interface Profile { engine: string; provider: string; model: string; sidecarUrl: string; npu: boolean; npuUrl: string }
 const LEGACY: Profile = { engine: "halogen", provider: "halogen", model: "halogen-qwen3.8-flash-next", sidecarUrl: "http://127.0.0.1:8090", npu: true, npuUrl: "http://127.0.0.1:8731" };
@@ -54,5 +54,8 @@ export function subagentSawOutside(details: any): boolean {
 /** true when the session's model is the local engine this harness was set up for (false on cloud hybrid turns) */
 export const isMain = (ctx: any): boolean => ctx?.model?.provider === profile().provider;
 
-// pi loads every extensions/<dir>/index.ts; this one registers nothing
-export default function () {}
+// pi loads every extensions/<dir>/index.ts; this one only tags events with the session id, on globalThis since each
+// extension may get its own copy of this module. scripts/harness-events.py splits two sessions in one dir by it.
+export default function (pi: any) {
+	pi.on("session_start", async (_e: any, ctx: any) => { (globalThis as any).__harnessSid = ctx.sessionManager?.getSessionId?.(); });
+}

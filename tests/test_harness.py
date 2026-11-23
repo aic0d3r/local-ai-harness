@@ -672,6 +672,22 @@ assert h.speed_row({**r, "pf_tps": None}) == "12:34:56  speed 41 t/s" and h.spee
 h.SPEED_LOG = os.path.join(tempfile.mkdtemp(), "s.jsonl")
 open(h.SPEED_LOG, "w").write(json.dumps(r) + "\n{cut mid-wri\n")
 h.speed_tail(once=True)  # prints the good row, skips the broken one, returns
+# harness-status rotates the log by renaming a trimmed copy in: the follower reopens it and prints only the new reply
+import contextlib, io
+naps, real_sleep = [], h.time.sleep
+def nap(_):
+    naps.append(1)
+    if len(naps) > 1:
+        raise KeyboardInterrupt
+    open(h.SPEED_LOG + ".tmp", "w").write(json.dumps(r) + "\n" + json.dumps({**r, "t": "2026-01-01T12:35:00.000Z"}) + "\n")
+    os.rename(h.SPEED_LOG + ".tmp", h.SPEED_LOG)
+open(h.SPEED_LOG, "w").write(json.dumps(r) + "\n")
+h.time.sleep, buf = nap, io.StringIO()
+with contextlib.redirect_stdout(buf):
+    h.speed_tail()
+h.time.sleep = real_sleep
+rows = [x for x in buf.getvalue().splitlines() if "speed pf" in x]
+assert [x[:8] for x in rows] == ["12:34:56", "12:35:00"], buf.getvalue()
 # live reply: the engine answers over HTTP without pi; a dead port and an HTTP error are failures with a reason
 assert h.live_reply("llamacpp", "m", timeout=5)[0] is True
 dead = h.PROFILES["engines"]["vllm"]["port"]
