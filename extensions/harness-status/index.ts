@@ -7,7 +7,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent";
-import { profile, sidecarOn } from "../harness-profile/index.ts";
+import { profile, sidecarOn, weights } from "../harness-profile/index.ts";
 import { otherOwner } from "./session-lock.ts";
 
 const BASE = process.env.HALOGEN_URL || "http://127.0.0.1:8731";
@@ -52,8 +52,18 @@ export default function harnessStatus(pi: ExtensionAPI) {
 
 	// footer + polling only while a halogen model is selected; other providers get nothing
 	const stop = (ctx: any) => { clearInterval(timer); timer = undefined; prev = rate = undefined; ctx.ui.setStatus("halogen", undefined); ctx.ui.setStatus("speed", undefined); };
+	// pi's footer shows the served id (osmos: osmos-osmos-evo); a one-model engine's profiles.json model_label + weights reads better
+	const label = (provider: string | undefined, ctx: any) => {
+		let text: string | undefined;
+		try {
+			const e = JSON.parse(fs.readFileSync(path.join(REPO, "config/profiles.json"), "utf8")).engines?.[profile().engine];
+			if (provider === profile().provider && e?.model_label) text = `${e.model_label} · ${weights()}`;
+		} catch {}
+		ctx.ui.setStatus("model", text && ctx.ui.theme.fg("muted", text));
+	};
 	const sync = (provider: string | undefined, ctx: any) => {
 		stop(ctx);
+		label(provider, ctx);
 		if (provider !== "halogen") return;
 		void poll(ctx);
 		timer = setInterval(() => void poll(ctx), 5000);

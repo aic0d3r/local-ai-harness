@@ -186,9 +186,10 @@ of decode against evo-A, as its release notes say. It appears in pi and Paseo as
 profile can name itself: `models.osmos-deepseek`; the id osmos-api serves is `osmos-osmos-evo`). Two things the
 harness handles for it:
 
-- **Greedy by the profile's choice**: since libosmos 0.14.0 osmos takes `temperature`, `top_p` and `seed` (before, anything but
-  greedy was a 400). DeepSeek packs stay greedy unless a request asks, and drafting gains less when sampling (0.14.0 notes), so
-  `config/profiles.json` (`models.osmos-deepseek`) still sends `temperature 0`, `top_p 1`.
+- **Sampled, not greedy**: since libosmos 0.14.0 osmos takes `temperature`, `top_p` and `seed` (before, anything but
+  greedy was a 400). DeepSeek packs stay greedy unless a request asks, and drafting gains less when sampling (0.14.0 notes), yet
+  `config/profiles.json` (`models.osmos-deepseek`) sends `temperature 1.0`, `top_p 0.95`: DeepSeek's agentic setting (model
+  card); greedy (`temperature 0`) looped on repeated tool calls in long agent turns, at some cost in drafted decode speed.
 - **Thinking is real, with three levels**: DeepSeek maps seven effort names onto three real ones ([its docs](https://api-docs.deepseek.com/guides/thinking_mode/)): `low`, `high`, `max`. The profile keeps exactly those and marks `minimal`/`medium`/`xhigh` unsupported (`null`), so pi and Paseo offer `off, low, high, max` instead of advertising levels the model collapses anyway. `off` sends `reasoning_effort: none` and the reply carries no reasoning at all.
 - **It does not report its context window** (`/v1/models` has no `context_length`, `/props` is 404). The engine
   profile carries `ctx`, mirroring `max_context` in the pack's `osmos.json` - change both together.

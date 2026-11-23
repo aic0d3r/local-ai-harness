@@ -129,8 +129,8 @@
    "reasoning": true,
    "maxTokens": 4096,
    "samplingParams": {
-    "temperature": 0,
-    "top_p": 1
+    "temperature": 1.0,
+    "top_p": 0.95
    },
    "compat": {
     "thinkingFormat": "openai"
