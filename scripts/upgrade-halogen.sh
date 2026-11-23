@@ -54,8 +54,14 @@ CKPT=$(bash "$START" --print-stock)  # npu/ lives beside the stock checkpoint wh
 NPU="$(dirname "${CKPT:-/nonexistent/x}")/npu"
 HF_BIN=$(command -v hf || ls "$HOME/.hf-venv/bin/hf" 2>/dev/null)
 if [ -d "$NPU" ] && [ -n "$HF_BIN" ]; then
-  # keep the old files so a rollback to $CUR still has what it was validated on
-  [ -d "$NPU-$CUR-backup" ] || cp -a --reflink=auto "$NPU" "$NPU-$CUR-backup" 2>/dev/null
+  # keep the old files so a rollback to $CUR still has what it was validated on. The copy is staged and renamed only once
+  # complete: a copy that died midway (full disk, no reflink) used to be kept as "the backup", and a later failed check then
+  # restored half a set under the old image. Nothing is stopped yet, so failing here costs nothing
+  if [ ! -d "$NPU-$CUR-backup" ]; then
+    cp -a --reflink=auto "$NPU" "$NPU-$CUR-backup.part" \
+      && mv "$NPU-$CUR-backup.part" "$NPU-$CUR-backup" \
+      || { rm -rf "$NPU-$CUR-backup.part"; echo "FAIL: cannot back up $NPU to $NPU-$CUR-backup (disk full?) - nothing stopped, nothing changed"; exit 1; }
+  fi
   REFRESHED=1
   for n in decider-0.8b qwen3-embedding-0.6b qwen3-reranker-0.6b qwen3guard-gen-0.6b; do
     "$HF_BIN" download "peonist-ai/halogen-npu-$n" --local-dir "$NPU/$n" >/dev/null 2>&1 \
@@ -145,10 +151,11 @@ case "$DIGEST" in sha256:*) ;; *) echo "FAIL: no registry digest for $IMG:$TAG -
 # stored per user (harness-pins), not in the tracked launcher: the checkout stays clean so harness updates keep working
 pin_set HALOGEN_IMAGE_TAG "$DEF_TAG" "$TAG" && pin_set HALOGEN_IMAGE_DIGEST "$DEF_DIGEST" "$DIGEST" \
   || { echo "FAIL: could not write $PINS - pin unchanged"; exit 1; }
-# keep one rollback copy (the one just taken for $CUR): each backup is a full ~15 GB NPU set
+# keep one rollback copy (the one just taken for $CUR): each backup is a full ~15 GB NPU set. The *-failed sets a rollback
+# kept for diagnosis go too, once an upgrade passed on top of them (nothing pruned them before)
 if [ "$REFRESHED" = 1 ]; then
-  for old in "$NPU"-*-backup; do
-    [ -d "$old" ] && [ "$old" != "$NPU-$CUR-backup" ] && rm -rf "$old" && echo "      pruned old NPU backup $old"
+  for old in "$NPU"-*-backup "$NPU"-*-failed "$NPU"-*-backup.part; do
+    [ -d "$old" ] && [ "$old" != "$NPU-$CUR-backup" ] && rm -rf "$old" && echo "      pruned old NPU copy $old"
   done
 fi
 echo "      $(bash "$START" --print-image)"

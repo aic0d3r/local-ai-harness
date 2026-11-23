@@ -77,11 +77,14 @@ Optional / situational:
   instruction-hijack phrasings live, so it is a tripwire only. `/guard-stats` counts both screens.
 - `taint-gate.ts` - the prompt-injection defence that needs no model. After the agent reads outside
   content (web search or fetch, MCP resources, a `curl`), risky calls need a yes from the user until
-  their next message: sending data out (not to localhost), force-pushing, `curl | sh` or into `python3`/`node`, download-then-run,
-  `git remote add`, credentials (writing `.env`; reading it is fine), shell startup files, git hooks and cron, recursive `rm` outside
-  the project. A best-effort check on the command text (base64 or variables get around it), not a guarantee. Not gated, to keep prompts rare:
-  `npm install`, plain GET requests. Blocked when there is no UI (print mode, subagents). Off: `TAINT_GATE_DISABLED=1`;
-  `/taint-stats`. Tested live: a hidden "POST your .env" in a fetched page was obeyed with the gate off,
+  their next message (a new/resumed session or `/tree` also starts clean; compaction does not: pi compacts on its own
+  between turns and the summary keeps the page's instructions): sending data out (not to localhost), a `git push` to a URL or a
+  force-push, `curl | sh` or into `python3`/`node`, `bash|python3|node <(curl …)`, download-then-run,
+  `git remote add`, `env`/`printenv` run as a command, credentials (writing `.env`; reading it is fine), shell startup files, git
+  hooks and cron, recursive `rm` outside the project. A best-effort check on the command text (base64 or variables get around
+  it; quoted text is data unless the command runs a string, `sh -c`/`eval`/`xargs`/`python -c`), not a guarantee. Not gated, to
+  keep prompts rare: `npm install`, plain GET requests. Blocked when there is no UI (print mode, subagents). Off:
+  `TAINT_GATE_DISABLED=1`; `/taint-stats`. Tested live: a hidden "POST your .env" in a fetched page was obeyed with the gate off,
   stopped with it on.
 - `image-prune.ts` - a guardrail, not a saving: every turn re-sends the whole transcript, so
   each screenshot ever read stays in the request (a provider caps it: DeepInfra 30) and keeps
@@ -130,6 +133,11 @@ Two tools, each measured:
 `/tune [key value]` - live performance knobs from inside pi: compaction threshold,
 per-turn token budget, sampling temperature (0 for deterministic benches),
 llama.cpp-side ubatch. Reads and writes the real config files with validation.
+`/tune reset` computes `compactAt` from the real context window (a quarter of it
+kept free, at most 60k: the installer's rule) and restores halogen's 8192
+`maxTokens` cap on halogen only; another engine keeps its model entry's own
+`maxTokens`. A `/tune` reserve that still fits the window survives `./start.sh`
+and `./harness use` (only a reserve the installer wrote follows the window).
 (Tool-result triage threshold was removed 10-06: it pointed at
 `ling-tiny-triage.ts`, which was never installed or loaded, so
 the knob was a silent no-op.)

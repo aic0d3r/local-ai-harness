@@ -22,12 +22,24 @@ case "$TARGET" in Huihui-*) TREPO=huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF;
 # only what is missing: Q4 and Q8 share the draft and projector, so a second quant fetches just its target
 # sizes in GB (10^9) at the pinned revisions, rounded up
 size_gb() { case "$1" in *Q8_K_XL*) echo 32 ;; *Q4_K_XL*) echo 18 ;; *) echo 1 ;; esac; }
-NEED=(); GB=0
+NEED=(); GB=0; TOTAL=0
 for f in "$TARGET" mmproj-BF16.gguf "$DRAFT"; do
+  TOTAL=$((TOTAL + $(size_gb "$f")))
   [ -f "$DIR/$f" ] || { NEED+=("$f"); GB=$((GB + $(size_gb "$f"))); }
 done
-[ "${1:-}" = --print-gb ] && { echo "$GB"; exit 0; }
-[ "$GB" = 0 ] && { echo "  already there: $DIR"; exit 0; }
+# the three files against their repos' sizes + sha256 (the same three calls end a download)
+verify_all(){ hf_verify "$TREPO" "$TREV" "$DIR" --require "$TARGET" \
+  && hf_verify "$UNSLOTH" "$REV_TARGET" "$DIR" --require mmproj-BF16.gguf \
+  && hf_verify z-lab/Qwen3.8-27B-DFlash2-GGUF "$REV_DRAFT" "$DIR" --require "$DRAFT"; }
+# --print-gb: the wizard's "still to fetch". A file that is there but corrupt counts as missing, so the download step runs,
+# verifies and names the file to delete (instead of the wizard assuming everything is in place)
+[ "${1:-}" = --print-gb ] && { [ "$GB" != 0 ] || verify_all >/dev/null 2>&1 || GB=$TOTAL; echo "$GB"; exit 0; }
+if [ "$GB" = 0 ]; then
+  # whole as well as there: a file a killed download or a bad disk left short used to pass as complete, and gufo then
+  # failed to load without exiting. An untouched file is not hashed again (.hf-verified.json); offline the check passes
+  if OUT=$(verify_all 2>&1); then echo "  already there: $DIR (verified)"; exit 0; fi
+  echo "  a file in $DIR does not match the repo - delete the file named and re-run:" >&2; echo "$OUT" | sed 's/^/  /' >&2; exit 1
+fi
 mkdir -p "$DIR"
 AVAIL=$(df -BG --output=avail "$DIR" 2>/dev/null | tail -1 | tr -dc '0-9')
 UP=(); DL=(); TG=()  # files per repo: Unsloth (projector), z-lab (draft), the target's
@@ -57,8 +69,6 @@ echo "  downloading - resumable: if it stops, re-run and it continues where it l
 for f in "$TARGET" "$DRAFT" mmproj-BF16.gguf; do
   [ -f "$DIR/$f" ] || { echo "  download finished but $f is missing from $DIR" >&2; exit 1; }
 done
-hf_verify "$TREPO" "$TREV" "$DIR" --require "$TARGET" \
-  && hf_verify "$UNSLOTH" "$REV_TARGET" "$DIR" --require mmproj-BF16.gguf \
-  && hf_verify z-lab/Qwen3.8-27B-DFlash2-GGUF "$REV_DRAFT" "$DIR" --require "$DRAFT" \
+verify_all \
   || { echo "  a downloaded file does not match the repo - delete the file(s) named above and re-run" >&2; exit 1; }
 echo "  download complete ($DIR)"

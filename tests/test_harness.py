@@ -394,8 +394,11 @@ os.remove(f"{AGENT}/harness-sidecar")
 # setup order: update offered right after the engine pick (before any start question); then install (no launch),
 # free memory, upgrade, start last; an upgrade forces a fresh probe even when a saved result exists
 import argparse, types
-calls, saved = [], {n: getattr(h, n) for n in ("pick_engine", "update_offer", "upgrader", "install_extensions", "prepare_start", "bring_up", "finish", "harness_update_offer", "ask_sidecar", "ask_once", "served_models")}
-h.harness_update_offer = h.ask_sidecar = lambda *a: None
+calls, saved = [], {n: getattr(h, n) for n in ("pick_engine", "update_offer", "upgrader", "install_extensions", "prepare_start", "bring_up", "finish", "harness_update_offer", "ask_sidecar", "ask_once", "served_models", "ask_agent")}
+# the update offer may restart the wizard through execv (no `finally`, so UNDO never runs): it has to come before any answer is written
+h.harness_update_offer = lambda: calls.append("restart_offer")
+h.ask_sidecar = lambda *a: None
+h.ask_agent = lambda r: calls.append("agent")
 h.ask_once = lambda *a: False
 h.pick_engine = lambda d, yes, want=None, on_pick=None: (on_pick("gufo"), calls.append("plan_start"), ("gufo", {"stop": "halogen", "download": False}))[2]
 h.update_offer = lambda e: calls.append("update_offer") or True
@@ -411,7 +414,7 @@ h.cmd_setup(argparse.Namespace(yes=False, verbose=False, reconfigure=False, no_t
 h.subprocess.run = real_run
 h.capacity = real_cap
 for n, f in saved.items(): setattr(h, n, f)
-assert calls == ["update_offer", "plan_start", "install launch=False", "prepare", "upgrade", "start plan=True", "probe=True"], calls
+assert calls == ["restart_offer", "agent", "update_offer", "plan_start", "install launch=False", "prepare", "upgrade", "start plan=True", "probe=True"], calls
 # upgrade chosen: pick_engine must not ask "Start <engine>?" (declining it used to exit setup); without one it does
 asked, saved = [], {n: getattr(h, n) for n in ("engine_menu", "plan_start", "ask_weights", "ask_yn", "ask_route")}
 h.engine_menu = lambda r, esc=None: "halogen"
@@ -904,3 +907,126 @@ assert h.fmt_free(dict(h.mem_pools(), vram_total=96 * G, vram_used=56 * G)) == "
 for n, f in saved.items():
     setattr(h, n, f)
 print("ok: memory row on shared memory, a separate card and root containers")
+
+# ---- this audit's wizard fixes: `use` refuses a model id the engine does not serve, Esc at the wizard's last question keeps
+# the engine, the compaction reserve has one rule, no traceback without docker/systemctl/pkill, and the CLI subcommands that
+# had no test (heavy helpers stubbed: exit code and output)
+import contextlib, io
+
+d = {"engines": [{"engine": "gufo", "port": srv.server_port, "models": ["qwen3.8-27b-q8"]}]}
+try:
+    h.bring_up(d, "gufo", None, True, "qwen38-27b-q8")  # a typo'd `use gufo/<model>` used to be written into models.json as the id
+    raise AssertionError("a model the engine does not serve must exit")
+except SystemExit as e:
+    assert "gufo serves qwen3.8-27b-q8, not qwen38-27b-q8" in str(e), e
+assert h.bring_up(d, "gufo", None, True, "qwen3.8-27b-q8") == ("gufo", "qwen3.8-27b-q8")
+# the wizard's last question (after install, downloads and the engine switch): Esc takes the first model instead of cancelling
+# with the profile still naming the old engine; ./harness config (esc=BACK) still goes back
+real_choose, h.choose = h.choose, lambda q, o, y, esc=None: esc
+assert h.bring_up(d, "gufo", None, False) == ("gufo", "qwen3.8-27b-q8")
+assert h.bring_up(d, "gufo", None, False, esc=h.BACK) == (h.BACK, None)
+h.choose = real_choose
+print("ok: use checks the model id; Esc at the last question keeps the engine")
+
+# compaction reserve: a /tune value that fits (and a compaction the user turned off) survives apply(); ours follows the window
+h.jput(f"{AGENT}/settings.json", {"compaction": {"reserveTokens": 5000, "enabled": False}})
+h.jput(f"{AGENT}/harness-profile.json", {"engine": "llamacpp", "model": "Qwen3-8B"})
+h.apply("llamacpp", "Qwen3-8B", {})
+s, p = json.load(open(f"{AGENT}/settings.json"))["compaction"], json.load(open(f"{AGENT}/harness-profile.json"))
+assert s == {"reserveTokens": 5000, "enabled": False} and "reserveTokens" not in p, (s, p)  # kept, and not remembered as ours
+h.jput(f"{AGENT}/settings.json", {})
+h.apply("llamacpp", "Qwen3-8B", {})  # unset: ours to set (32768 window), and remembered as ours
+s = json.load(open(f"{AGENT}/settings.json"))["compaction"]
+assert s == {"reserveTokens": 8192, "enabled": True} and json.load(open(f"{AGENT}/harness-profile.json"))["reserveTokens"] == 8192, s
+h.apply("llamacpp", "Qwen3-8B", {})
+assert json.load(open(f"{AGENT}/settings.json"))["compaction"] == s
+# sync_ctx: the remembered value follows the window both ways; a value that is not ours stays; an older install's default with no
+# marker is still recognised (this window's default, or over half the window)
+GUFO = True
+h.jput(f"{AGENT}/models.json", {"providers": {"gufo": {"models": [{"id": "Qwen3-8B", "contextWindow": 262144}]}}})
+h.jput(f"{AGENT}/harness-profile.json", {"engine": "gufo", "model": "Qwen3-8B", "reserveTokens": 60000})
+h.jput(f"{AGENT}/settings.json", {"compaction": {"reserveTokens": 60000}})
+h.sync_ctx("gufo")  # the mock reports 65536
+assert json.load(open(f"{AGENT}/settings.json"))["compaction"]["reserveTokens"] == 16384 and json.load(open(f"{AGENT}/harness-profile.json"))["reserveTokens"] == 16384
+h.jput(f"{AGENT}/settings.json", {"compaction": {"reserveTokens": 5000}})  # /tune: fits, not ours
+h.sync_ctx("gufo")
+assert json.load(open(f"{AGENT}/settings.json"))["compaction"]["reserveTokens"] == 5000
+h.jput(f"{AGENT}/settings.json", {"compaction": {"reserveTokens": 60000}})
+h.jput(f"{AGENT}/harness-profile.json", {"engine": "gufo", "model": "Qwen3-8B"})
+h.sync_ctx("gufo")
+assert json.load(open(f"{AGENT}/settings.json"))["compaction"]["reserveTokens"] == 16384
+print("ok: compaction reserve, one rule for apply() and sync_ctx")
+
+# a box without docker / systemd / procps (Ollama, vLLM, LM Studio, osmos: no container anywhere) used to raise
+# FileNotFoundError out of ./harness status and up; tool() gives exit 127 and no output there
+real_which = h.shutil.which
+h.shutil.which = lambda n: None if n in ("docker", "systemctl", "pkill") else real_which(n)
+try:
+    r = h.tool("docker", "ps")
+    assert r.returncode == 127 and r.stdout == "" and r.stderr == "", r
+    assert h.engine_containers("gufo") == [] and h.port_pids(1) == set() and h.strix_container(1) is False
+    h.stop_sidecar()
+    line = h.mem_line({"ollama": 11434}, False)
+    assert ":11434" in line and "not ours" in line, line
+finally:
+    h.shutil.which = real_which
+print("ok: no traceback without docker, systemctl or pkill")
+
+
+def cli(*argv, **stubs):
+    """harness.main() in-process on argv, the named helpers stubbed -> (exit code, output)."""
+    saved = {k: getattr(h, k) for k in stubs}
+    out, code = io.StringIO(), 0
+    for k, v in stubs.items():
+        setattr(h, k, v)
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            sys.argv = ["harness", *argv]
+            h.main()
+    except SystemExit as e:
+        out.write(e.code if isinstance(e.code, str) else "")  # sys.exit("message"): the interpreter prints it at exit, which this catches
+        code = e.code if isinstance(e.code, int) else (0 if e.code is None else 1)
+    finally:
+        for k, v in saved.items():
+            setattr(h, k, v)
+    return code, out.getvalue()
+
+
+h.jput(f"{AGENT}/harness-profile.json", {"engine": "gufo", "provider": "gufo", "model": "Qwen3-8B", "npu": False, "npuUrl": "http://127.0.0.1:8731", "sidecarUrl": "http://127.0.0.1:8090"})
+h.jput(f"{AGENT}/settings.json", {})
+execs, real_execvp = [], os.execvp
+os.execvp = lambda *a: execs.append(a)
+try:
+    code, out = cli("detect")
+    det = json.loads(out)
+    assert code == 0 and {"hardware", "engines", "gguf", "docker", "pi"} <= set(det) and "gufo" in [e["engine"] for e in det["engines"]], out
+    assert cli("model-info", "flash-next", "label") == (0, h.catalog()["flash-next"]["label"] + "\n") and cli("model-info", "nosuch", "label")[0] == 1
+    code, out = cli("recommend", "--json")
+    assert code == 0 and "recommendation" in json.loads(out), out
+    assert cli("update-check", update_pref=lambda: "0", engine_update=lambda e: "MUST NOT PRINT") == (0, "")
+    assert "9.9.9" in cli("update-check", update_pref=lambda: "1", engine_update=lambda e: "gufo 9.9.9 available")[1]
+    assert cli("refresh", saved_engine=lambda: None)[0] != 0 and "not set up" in cli("refresh", saved_engine=lambda: None)[1]
+    assert cli("refresh", saved_engine=lambda: "gufo", install_extensions=lambda *a, **k: True)[0] == 0
+    assert cli("refresh", saved_engine=lambda: "gufo", install_extensions=lambda *a, **k: False)[0] == 1
+    code, out = cli("status", mem_line=lambda *a: "gufo :8080 1 GiB", speed_text=lambda *a: "fast", custom_endpoint=lambda: None)
+    assert code == 0 and re.search(r"^engine gufo .*:.* UP", out, re.M) and "speed: fast" in out and "memory: gufo :8080 1 GiB)" in out, out
+    code, out = cli("monitor", "--once", monitor_cmd=lambda *a: ["halogen-top.sh", "--once"])
+    assert code == 0 and execs == [("halogen-top.sh", ["halogen-top.sh", "--once"])], (code, out, execs)
+    code, out = cli("up", install_extensions=lambda *a, **k: True, update_pref=lambda: "0", no_pi=lambda: False)
+    assert code == 0 and "!" not in out, out  # gufo is up on the mock: nothing to start, the install refreshed, the window synced
+    assert json.load(open(f"{AGENT}/settings.json"))["compaction"]["reserveTokens"] == 16384
+    done = []
+    code, out = cli("use", "gufo", install_extensions=lambda *a, **k: True, finish=lambda e, m, nt, launch=False: done.append((e, m)))
+    assert code == 0 and done == [("gufo", "Qwen3-8B")], (code, out)
+    code, out = cli("use", "gufo/nosuch", install_extensions=lambda *a, **k: True, finish=lambda *a, **k: None)
+    assert code == 1 and "serves Qwen3-8B, not nosuch" in out, out
+    code, out = cli("tune", finish=lambda e, m, nt: done.append(f"tuned {e}"))
+    assert code == 0 and done[-1] == "tuned gufo", (code, out)
+    code, out = cli("config")  # no terminal: the choices line, no menu
+    assert code == 0 and out.startswith("model ") and "\n" not in out.strip(), out
+    code, out = cli("report", "--no-doctor")
+    assert code == 0 and out.startswith("local-ai-harness report") and "engine:   gufo" in out, out
+finally:
+    os.execvp = real_execvp
+    GUFO = False
+print("ok: detect, model-info, recommend, update-check, refresh, status, monitor, up, use, tune, config, report")

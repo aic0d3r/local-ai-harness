@@ -8,8 +8,8 @@
  *   outside content arrives (web search/fetch, MCP resources, bash that curled something)
  *     -> the session is "tainted" until the user's next message
  *   while tainted, a small set of risky calls needs a yes from the user:
- *     sending data out (curl -d/-F/-T/POST, nc, scp, rsync, ssh, git push), piping into a shell,
- *     downloading then running it, piping into an interpreter, adding a git remote,
+ *     sending data out (curl -d/-F/-T/POST, nc, scp, rsync, ssh, git push to a URL, force-push), piping into a shell,
+ *     downloading then running it, piping into an interpreter, a shell reading <(curl …), adding a git remote,
  *     reading or writing credentials (.env, ~/.ssh, ~/.aws, .netrc, auth.json), writing shell startup
  *     files / git hooks / cron, recursive rm outside the project. (Other file edits outside the project
  *     are allowed; `npm install` and plain GET requests are not gated, to keep prompts rare.)
@@ -28,36 +28,53 @@ import { isOutsideContent, subagentSawOutside, ev } from "./harness-profile/inde
 
 // shortcut: regex heuristics on the command string. A determined agent can obfuscate around them
 // (base64, variables); the goal is the plain, copy-pasted attack a fetched page asks for.
+// Quoted text is data for the "what it does" rules below (a grep pattern, a commit message: `grep -rn "nc" src/` is not nc)
+// unless the command runs a string (sh -c, eval, xargs, python -c), where the quotes are the program. The "what it touches"
+// rules keep the raw command: a quoted path is still a path (`rm -rf "~"`).
+const runsString = /\b(ba|z|da)?sh\s+-\w*c\b|\beval\b|\bxargs\b|\b(python3?|node|perl|ruby|php)\s+-[cer]\b/;
+const emptyQuotes = (s: string) => s.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, '""');
 const SEND: [RegExp, string][] = [
-	[/\bcurl\b(?![^|;&\n]*(localhost|127\.0\.0\.1|\[::1\]))[^|;&\n]*(\s-d\b|\s-F\b|\s-T\b|--data|--form|--upload-file|-X\s*(POST|PUT|PATCH|DELETE))/i, "uploads data with curl"],
+	[/\bcurl\b(?![^|;&\n]*(localhost|127\.0\.0\.1|\[::1\]))[^|;&\n]*(\s-d\b|\s-F\b|\s-T\b|--data|--form|--upload-file|--json|--request\s*(POST|PUT|PATCH|DELETE))/i, "uploads data with curl"],
 	[/\bwget\b[^|;&\n]*(--post-data|--post-file|--method)/i, "uploads data with wget"],
-	[/\|\s*(sudo\s+)?(ba|z|da|k)?sh\b|\b(ba|z)?sh\s+<\(\s*(curl|wget)|\beval\s+"?\$\(\s*(curl|wget)/i, "pipes into a shell"],
+	[/\|\s*(sudo\s+)?(ba|z|da|k)?sh\b|\beval\s+"?\$\(\s*(curl|wget)/i, "pipes into a shell"],
+	// a shell or interpreter whose program is a process substitution: bash <(curl …), python3 <(curl …), node <(curl …)
+	[/\b((ba|z|da|k)?sh|python3?|node|perl|ruby|php)(\s+-\S+)*\s+<\(\s*(sudo\s+)?(curl|wget)\b/i, "runs a program fetched on the spot"],
 	// an interpreter with no script argument reads the program from the pipe; `| python3 -c ...` and `| node file.js` do not match
 	[/\|\s*(sudo\s+)?(python3?|node|perl|ruby|php)(\s+-)?\s*($|[;&|)])/i, "pipes into an interpreter"],
-	// download, then run or make executable what was downloaded (a localhost fetch is the test-my-own-server case)
-	[/\b(curl|wget)\b(?![^|;&\n]*(localhost|127\.0\.0\.1|\[::1\]))[^\n]*(&&|;)\s*(sudo\s+)?((ba|z|da|k)?sh|python3?|node|perl|ruby|chmod\s+\+x|\.\/\S)/i, "downloads something and runs it"],
+	// download, then run or make executable what was downloaded (a localhost fetch is the test-my-own-server case);
+	// \b after the names: `&& shellcheck x.sh` and `&& node_modules/.bin/vitest` are not a shell or node
+	[/\b(curl|wget)\b(?![^|;&\n]*(localhost|127\.0\.0\.1|\[::1\]))[^\n]*(&&|;)\s*(sudo\s+)?(((ba|z|da|k)?sh|python3?|node|perl|ruby)\b|chmod\s+\+x|\.\/\S)/i, "downloads something and runs it"],
 	[/\bgit\s+remote\s+(add|set-url)\b/, "points git at another remote"],
-	[/\b(nc|ncat|netcat|telnet|scp|sftp|rsync|ssh)\b|\/dev\/(tcp|udp)\//, "opens a connection / copies to another machine"],
+	[/\bgit\s+push\b[^|;&\n]*(https?:\/\/|git@|ssh:)/, "pushes to another remote"],
+	// not inside a word or a path: ssh-keygen, ~/.ssh, src/nc/
+	[/(?<![\w.-])(?<![\w.-]+\/)(nc|ncat|netcat|telnet|scp|sftp|rsync|ssh)(?![\w-])|\/dev\/(tcp|udp)\//, "opens a connection / copies to another machine"],
 	[/\bgit\s+push\b[^|;&\n]*(\s-f\b|--force|--delete|\s-d\b|\s\+\S|--mirror)/, "force-pushes or deletes remote refs"],
 ];
-// credential locations. `.env` must start a path component so process.env.X and .env.example don't trip it.
-const DOTENV = /(^|[\s/"'=~])\.env(?![\w-]*\.?(example|sample|template)\b)(\b|$)/;
-const WRITEISH = /[^<]>|\btee\b|\bsed\s+-i|\b(mv|cp|rm|truncate|shred)\b/; // reading .env is fine, changing it is not
+// credential locations. `.env` must start a path component so process.env.X and .env.example don't trip it; `>` with no
+// space before it (cat tpl >.env) writes one too.
+const DOTENV = /(^|[\s/"'=~>])\.env(?![\w-]*\.?(example|sample|template)\b)(\b|$)/;
+const WRITEISH = /[^<]>|\btee\b|\bsed\s+-i|\b(mv|cp|rm|truncate|shred|ln)\b|\binstall\s+-m\b/; // reading .env is fine, changing it is not
 const SECRET = /\.ssh\/|\bid_(rsa|ed25519|ecdsa)\b|\.aws\/|\.netrc\b|\.npmrc\b|\.pypirc\b|\.gnupg\b|\.pi\/agent\/auth|auth\.json\b|\.config\/gh\/hosts/;
 // files that run later with the user's rights: shell startup files, git hooks, cron, autostart
 const STARTUP = /(^|[\s/"'=~])\.(bashrc|zshrc|bash_profile|zprofile|zshenv|profile)\b|\.git\/hooks\/|\bcrontab\b|\.config\/autostart|\/etc\/(profile|cron|systemd)/;
-const ENV_DUMP = /(^|[;&|]\s*)(printenv|env)\s*($|[|;&>])/;
+// env run as a command (also `sudo env`, `command env`, /usr/bin/env, `env 2>&1 | …`), not `venv env` or `process.env`
+const ENV_DUMP = /(^|[;&|(\n]\s*|\bsudo\s+|\bcommand\s+|\S*\/bin\/)(printenv|env)\s*($|[|;&)]|\d*[<>])/
 const RM_RECURSIVE = /\brm\s+(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)\b[^;&|\n]*/;
 const WIPE = /\b(mkfs(\.\w+)?|dd\s+[^|;&\n]*of=\/dev\/)\b/;
 
 const TMPDIR = process.env.TMPDIR || os.tmpdir();
-const inside = (p: string, cwd: string) => { const r = path.resolve(cwd, p.replace(/^~(?=[\\/]|$)/, os.homedir())); return r === cwd || r.startsWith(cwd + path.sep) || r.startsWith(TMPDIR + path.sep); };
+// ~, $HOME and ${HOME} (quoted or not) name the home folder, which is outside every project
+const inside = (p: string, cwd: string) => {
+	const r = path.resolve(cwd, p.replace(/^["']|["']$/g, "").replace(/^(~|\$(?:\{HOME\}|HOME))(?=[\\/]|$)/, os.homedir()));
+	return r === cwd || r.startsWith(cwd + path.sep) || r.startsWith(TMPDIR + path.sep);
+};
 
 /** Why this call is risky right after outside content, or null. Exported for tests. */
 export function riskyAfterOutside(toolName: string, input: any, cwd: string): string | null {
 	if (toolName === "bash") {
 		const cmd = String(input?.command ?? "");
-		for (const [re, why] of SEND) if (re.test(cmd)) return why;
+		const probe = runsString.test(cmd) ? cmd : emptyQuotes(cmd);
+		for (const [re, why] of SEND) if (re.test(probe)) return why;
 		if (SECRET.test(cmd) || (DOTENV.test(cmd) && WRITEISH.test(cmd)) || ENV_DUMP.test(cmd)) return "touches credentials or dumps the environment";
 		if (STARTUP.test(cmd) && (WRITEISH.test(cmd) || /\bchmod\b|\bcrontab\b(?!\s+-l\b)/.test(cmd))) return "changes a shell startup file, git hook or cron job";
 		if (WIPE.test(cmd)) return "formats or overwrites a disk";
@@ -86,7 +103,9 @@ export default function taintGate(pi: ExtensionAPI) {
 
 	// the user's own message ends the taint: a human just spoke, whatever the pages said is stale
 	pi.on("before_agent_start", async () => { tainted = null; });
-	for (const e of ["session_start", "session_compact", "session_tree", "session_switch", "session_fork"]) pi.on(e as any, async () => { tainted = null; okForSession.clear(); });
+	// a new/resumed/forked session (session_start covers all three) and /tree navigation start a different context. NOT
+	// session_compact: pi compacts by itself between turns, with nobody present, and the summary keeps the page's instructions
+	for (const e of ["session_start", "session_tree"]) pi.on(e as any, async () => { tainted = null; okForSession.clear(); });
 
 	pi.on("tool_result", async (event: any) => {
 		// a failed bash or subagent still returns what it fetched (pi marks any non-zero exit as an error), so only other errors are skipped

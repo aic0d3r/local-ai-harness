@@ -13,6 +13,16 @@ test("blocks source edits routed through bash", () => {
 	expect(blocksBashEdit("echo x >> src/main.ts", PROJ)).toBe(true);
 	expect(blocksBashEdit("tee out.py", PROJ)).toBe(true);
 	expect(blocksBashEdit("python3 - <<'PY'\nopen('a.go','w').write(s)\nPY", PROJ)).toBe(true);
+	expect(blocksBashEdit("python3 -m pathlib -c \"Path('src/a.ts').write_text(s)\"", PROJ)).toBe(true);
+	// mentioning /tmp is not working in /tmp: back up to /tmp, then sed -i the project file, is the habit this rule is for
+	expect(blocksBashEdit("cp src/app.py /tmp/app.py.orig && sed -i 's/a/b/' src/app.py", PROJ)).toBe(true);
+	expect(blocksBashEdit("echo x > /tmp/notes.md; sed -i s/a/b/ main.py", PROJ)).toBe(true);
+});
+
+test("python writing a non-source file, or a heredoc that only mentions .write(, is not a source edit", () => {
+	expect(blocksBashEdit(`python3 -c "json.dump(c, open('config.json','w'))"`, PROJ)).toBe(false);
+	expect(blocksBashEdit(`python3 -c "open('out.txt','w')"`, PROJ)).toBe(false);
+	expect(blocksBashEdit("python3 - <<'PY'\n# don't call .write(\nx = 1\nPY", PROJ)).toBe(false);
 });
 
 test("quoted text is data: grep/echo/commit messages that mention sed -i pass, a real sed -i still blocks", () => {
@@ -29,6 +39,7 @@ test("quoted text is data: grep/echo/commit messages that mention sed -i pass, a
 test("lets scratch work, reads and build/test commands through", () => {
 	expect(blocksBashEdit("cd /tmp; python3 - <<'PY'\nopen('p.py','w').write(s)\nPY", PROJ)).toBe(false);
 	expect(blocksBashEdit("cd /tmp && sed -i s/a/b/ scratch.py", PROJ)).toBe(false);
+	expect(blocksBashEdit("cd /tmpx && sed -i s/a/b/ x.py", PROJ)).toBe(true); // /tmpx is not the temp dir
 	expect(blocksBashEdit("sed -i s/a/b/ x.go", "/tmp")).toBe(false);
 	// a mktemp'd variable is a temp dir; any other variable is not
 	expect(blocksBashEdit("H=$(mktemp -d); git show HEAD:setup/mcp.py > $H/mcp_old.py", PROJ)).toBe(false);

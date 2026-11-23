@@ -30,7 +30,19 @@ case "$ENG" in
   *) echo "usage: $0 halogen|gufo|llamacpp [--yes]" >&2; exit 1 ;;
 esac
 # gufo also needs the shared MTP head beside the weights folder (the launcher's --mtp-model)
-[ -f "$WANT" ] && { [ "$ENG" != gufo ] || [ -f "$ROOT/$MTP" ]; } && { echo "  already there: $WANT"; exit 0; }
+# the weights against the repo's own sizes + sha256: the named files (halogen, llamacpp), or every .gguf that is there (gufo's
+# folder holds only these)
+VR=main; VF=(); i=1
+while [ "$i" -lt "${#ARGS[@]}" ]; do
+  case "${ARGS[$i]}" in --revision) VR=${ARGS[$((i+1))]}; i=$((i+2)) ;; --*) i=$((i+2)) ;; *) VF+=("${ARGS[$i]}"); i=$((i+1)) ;; esac
+done
+verify_there(){ hf_verify "${ARGS[0]}" "$VR" "$DIR" ${VF[@]:+--require "${VF[@]}"} 2>&1; }
+if [ -f "$WANT" ] && { [ "$ENG" != gufo ] || [ -f "$ROOT/$MTP" ]; }; then
+  # whole as well as there: a file a killed download or a bad disk left short used to pass as complete, and the engine then
+  # failed to load without exiting. An untouched file is not hashed again (.hf-verified.json); offline the check passes
+  if OUT=$(verify_there); then echo "  already there: $WANT (verified)"; exit 0; fi
+  echo "  $WANT is there but does not match the repo - delete the file named and re-run:" >&2; echo "$OUT" | sed 's/^/  /' >&2; exit 1
+fi
 [ -f "$WANT" ] && GB=5  # weights there, only the gufo sidecars left
 mkdir -p "$DIR"
 AVAIL=$(df -BG --output=avail "$DIR" 2>/dev/null | tail -1 | tr -dc '0-9')
@@ -53,11 +65,6 @@ if ! hf_dl "${ARGS[@]}" --local-dir "$DIR"; then
   [ "$ENG" = gufo ] && echo "  the gufo repo is gated: accept its terms on huggingface.co/brainnxdomain/Qwen3.8-Flash-Next-Uncensored-Gufo-GGUF, then: $HF_BIN auth login" >&2
   echo "  download failed/incomplete - re-run to resume" >&2; exit 1
 fi
-# the weights against the repo's own sizes + sha256: the named files (halogen), or every .gguf that is there (gufo's folder holds only these)
-VR=main; VF=(); i=1
-while [ "$i" -lt "${#ARGS[@]}" ]; do
-  case "${ARGS[$i]}" in --revision) VR=${ARGS[$((i+1))]}; i=$((i+2)) ;; --*) i=$((i+2)) ;; *) VF+=("${ARGS[$i]}"); i=$((i+1)) ;; esac
-done
 hf_verify "${ARGS[0]}" "$VR" "$DIR" ${VF[@]:+--require "${VF[@]}"} \
   || { echo "  a downloaded file does not match the repo - delete the file(s) named above and re-run" >&2; exit 1; }
 # gufo sidecars from the stock repo when this box never had the stock gufo setup: MTP head + vision projector

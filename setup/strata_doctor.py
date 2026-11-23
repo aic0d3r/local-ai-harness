@@ -58,7 +58,14 @@ def feed_status(url=FEED):
 
 
 def served(url):
-    return json.load(get(url.rstrip("/") + "/v1/models"))["data"]
+    headers = {}
+    try:  # Strata in Docker serves only with its key (a request without it is a 401): the same file harness.py and setup.sh read
+        from harness import strata_key  # lazy: harness imports this module
+        if strata_key():
+            headers["Authorization"] = f"Bearer {strata_key()}"
+    except ImportError:
+        pass
+    return json.load(urllib.request.urlopen(urllib.request.Request(url.rstrip("/") + "/v1/models", headers=headers), timeout=3))["data"]
 
 
 def provider_ids():

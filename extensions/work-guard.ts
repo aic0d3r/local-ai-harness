@@ -15,7 +15,9 @@ const SRC = "(go|py|ts|tsx|js|jsx|mjs|rs|c|h|cpp|java|kt|swift|rb|php|css|scss|h
 const BASH_EDIT = [
 	/\bsed\s+(-[a-zA-Z]*i|--in-place)/,
 	/\bperl\s+-[a-zA-Z]*p[a-zA-Z]*i|\bperl\s+-[a-zA-Z]*i/,
-	/\bpython3?\b[\s\S]*(\.write\(|write_text\(|open\([^)]*['"][wa]\+?['"])/,
+	// a source file opened for writing, or Path(...).write_text. No bare `.write(` rule: `open('out.txt','w')` and a
+	// heredoc comment saying `# don't call .write(` were blocked as source edits.
+	new RegExp(`\\bopen\\(\\s*['"][^'"]*\\.${SRC}['"]\\s*,\\s*['"][wa]\\+?['"]\\)|\\bPath\\(\\s*['"][^'"]*\\.${SRC}['"]\\s*\\)\\.write_text\\(`),
 	new RegExp(`(>>?|\\btee\\s+(-a\\s+)?)\\s*["']?(?!/tmp/|/dev/)[^\\s"'|;&]*\\.${SRC}\\b`),
 ];
 // [\\/]: tool paths use backslashes on native Windows
@@ -27,6 +29,10 @@ const IMAGE = /\.(png|jpe?g|webp|gif)$/i;
 export const skillInstalled = (dir: string = getAgentDir()) => fs.existsSync(path.join(dir, "skills", "ui-ux-work", "SKILL.md"));
 
 const TMPDIR = process.env.TMPDIR || os.tmpdir();
+// a `cd /tmp` (TMPDIR) before the edit: the work happens in scratch space, wherever the session started. Not "the command
+// mentions /tmp": `cp src/app.py /tmp/app.py.orig && sed -i s/a/b/ src/app.py` is the backup habit this rule exists for.
+// shortcut: a later `cd` back to the project is not followed, upgrade when an agent actually writes that
+const CD_TMP = new RegExp(`(^|[;&|]\\s*)cd\\s+["']?${TMPDIR.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(/|["'\\s;&]|$)`);
 // heredoc bodies are data, not commands the agent is about to run
 const stripHeredocs = (cmd: string) => cmd.replace(/<<-?['"]?(\w+)['"]?[\s\S]*?\n\1\b/g, "<<heredoc");
 
@@ -37,9 +43,10 @@ const emptyQuotes = (s: string) => s.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, '""')
 
 // exported for tests: does this bash command edit project source (as opposed to build/test/run)?
 export const blocksBashEdit = (cmd: string, cwd = ""): boolean => {
-	if (cwd.startsWith(TMPDIR) || cmd.includes(TMPDIR)) return false; // scratch work, wherever the session started
+	if (cwd.startsWith(TMPDIR)) return false; // scratch work, wherever the session started
 	// a variable the same command fills from mktemp (H=$(mktemp -d); ... > $H/x.py) is a temp path: read as /tmp
 	for (const [, v] of cmd.matchAll(/\b(\w+)=\$\(mktemp\b/g)) cmd = cmd.replace(new RegExp(`\\$\\{?${v}\\}?(?=/)`, "g"), "/tmp");
+	if (CD_TMP.test(cmd)) return false;
 	const runsPython = /^\s*python3?\b/.test(cmd) || /(^|\||&&|;)\s*python3?\s/.test(cmd);
 	// text quoted in a sed pattern or a heredoc body is data, not an edit: only python actually being run may match that rule
 	const probe = runsPython ? cmd : stripHeredocs(cmd);

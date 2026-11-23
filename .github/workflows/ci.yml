@@ -42,4 +42,6 @@ jobs:
       - name: setup.sh end to end
         run: bash tests/e2e-setup.sh
       - name: engine upgrade scripts against fakes (upgrade, rollback, local edits)
-        run: bash tests/upgrade-osmos.test.sh
+        run: |
+          bash tests/upgrade-osmos.test.sh
+          bash tests/upgrade-strata.test.sh

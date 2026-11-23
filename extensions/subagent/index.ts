@@ -24,11 +24,11 @@ import {
 	type ExtensionAPI,
 	getAgentDir,
 	getMarkdownTheme,
-	withFileMutationQueue,
 } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.ts";
+import { exitCodeOf, killedNote, withPrevious } from "./result.ts";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -268,9 +268,7 @@ async function writePromptToTempFile(agentName: string, prompt: string): Promise
 	const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "pi-subagent-"));
 	const safeName = agentName.replace(/[^\w.-]+/g, "_");
 	const filePath = path.join(tmpDir, `prompt-${safeName}.md`);
-	await withFileMutationQueue(filePath, async () => {
-		await fs.promises.writeFile(filePath, prompt, { encoding: "utf-8", mode: 0o600 });
-	});
+	await fs.promises.writeFile(filePath, prompt, { encoding: "utf-8", mode: 0o600 }); // a file this call just created: no queue needed
 	return { dir: tmpDir, filePath };
 }
 
@@ -390,13 +388,22 @@ async function runSingleAgent(
 
 		const exitCode = await new Promise<number>((resolve) => {
 			const invocation = getPiInvocation(args);
-			const proc = spawn(invocation.command, invocation.args, {
-				cwd: cwd ?? defaultCwd,
-				shell: false,
-				stdio: ["ignore", "pipe", "pipe"],
-				env: { ...process.env, PI_SUBAGENT: "1" },
-				detached: process.platform !== "win32", // its own process group: a kill reaches the bash commands it started too
-			});
+			let proc: ReturnType<typeof spawn>;
+			try {
+				proc = spawn(invocation.command, invocation.args, {
+					cwd: cwd ?? defaultCwd,
+					shell: false,
+					stdio: ["ignore", "pipe", "pipe"],
+					env: { ...process.env, PI_SUBAGENT: "1" },
+					detached: process.platform !== "win32", // its own process group: a kill reaches the bash commands it started too
+				});
+			} catch (err: any) {
+				// thrown synchronously, e.g. E2BIG: the task is one argv entry (Linux caps a single one at 128 KiB; a chain step's
+				// {previous} is the uncapped previous output). Without this the promise rejected and the error path below was skipped.
+				currentResult.stderr += `\n[could not start the subagent: ${err.message}]`;
+				resolve(1);
+				return;
+			}
 			let buffer = "";
 			const killTree = (sig: NodeJS.Signals) => {
 				try {
@@ -426,55 +433,54 @@ async function runSingleAgent(
 					return;
 				}
 
-				if (event.type === "message_end" && event.message) {
+				if (event.type === "message_end" && event.message?.role === "assistant") {
+					// assistant messages only: tool results were pushed too, nothing reads them (getFinalOutput, getDisplayItems,
+					// subagentSawOutside look at assistant messages), and 40 tool calls added ~2 MB to the parent's session file
 					const msg = event.message as Message;
 					currentResult.messages.push(msg);
-
-					if (msg.role === "assistant") {
-						currentResult.usage.turns++;
-						const usage = msg.usage;
-						if (usage) {
-							currentResult.usage.input += usage.input || 0;
-							currentResult.usage.output += usage.output || 0;
-							currentResult.usage.cacheRead += usage.cacheRead || 0;
-							currentResult.usage.cacheWrite += usage.cacheWrite || 0;
-							currentResult.usage.cost += usage.cost?.total || 0;
-							currentResult.usage.contextTokens = usage.totalTokens || 0;
-						}
-						if (!currentResult.model && msg.model) currentResult.model = msg.model;
-						if (msg.stopReason) currentResult.stopReason = msg.stopReason;
-						if (msg.errorMessage) currentResult.errorMessage = msg.errorMessage;
+					currentResult.usage.turns++;
+					const usage = msg.usage;
+					if (usage) {
+						currentResult.usage.input += usage.input || 0;
+						currentResult.usage.output += usage.output || 0;
+						currentResult.usage.cacheRead += usage.cacheRead || 0;
+						currentResult.usage.cacheWrite += usage.cacheWrite || 0;
+						currentResult.usage.cost += usage.cost?.total || 0;
+						currentResult.usage.contextTokens = usage.totalTokens || 0;
 					}
-					emitUpdate();
-				}
-
-				if (event.type === "tool_result_end" && event.message) {
-					currentResult.messages.push(event.message as Message);
+					if (!currentResult.model && msg.model) currentResult.model = msg.model;
+					if (msg.stopReason) currentResult.stopReason = msg.stopReason;
+					if (msg.errorMessage) currentResult.errorMessage = msg.errorMessage;
 					emitUpdate();
 				}
 			};
 
-			proc.stdout.on("data", (data) => {
-				buffer += data.toString();
+			// setEncoding: the runtime then carries a multibyte character that straddles two chunks; data.toString() per
+			// chunk turned it into U+FFFD (200000 中 came back garbled under bun 1.3 and node 26)
+			proc.stdout.setEncoding("utf8");
+			proc.stderr.setEncoding("utf8");
+			proc.stdout.on("data", (data: string) => {
+				buffer += data;
 				const lines = buffer.split("\n");
 				buffer = lines.pop() || "";
 				if (buffer.length > MAX_LINE_BYTES) buffer = ""; // one endless line without a newline is not an event
 				for (const line of lines) processLine(line);
 			});
 
-			proc.stderr.on("data", (data) => {
-				if (currentResult.stderr.length < MAX_STDERR_BYTES) currentResult.stderr += data.toString();
+			proc.stderr.on("data", (data: string) => {
+				if (currentResult.stderr.length < MAX_STDERR_BYTES) currentResult.stderr += data;
 			});
 
 			const done = () => {
 				if (limitTimer) clearTimeout(limitTimer);
 				if (hardKill) clearTimeout(hardKill);
 			};
-			proc.on("close", (code) => {
+			proc.on("close", (code, sig) => {
 				done();
 				if (buffer.trim()) processLine(buffer);
 				if (timedOut) currentResult.stderr += `\n[subagent stopped after ${limitS}s (PI_SUBAGENT_TIMEOUT_S)]`;
-				resolve(timedOut ? 124 : (code ?? 0));
+				currentResult.stderr += killedNote(code, sig, timedOut); // the OOM killer or a crash: code is null, not 0
+				resolve(exitCodeOf(code, timedOut));
 			});
 
 			proc.on("error", (err) => {
@@ -622,7 +628,7 @@ export default function (pi: ExtensionAPI) {
 
 				for (let i = 0; i < params.chain.length; i++) {
 					const step = params.chain[i];
-					const taskWithContext = step.task.replace(/\{previous\}/g, () => previousOutput) /* a function: `$&` in the output must stay text */;
+					const taskWithContext = withPrevious(step.task, previousOutput);
 
 					// Create update callback that includes all previous results
 					const chainUpdate: OnUpdateCallback | undefined = onUpdate
@@ -712,27 +718,36 @@ export default function (pi: ExtensionAPI) {
 				};
 
 				const results = await mapWithConcurrencyLimit(params.tasks, MAX_CONCURRENCY, async (t, index) => {
-					const result = await runSingleAgent(
-						ctx.cwd,
-						dispatchDefaults,
-						agents,
-						t.agent,
-						t.task,
-						t.cwd,
-						undefined,
-						signal,
-						// Per-task update callback
-						(partial) => {
-							if (partial.details?.results[0]) {
-								allResults[index] = partial.details.results[0];
-								emitParallelUpdate();
-							}
-						},
-						makeDetails("parallel"),
-					);
-					allResults[index] = result;
-					emitParallelUpdate();
-					return result;
+					try {
+						const result = await runSingleAgent(
+							ctx.cwd,
+							dispatchDefaults,
+							agents,
+							t.agent,
+							t.task,
+							t.cwd,
+							undefined,
+							signal,
+							// Per-task update callback
+							(partial) => {
+								if (partial.details?.results[0]) {
+									allResults[index] = partial.details.results[0];
+									emitParallelUpdate();
+								}
+							},
+							makeDetails("parallel"),
+						);
+						allResults[index] = result;
+						emitParallelUpdate();
+						return result;
+					} catch (err: any) {
+						// one task failing to run must not end the whole call while its siblings keep running detached,
+						// editing files nobody watches, their results dropped
+						if (signal?.aborted) throw err;
+						allResults[index] = { ...allResults[index], exitCode: 1, stderr: `${allResults[index].stderr} [${err.message}]` };
+						emitParallelUpdate();
+						return allResults[index];
+					}
 				});
 
 				const successCount = results.filter((r) => !isFailedResult(r)).length;
@@ -930,7 +945,9 @@ export default function (pi: ExtensionAPI) {
 			};
 
 			if (details.mode === "chain") {
-				const successCount = details.results.filter((r) => r.exitCode === 0).length;
+				// pi exits 0 on an LLM error: the same test as every other renderer, or a failed step shows ✓
+				const ok = (r: SingleResult) => !isFailedResult(r);
+				const successCount = details.results.filter(ok).length;
 				const icon = successCount === details.results.length ? theme.fg("success", "✓") : theme.fg("error", "✗");
 
 				if (expanded) {
@@ -947,7 +964,7 @@ export default function (pi: ExtensionAPI) {
 					);
 
 					for (const r of details.results) {
-						const rIcon = r.exitCode === 0 ? theme.fg("success", "✓") : theme.fg("error", "✗");
+						const rIcon = ok(r) ? theme.fg("success", "✓") : theme.fg("error", "✗");
 						const displayItems = getDisplayItems(r.messages);
 						const finalOutput = getFinalOutput(r.messages);
 
@@ -999,7 +1016,7 @@ export default function (pi: ExtensionAPI) {
 					theme.fg("toolTitle", theme.bold("chain ")) +
 					theme.fg("accent", `${successCount}/${details.results.length} steps`);
 				for (const r of details.results) {
-					const rIcon = r.exitCode === 0 ? theme.fg("success", "✓") : theme.fg("error", "✗");
+					const rIcon = ok(r) ? theme.fg("success", "✓") : theme.fg("error", "✗");
 					const displayItems = getDisplayItems(r.messages);
 					text += `\n\n${theme.fg("muted", `─── Step ${r.step}: `)}${theme.fg("accent", r.agent)} ${rIcon}`;
 					if (displayItems.length === 0) text += `\n${theme.fg("muted", "(no output)")}`;

@@ -28,12 +28,12 @@ export function isContinuation(t: string): boolean {
 }
 
 // Only a PROGRESS.md this harness wrote is read back (its task label) or deleted: a cloned or unzipped repo can
-// ship its own. The sha256 of every file we write is kept under the agent dir, keyed by path.
-const STAMPS = path.join(AGENT_DIR, "progress-stamps.json");
+// ship its own. The sha256 of every file we write is kept under the agent dir, one file per checkpoint path (not one
+// shared index: two pi processes wrote that at once, last writer won).
 const sha = (s: string) => crypto.createHash("sha256").update(s).digest("hex");
-const readStamps = (): Record<string, string> => { try { return JSON.parse(fs.readFileSync(STAMPS, "utf8")); } catch { return {}; } };
-export const isOurs = (file: string, content: string): boolean => readStamps()[file] === sha(content);
-export const stamp = (file: string, content: string) => { try { fs.mkdirSync(AGENT_DIR, { recursive: true }); fs.writeFileSync(STAMPS, JSON.stringify({ ...readStamps(), [file]: sha(content) })); } catch {} };
+const stampFile = (file: string) => path.join(AGENT_DIR, "progress", sha(file).slice(0, 16) + ".sha");
+export const isOurs = (file: string, content: string): boolean => { try { return fs.readFileSync(stampFile(file), "utf8") === sha(content); } catch { return false; } };
+export const stamp = (file: string, content: string) => { try { fs.mkdirSync(path.dirname(stampFile(file)), { recursive: true }); fs.writeFileSync(stampFile(file), sha(content)); } catch {} };
 
 // Checkpoints live under the agent dir, one file per project folder: project folders stay clean (nothing to gitignore, nothing for
 // `git add -A` to pick up). PI_PROGRESS_FILE still names a file inside the project when set (one per task for parallel work).
@@ -118,11 +118,6 @@ let responseCount = 0;
 			fs.mkdirSync(path.dirname(file), { recursive: true });
 			fs.writeFileSync(file, entry);
 			stamp(file, entry);
-			// HUD: machine-readable per-checkpoint stats (tail -f it)
-			try {
-				fs.appendFileSync(path.join(AGENT_DIR, "hud.log"),
-					`${new Date().toISOString()} responses=${responseCount} task=${(taskDescription || "").slice(0, 60).replace(/\n/g, " ")}\n`);
-			} catch {}
 			if (DEBUG) console.log(`[progress-tracker] wrote ${PROGRESS_FILE} at response ${responseCount}`);
 		} catch {}
 	}
@@ -138,7 +133,7 @@ let responseCount = 0;
 			const cwd = process.cwd();
 			for (const f of [progressPath(cwd), path.join(cwd, PROGRESS_FILE)]) {
 				// only files this harness wrote: a PROGRESS.md the project owns is not ours to delete
-				try { if (isOurs(f, fs.readFileSync(f, "utf8"))) fs.rmSync(f); } catch {}
+				try { if (isOurs(f, fs.readFileSync(f, "utf8"))) { fs.rmSync(f); fs.rmSync(stampFile(f), { force: true }); } } catch {}
 			}
 			taskDescription = "";
 			ctx.ui.notify("progress note cleared for this project", "info");

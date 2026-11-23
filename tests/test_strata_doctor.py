@@ -6,6 +6,12 @@ os.environ["PI_CODING_AGENT_DIR"] = AGENT
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "setup"))
 import strata_doctor as d
 
+# Strata in Docker serves only with its key (a request without it is a 401): the doctor sends it, read as harness.strata_key does
+KEYDIR = tempfile.mkdtemp()
+os.environ["STRATA_DATA"] = KEYDIR
+open(os.path.join(KEYDIR, "harness-key"), "w").write("k" * 32 + "\n")
+KEY = "Bearer " + "k" * 32
+
 # explain: each known failure, plus nothing for unrelated text
 assert "#5542" in d.explain("--version exited 3221225785: no output")[0]
 assert "Smart App Control" in d.explain("OSError: [WinError 4551] blocked")[0]
@@ -22,6 +28,8 @@ OWNER = {"v": None}
 class H(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def do_GET(self):
+        if self.headers.get("Authorization") != KEY:  # what the Docker image does to a bare request
+            self.send_response(401); self.send_header("Content-Length", "0"); self.end_headers(); return
         b = json.dumps({"data": [{"id": "real-model", **({"owned_by": OWNER["v"]} if OWNER["v"] else {})}]}).encode()
         self.send_response(200); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
 
@@ -41,6 +49,9 @@ assert r[0][0] == "warn" and "gufo answers" in r[0][1] and len(r) == 1, r  # no 
 s.shutdown()
 r = d.check(url)  # down: warns, no crash
 assert r[0][0] == "warn" and "nothing answers" in r[0][1], r
+os.remove(os.path.join(KEYDIR, "harness-key"))
+r = d.check(url)  # no key on this box: Docker Strata refuses the doctor too, and it says so instead of a traceback
+assert r[0][0] == "warn" and "nothing answers" in r[0][1] and len(r) == 1, r
 
 # feed: HTTP error is reported, a dead connection is not
 import importlib; importlib.reload(d)

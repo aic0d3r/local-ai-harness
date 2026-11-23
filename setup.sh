@@ -91,6 +91,9 @@ ok(){ printf '  %s✓%s %s\n' "$C_OK" "$C_OFF" "$1"; }
 warn(){ printf '  %s!%s %s\n' "$C_WARN" "$C_OFF" "$1"; }
 FAILS=0  # every fail() counts; --doctor exits 1 when any happened
 fail(){ FAILS=$((FAILS+1)); printf '  %s✗%s %s\n' "$C_FAIL" "$C_OFF" "$1"; }
+# an install that printed a ✗ is not a successful install either: the wizard and ./harness refresh read this status, and so
+# do scripts. The exec dispatches above never reach it; --doctor keeps its own exits (the trap only turns a 0 into a 1).
+trap '[ "$FAILS" -gt 0 ] && exit 1' EXIT
 tiny_up(){ curl -sf -m 3 "localhost:$TINY_PORT/health" >/dev/null 2>&1; }
 hal_up(){  curl -sf -m 3 "localhost:$HAL_PORT/health"  >/dev/null 2>&1; }
 eng_up(){ curl -sf -m 3 ${STRATA_KEY:+-H "Authorization: Bearer $STRATA_KEY"} "$ENG_URL/v1/models" >/dev/null 2>&1; }
@@ -162,7 +165,9 @@ if [ "$DOCTOR" = 1 ]; then
   [ -f "$EXT_DIR/progress-tracker.ts" ] \
                                     && ok "core extensions in place" || fail "extensions missing - run ./setup.sh"
   # halogen provider is only ours on NPU installs (--no-halogen skips it and the NPU extensions)
-  python3 -c "import json,os;p=json.load(open('$MODELS_JSON'))['providers'];p['llamacpp-tiny'];os.path.exists('$EXT_DIR/npu-retrieval.ts') and p['halogen']" 2>/dev/null \
+  # the sidecar entry is ours on every install (compaction and branch summaries find it in the model registry); the halogen
+  # provider only on an NPU install: --no-halogen and the --strata/--gufo/--endpoint installs have no halogen, no NPU extensions
+  python3 -c 'import json,os,sys;p=json.load(open(sys.argv[1]))["providers"];p["llamacpp-tiny"];sys.exit(0 if "halogen" in p or not os.path.exists(sys.argv[2]) else 1)' "$MODELS_JSON" "$EXT_DIR/npu-retrieval.ts" 2>/dev/null \
                                     && ok "providers configured"   || fail "providers missing - run ./setup.sh"
   [ -f "$AGENT_DIR/mcp.json" ]  && ok "mcp.json present (serena+ddg+jina+semble)" || warn "no mcp.json - serena/ddg/jina/semble unavailable (run ./setup.sh)"
   [ -f "$AGENT_DIR/mcp.json" ] && { [ -x "$HOME/.local/bin/serena" ] || warn "serena not found at ~/.local/bin/serena - symbol tools off (uv tool install -p 3.13 serena-agent)"; }
@@ -176,9 +181,9 @@ if [ "$DOCTOR" = 1 ]; then
   elif [ -f "$HOME/.config/systemd/user/ling-tiny.service" ]; then ok "sidecar idle (starts on first use)"
   else fail "sidecar not installed - run ./setup.sh"; fi
   # the active engine (what the wizard set pi up for) decides what "down" means; detect tells gufo/Strata apart on :8080
-  read -r ACT ACT_PROV ACT_MID < <(python3 -c 'import json,sys;p=json.load(open(sys.argv[1]));print(p["engine"],p["provider"],p["model"])' \
+  read -r ACT _ ACT_MID < <(python3 -c 'import json,sys;p=json.load(open(sys.argv[1]));print(p["engine"],p["provider"],p["model"])' \
     "$AGENT_DIR/harness-profile.json" 2>/dev/null)
-  [ -z "${ACT:-}" ] && [ -f "$EXT_DIR/npu-retrieval.ts" ] && { ACT=halogen; ACT_PROV=halogen; ACT_MID=halogen-qwen3.8-flash-next; }
+  [ -z "${ACT:-}" ] && [ -f "$EXT_DIR/npu-retrieval.ts" ] && { ACT=halogen; ACT_MID=halogen-qwen3.8-flash-next; }
   RUNNING=" $(python3 "$REPO/setup/harness.py" detect 2>/dev/null | python3 -c 'import json,sys;print(" ".join(e["engine"] for e in json.load(sys.stdin)["engines"]))' 2>/dev/null) "
   if [ -f "$EXT_DIR/npu-retrieval.ts" ] && [ "${ACT:-}" = halogen ]; then
     hal_up                          && ok "halogen up (:8731)"     || fail "halogen down - run: ./setup.sh --halogen auto   (or existing start-halogen.sh)"
@@ -353,7 +358,13 @@ fi
 [ "$SIDECAR_ON" = 0 ] && ! tiny_up || echo "== 3. ling-tiny sidecar (:8090) =="
 GGUF=""
 if [ "$SIDECAR_ON" = 0 ]; then
-  tiny_up && systemctl --user stop ling-tiny.service 2>/dev/null && ok "sidecar off: stopped the running one (frees ~8 GiB GPU memory)"
+  # it runs as a systemd unit, or as the bare container / llama-server the first run starts (no unit yet): stop all three,
+  # as scripts/stop-all.sh does, or stopping the inactive unit said "stopped" while the container kept ~8 GiB
+  if tiny_up; then
+    systemctl --user stop ling-tiny.service 2>/dev/null; docker rm -f ling-tiny >/dev/null 2>&1; pkill -f -- '-a ling3.0-tiny' 2>/dev/null
+    ok "sidecar off: stopped the running one (frees ~8 GiB GPU memory)"
+    sleep 3; tiny_up && warn "something still answers on :$TINY_PORT - stop it by hand: scripts/stop-all.sh"
+  fi
 elif tiny_up; then
   ok "sidecar is up"
   [ -f "$SC_PREF" ] || warn "sidecar is on by default (~8 GiB GPU memory); opt out with ./setup.sh --no-sidecar"
@@ -362,7 +373,8 @@ elif [ -f "$HOME/.config/systemd/user/ling-tiny.service" ]; then
   systemctl --user daemon-reload 2>/dev/null
   ok "sidecar idle: starts on first use, unloads after 10 min idle"
 else
-  fail "sidecar not running"
+  # not running: this run starts it below (the fail counted and made a fresh install exit 1 for nothing)
+  warn "sidecar not running"   # this run starts it below unless the model is missing and you decline the download
   GGUF="$(ls "$HOME"/.models/ling3.0-tiny/*.gguf "$REPO"/models/ling3.0-tiny/*.gguf 2>/dev/null | head -1)"
   # no llama-server to run it: do not fetch 4.5 GB first
   if [ -z "${GGUF:-}" ] && [ -z "$TINY_RUN" ]; then
@@ -534,7 +546,6 @@ elif [ -n "$HALOGEN_CKPT" ]; then
       docker image inspect "$IMG" >/dev/null 2>&1 \
         || { echo "  pulling halogen image (first run, ~4.6 GB) ..."; docker pull "$IMG"; }
       W=$(dirname "$HALOGEN_CKPT")
-      RENDER_GID=$(getent group render | cut -d: -f3); VIDEO_GID=$(getent group video | cut -d: -f3)
       echo "  launching halogen ($HALOGEN_CKPT, cache ON) ..."
       # also drop a one-command restart script (halogen is NOT auto-started at boot on purpose: full-ctx
       # launches need a fresh allocator - see README. 65k/2-slot is the safe default below.)

@@ -29,6 +29,11 @@ check "setup.sh exits 0" '[ "$RC" = 0 ]'
 check "models.json has the strata provider and the stub model" \
   'python3 -c "import json,sys; m=json.load(open(sys.argv[1]))[\"providers\"][\"strata\"][\"models\"][0]; sys.exit(m[\"id\"]!=\"stub-model\" or m[\"contextWindow\"]!=65536)" "$A/models.json"'
 check "extensions installed, NPU ones left out" '[ -f "$A/extensions/taint-gate.ts" ] && [ ! -e "$A/extensions/npu-retrieval.ts" ]'
+# a flag install used to ship only the engine provider: compaction fell back to the main model and --doctor failed forever
+check "the sidecar provider is in the registry too" \
+  'python3 -c "import json,sys; sys.exit(\"llamacpp-tiny\" not in json.load(open(sys.argv[1]))[\"providers\"])" "$A/models.json"'
+DOC=$(run bash "$REPO/setup.sh" --doctor < /dev/null 2>&1); RCD=$?
+check "setup.sh --doctor passes on a pi-only (strata) install" '[ "$RCD" = 0 ] && echo "$DOC" | grep -q "providers configured" && echo "$DOC" | grep -q "doctor: all checks passed"'
 check "mcp.json written" '[ -s "$A/mcp.json" ]'
 check "sidecar opt-out recorded" '[ "$(cat "$A/harness-sidecar")" = 0 ]'
 check "nothing written outside the temp HOME's .pi, .config, .local" '[ -z "$(find "$H" -mindepth 1 -maxdepth 1 ! -name bin ! -name .pi ! -name .config ! -name .local ! -name .cache)" ]'
@@ -68,8 +73,9 @@ check "no config temp files left behind" '[ -z "$(find "$H/halogen" -name "*.tmp
 echo "== a models.json that does not parse is left exactly as it was"
 BAD="$H/bad/agent"; mkdir -p "$BAD"; printf '{ "providers": ' > "$BAD/models.json"
 env -i HOME="$H" PI_HOME="$H/bad" PATH="$H/bin:/usr/bin:/bin:/usr/local/bin" \
-  bash "$REPO/setup.sh" --no-sidecar < /dev/null >/dev/null 2>&1
-check "the broken models.json is untouched" '[ "$(cat "$BAD/models.json")" = "{ \"providers\": " ]'
+  bash "$REPO/setup.sh" --no-sidecar < /dev/null >/dev/null 2>&1; RCB=$?
+# a run that printed a ✗ is not a success: the wizard, ./harness refresh and scripts read this status
+check "the broken models.json is untouched, and the run exits 1" '[ "$RCB" = 1 ] && [ "$(cat "$BAD/models.json")" = "{ \"providers\": " ]'
 rm -rf "$H/halogen" "$H/bad"
 
 echo "== uninstall, agent dir outside PI_HOME (PI_HOME set = sandbox: real systemd units are skipped)"

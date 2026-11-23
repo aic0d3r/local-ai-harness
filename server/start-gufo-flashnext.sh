@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gufo (version: GUFO_VERSION below) serving Qwen3.8-Flash-Next, UD-Q4_K_XL unless the hardware pick says otherwise (0.12 dropped UD-IQ4_XS).
+# gufo (version: DEFAULT_VERSION below, pinned per user by scripts/upgrade-gufo.sh) serving Qwen3.8-Flash-Next, UD-Q4_K_XL unless the hardware pick says otherwise (0.12 dropped UD-IQ4_XS).
 # One big engine at a time: STOP halogen first (docker rm -f the container) or
 # the two engines fight over the same 109GB heap and device-lost follows.
 # Spec decode: native MTP via the -shared- sidecar (the one gufo's docs name).
@@ -87,7 +87,6 @@ fi
 DEFAULT_VERSION=0.32.0  # the tag the digest below was pulled as; ./harness update-check compares against it
 DEFAULT_DIGEST=sha256:9e47025c4dab6b24867e50e9374009a68133a4864b96a85542bff6c1cdbf2b55
 . "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../scripts/lib-pins.sh"
-GUFO_VERSION=$(pin_value GUFO_VERSION "$DEFAULT_VERSION")
 GUFO_IMAGE=${GUFO_IMAGE:-ghcr.io/gufo-org/toolboxes/gufo-runtime@$(pin_value GUFO_DIGEST "$DEFAULT_DIGEST")}
 PORT=${PORT:-8080}
 RENDER_GID=$(getent group render | cut -d: -f3); VIDEO_GID=$(getent group video | cut -d: -f3)

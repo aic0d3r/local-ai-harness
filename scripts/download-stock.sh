@@ -15,11 +15,17 @@ MTP=mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf
 SHARDS=$(basename "$WANT" | sed -E 's/.*-of-0*([0-9]+)\.gguf/\1/')
 GB=$(python3 "$REPO/setup/harness.py" quant-info "$Q") || exit 1   # UD-Q4_K_XL: 103.7 GiB of shards; the MTP head (2.6 GB) and projector (0.9 GB) come on top
 HAVE=$(ls "$DIR"/Qwen3.8-Flash-Next-$Q-0000?-of-0000$SHARDS.gguf 2>/dev/null | wc -l)
-if [ "$HAVE" = "$SHARDS" ] && [ -f "$ROOT/$MTP" ] && [ -f "$ROOT/mmproj-BF16.gguf" ]; then echo "  already there: $DIR"; exit 0; fi
+REV="${UNSLOTH_REV:-d96201194f103c906994f283f504209dc8d2a10c}"
+R=unsloth/Qwen3.8-Flash-Next-GGUF
+if [ "$HAVE" = "$SHARDS" ] && [ -f "$ROOT/$MTP" ] && [ -f "$ROOT/mmproj-BF16.gguf" ]; then
+  # whole as well as there: a file a killed download or a bad disk left short used to pass as complete, and gufo then
+  # failed to load without exiting. An untouched file is not hashed again (.hf-verified.json); offline the check passes
+  if OUT=$(hf_verify "$R" "$REV" "$ROOT" --require "$Q/" mmproj-BF16.gguf 2>&1); then echo "  already there: $DIR (verified)"; exit 0; fi
+  echo "  a file in $DIR does not match the repo - delete the file named and re-run:" >&2; echo "$OUT" | sed 's/^/  /' >&2; exit 1
+fi
 mkdir -p "$DIR"
 AVAIL=$(df -BG --output=avail "$DIR" 2>/dev/null | tail -1 | tr -dc '0-9')
-REV="${UNSLOTH_REV:-d96201194f103c906994f283f504209dc8d2a10c}"
-echo "  required download: ~$GB GB into $DIR (unsloth/Qwen3.8-Flash-Next-GGUF @ $REV)${AVAIL:+ (free: ${AVAIL} GB)}"
+echo "  required download: ~$GB GB into $DIR ($R @ $REV)${AVAIL:+ (free: ${AVAIL} GB)}"
 if [ "${1:-}" != --yes ]; then
   prompt_yn "download now?" n || { echo "  aborted" >&2; exit 1; }
 fi
@@ -32,7 +38,6 @@ if [ -z "$HF_BIN" ]; then
   python3 -m venv "$HOME/.hf-venv" 2>/dev/null && "$HOME/.hf-venv/bin/pip" install -q -U huggingface_hub 2>/dev/null \
     && HF_BIN="$HOME/.hf-venv/bin/hf" || { echo "  could not bootstrap the hf downloader - install huggingface_hub and re-run" >&2; exit 1; }
 fi
-R=unsloth/Qwen3.8-Flash-Next-GGUF
 echo "  downloading (resumable - re-run if interrupted) ..."
 hf_dl "$R" --revision "$REV" --include "$Q/*" --local-dir "$ROOT" \
   || { echo "  download failed/incomplete - re-run to resume" >&2; exit 1; }

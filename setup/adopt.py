@@ -133,6 +133,9 @@ def provider(url, eng):
             P[eng]["apiKey"] = key
         print(f"  added provider: {eng}")
     print(f"  model id: {mid}")
+    # the sidecar in the registry too, as the wizard's apply() adds it: compaction and branch summaries look it up there,
+    # and --doctor reads it. Without it every flag install fell back to main-model summaries and failed its own health check.
+    P.setdefault("llamacpp-tiny", entries.tiny_provider())
     write_json(path, m, 1)
     sp = os.path.join(AGENT, "settings.json")
     st = read_json(sp, {})

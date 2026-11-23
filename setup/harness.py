@@ -62,6 +62,12 @@ def jput(path, obj):
     jsonio.put(path, obj)  # temp + rename: a crash mid-write must not leave a truncated config
 
 
+def tool(name, *a, timeout=None):
+    """Run docker / systemctl / pkill, system tools a supported box may not have (Ollama, vLLM, LM Studio and osmos run
+    without docker): exit 127 and no output there, where a bare run raised FileNotFoundError out of ./harness status/up."""
+    return subprocess.run([name, *a], capture_output=True, text=True, timeout=timeout) if shutil.which(name) else subprocess.CompletedProcess((), 127, "", "")
+
+
 def http(url, body=None, timeout=3, key=None):
     if not key:  # Strata in Docker serves only with its key: every probe of a local engine port has to carry it
         u = urllib.parse.urlsplit(url)
@@ -392,8 +398,7 @@ def answers_ready(port, path):
 def strix_container(port):
     """True when server/start-qwen36.sh's container (llamacpp-<port>) is up: strix-llama.cpp, not a llama-server of your own."""
     try:
-        return bool(shutil.which("docker")) and bool(subprocess.run(
-            ["docker", "ps", "-q", "--filter", f"name=^llamacpp-{port}$"], capture_output=True, text=True, timeout=10).stdout.strip())
+        return bool(tool("docker", "ps", "-q", "--filter", f"name=^llamacpp-{port}$", timeout=10).stdout.strip())
     except (OSError, subprocess.SubprocessError):
         return False
 
@@ -473,9 +478,9 @@ def proc_mem(pid):
 
 def port_pids(port, engine=None):
     """Host pids serving port: a container's whole process list, else the listener (ours only) and its children."""
-    cids = engine_containers(engine) if engine else subprocess.run(["docker", "ps", "-q", "--filter", f"publish={port}"], capture_output=True, text=True).stdout.split()
+    cids = engine_containers(engine) if engine else tool("docker", "ps", "-q", "--filter", f"publish={port}").stdout.split()
     if cids:
-        return {int(p) for c in cids for p in subprocess.run(["docker", "top", c, "-eo", "pid"], capture_output=True, text=True).stdout.split()[1:]}
+        return {int(p) for c in cids for p in tool("docker", "top", c, "-eo", "pid").stdout.split()[1:]}
     pids = {int(p) for p in re.findall(r"pid=(\d+)", subprocess.run(["ss", "-ltnpH", f"sport = :{port}"], capture_output=True, text=True).stdout)}
     parent = {}
     for s in glob.glob("/proc/[0-9]*/stat"):
@@ -562,17 +567,22 @@ def sidecar_up():
 
 def stop_sidecar():
     """ling-tiny runs as a user service, or as a bare container / llama-server from an older start (as stop-all.sh stops it)."""
-    subprocess.run(["systemctl", "--user", "stop", "ling-tiny.service"], stderr=subprocess.DEVNULL)
-    subprocess.run(["docker", "rm", "-f", "ling-tiny"], capture_output=True)
-    subprocess.run(["pkill", "-f", "--", "-a ling3.0-tiny"], capture_output=True)
+    tool("systemctl", "--user", "stop", "ling-tiny.service")
+    tool("docker", "rm", "-f", "ling-tiny")
+    tool("pkill", "-f", "--", "-a ling3.0-tiny")
+
+
+def ggufs():
+    """Up to 20 *.gguf under the model folders: what ./harness detect prints. Not part of detect(): a recursive walk of the
+    Hugging Face cache on every ./start.sh, for a key nothing else reads."""
+    found = []
+    for d in MODEL_DIRS:
+        found += glob.glob(os.path.join(os.path.expanduser(d), "**", "*.gguf"), recursive=True)[:20]
+    return found[:20]
 
 
 def detect():
-    found = running_engines()
-    ggufs = []
-    for d in MODEL_DIRS:
-        ggufs += glob.glob(os.path.join(os.path.expanduser(d), "**", "*.gguf"), recursive=True)[:20]
-    return {"hardware": hardware(), "engines": found, "gguf": ggufs[:20], "docker": bool(shutil.which("docker")), "pi": bool(shutil.which("pi"))}
+    return {"hardware": hardware(), "engines": running_engines(), "docker": bool(shutil.which("docker")), "pi": bool(shutil.which("pi"))}
 
 
 # ---------- ask ----------
@@ -763,10 +773,17 @@ def reserve_for(ctx):
     return int(min(60000, ctx // 4))
 
 
+def reserve_is_ours(r, ctx, ours=None):
+    """Is the compaction reserve ours to move with the window? Unset, the value we last wrote (harness-profile.json), this
+    window's default, or one that no longer fits half the window. A /tune value (/tune writes settings.json only) differs
+    from all of those and stays. One rule for sync_ctx and apply(), which used to disagree."""
+    return r is None or r == ours or r == reserve_for(ctx) or r >= ctx // 2
+
+
 def sync_ctx(engine):
     """Keep pi's contextWindow and compaction reserve in step with the window the server really serves (GUFO_CTX, a Strata
     --max-context, a launcher fallback): a stale window makes pi budget against a context the server does not have.
-    A reserve we own (unset, or one of our defaults) follows the window; a /tune value that still fits is kept."""
+    A reserve we own follows the window; a /tune value that still fits is kept."""
     e = PROFILES["engines"][engine]
     ctx, mid = server_ctx(e["port"]), (active() or {}).get("model")
     mj = os.path.join(AGENT, "models.json")
@@ -780,10 +797,12 @@ def sync_ctx(engine):
     sj = os.path.join(AGENT, "settings.json")
     s = jget(sj, {})
     comp = s.setdefault("compaction", {})
-    if comp.get("reserveTokens") in (None, 10240, 16384, 60000) or comp["reserveTokens"] >= ctx // 2:
-        if comp.get("reserveTokens") != reserve_for(ctx):
-            comp["reserveTokens"] = reserve_for(ctx)
-            jput(sj, s)
+    prof = active() or {}
+    if reserve_is_ours(comp.get("reserveTokens"), ctx, prof.get("reserveTokens")) and comp.get("reserveTokens") != reserve_for(ctx):
+        comp["reserveTokens"] = reserve_for(ctx)
+        jput(sj, s)
+        prof["reserveTokens"] = reserve_for(ctx)
+        jput(os.path.join(AGENT, "harness-profile.json"), prof)
 
 
 def known_ctx(engine, model_id, old):
@@ -827,11 +846,16 @@ def apply(engine, model_id, tuned=None):
     s = jget(sj, {})
     s["defaultProvider"], s["defaultModel"] = prov, new["models"][0]["id"]
     reserve = reserve_for(ctx)  # not tuned["reserveTokens"]: a cached probe may be from another window (gufo moved 65k -> 262k)
-    s.setdefault("compaction", {}).update({"enabled": True, "reserveTokens": reserve})
+    comp = s.setdefault("compaction", {})
+    comp.setdefault("enabled", True)  # a user who turned compaction off meant it
+    # a /tune reserve that still fits is kept, as sync_ctx keeps it; the profile remembers only what we wrote (the marker of "ours")
+    prof = {"engine": engine, "provider": prov, "model": new["models"][0]["id"], "npu": bool(e["npu"]),
+            "npuUrl": "http://127.0.0.1:8731", "sidecarUrl": "http://127.0.0.1:8090"}
+    if reserve_is_ours(comp.get("reserveTokens"), ctx, (active() or {}).get("reserveTokens")):
+        comp["reserveTokens"] = reserve
+        prof["reserveTokens"] = reserve
     jput(sj, s)
-    jput(os.path.join(AGENT, "harness-profile.json"), {
-        "engine": engine, "provider": prov, "model": new["models"][0]["id"], "npu": bool(e["npu"]),
-        "npuUrl": "http://127.0.0.1:8731", "sidecarUrl": "http://127.0.0.1:8090"})
+    jput(os.path.join(AGENT, "harness-profile.json"), prof)
     return prov, new["models"][0]["id"], ctx
 
 
@@ -1040,7 +1064,9 @@ def cmd_quant_info(a):
 
 
 def cmd_detect(_):
-    print(json.dumps(detect(), indent=1))
+    d = detect()
+    d["gguf"] = ggufs()
+    print(json.dumps(d, indent=1))
 
 
 def catalog_id(served):
@@ -1152,23 +1178,23 @@ def engine_containers(engine):
     """Ids of the containers serving engine. halogen and gufo run in containers whose image name says so, so an unrelated
     container on the same port is left alone; any other engine is matched by port alone."""
     port = PROFILES["engines"][engine]["port"]
-    ids = subprocess.run(["docker", "ps", "-q", "--filter", f"publish={port}"], capture_output=True, text=True).stdout.split()
+    ids = tool("docker", "ps", "-q", "--filter", f"publish={port}").stdout.split()
     if engine not in ("halogen", "gufo"):
         return ids
-    return [i for i in ids if engine in subprocess.run(["docker", "inspect", "-f", "{{.Config.Image}}", i], capture_output=True, text=True).stdout.lower()]
+    return [i for i in ids if engine in tool("docker", "inspect", "-f", "{{.Config.Image}}", i).stdout.lower()]
 
 
 def stop_engine(engine, running):
     port = PROFILES["engines"][engine]["port"]
     cid = engine_containers(engine)
     if cid:
-        subprocess.run(["docker", "stop", "-t", "30", *cid], stdout=subprocess.DEVNULL)
+        tool("docker", "stop", "-t", "30", *cid)
     elif not stop_process(port):  # Strata runs as a plain process, not a container
         print(f"  could not find what serves {ename(engine)} on :{port}; stop it yourself")
         return False
     # the ling-tiny sidecar is a GPU llama-server holding ~8 GiB too (measured: GTT 9.7 -> 1.5 GiB when stopped);
     # it restarts on demand, so stopping it here frees the memory for the next engine
-    subprocess.run(["systemctl", "--user", "stop", "ling-tiny.service"], stderr=subprocess.DEVNULL)
+    tool("systemctl", "--user", "stop", "ling-tiny.service")
     for _ in range(10):
         if gtt_gb() < 3:
             break
@@ -1628,7 +1654,10 @@ def bring_up(d, eng, plan, yes, mod="", esc=None):
     models = running[eng]["models"]
     if not models:
         sys.exit(f"{ename(eng)} lists no models")
-    m = mod or choose("Which model?", models, yes, esc)
+    if mod and mod not in models:  # a typo'd `use gufo/<model>` used to be written as the model id: pi got 404s until the next use
+        sys.exit(f"{ename(eng)} serves {', '.join(models)}, not {mod}")
+    # Esc here (the wizard's last question, after install and start) takes the first model: cancel() left the profile on the old engine
+    m = mod or choose("Which model?", models, yes, esc if esc is not None else models[0])
     return (BACK, None) if m is BACK else (eng, m)
 
 
@@ -1845,8 +1874,7 @@ def _have(engine, spec):
     kind, *rest = spec
     if kind == "image":  # the image our launcher runs (--print-image): its own version label, '' until it is pulled
         img = subprocess.run(["bash", os.path.join(REPO, rest[0]), "--print-image"], capture_output=True, text=True).stdout.strip()
-        v = subprocess.run(["docker", "image", "inspect", "-f", '{{index .Config.Labels "org.opencontainers.image.version"}}', img],
-                           capture_output=True, text=True).stdout.strip() if img else ""
+        v = tool("docker", "image", "inspect", "-f", '{{index .Config.Labels "org.opencontainers.image.version"}}', img).stdout.strip() if img else ""
         return "" if v == "<no value>" else v
     if kind == "pin":  # version pinned in our launcher: known even while the engine is down
         # "pin FILE DEFAULT_VAR PIN_NAME": the launcher's tracked DEFAULT_VAR=0.19.1, unless an upgrade stored a newer pin on top of it
@@ -2364,8 +2392,10 @@ def cmd_setup(a):
         print("\n".join(describe(recommend(h, cap), cap)[1:]))
     # 1. every question first ...
     if not a.yes:
-        ask_agent(a.reconfigure)
+        # the update offer may exec the wizard on the new code (no `finally`: UNDO never runs), so it goes first: after it,
+        # the snapshot taken above still covers every answer written below
         harness_update_offer()
+        ask_agent(a.reconfigure)
     if not d["pi"] and not no_pi():
         print("! pi not found on PATH - install it first")
     up = []  # the update check runs as soon as the engine is chosen, before "Start <engine>?"
@@ -2663,7 +2693,7 @@ def cmd_config(a):
                 print("  pi wiring off (nothing uninstalled; ./start.sh now only brings the engine up)")
         elif k == "sidecar":
             open(os.path.join(AGENT, "harness-sidecar"), "w").write("0\n" if sc else "1\n")
-            r = subprocess.run(["systemctl", "--user", "stop" if sc else "start", "ling-tiny.service"], capture_output=True)
+            r = tool("systemctl", "--user", "stop" if sc else "start", "ling-tiny.service")
             print(f"  sidecar {'off, stopped' if sc else 'on, started'}" if not r.returncode else
                   f"  saved; {'stop' if sc else 'start'} failed - run ./setup.sh to {'stop' if sc else 'install'} it")
         elif k == "voice":

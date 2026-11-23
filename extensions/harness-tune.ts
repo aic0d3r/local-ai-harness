@@ -24,10 +24,11 @@ const UBATCH_FILE = path.join(AGENT_DIR, "harness-ubatch");
 const MAIN_PROVIDER = profile().provider;
 const MAIN_MODEL = profile().model;
 
-// canonical post-setup values = what setup.sh provisions (keep in sync):
-// maxTokens 8192 because halogen hard-rejects bigger requests past ~32.7k ctx;
-// compactAt 202 = reserveTokens 60000 on the 262k window (compaction summarize + answer room)
-const DEFAULTS: Record<string, number> = { compactAt: 202, maxTokens: 8192, temperature: 1.0, ubatch: 4096 };
+// canonical post-setup values = what setup.sh provisions (keep in sync with setup/harness.py reserve_for):
+// maxTokens 8192 because halogen hard-rejects bigger requests past ~32.7k ctx (halogen's cap only: another engine's model
+// entry keeps its own maxTokens); compactAt follows the real window (defaultCompactAt): 202 on halogen's 262k
+const DEFAULTS: Record<string, number> = { maxTokens: 8192, temperature: 1.0, ubatch: 4096 };
+const KEYS = ["compactAt", "maxTokens", "temperature", "ubatch"];
 
 const readJson = (p: string): any => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, "utf8")) : {});
 // temp + rename: a crash mid-write must not leave pi a truncated models.json; the temp keeps the file's mode (0600 stays 0600)
@@ -41,6 +42,11 @@ const writeJson = (p: string, v: any) => {
 // day produced a reserve larger than the context - compaction never fired
 const ctxWindow = (): number =>
 	readJson(MODELS)?.providers?.[MAIN_PROVIDER]?.models?.find((x: any) => x?.id === MAIN_MODEL)?.contextWindow || 262144;
+// a quarter of the window, at most 60k: the reserve setup.sh and ./start.sh set, so reset compacts a 1M osmos at ~989k
+// (halogen's 202 moved it to ~202k, 5x earlier than the installer's own setting)
+const reserveOf = (ctx: number) => Math.min(60000, Math.round(ctx / 4));
+const defaultCompactAt = () => Math.round((ctxWindow() - reserveOf(ctxWindow())) / 1000);
+const isHalogen = () => profile().engine === "halogen";
 
 function current(): Record<string, number> {
 	const s = readJson(SETTINGS);
@@ -70,7 +76,7 @@ export default function (pi: ExtensionAPI) {
 			if (argv.length === 0) {
 				const c = current();
 				ctx.ui.notify(
-					`harness tuning (defaults: ${Object.entries(DEFAULTS).map(([k, v]) => `${k}=${v}`).join(", ")}):\n` +
+					`harness tuning (defaults: compactAt=${defaultCompactAt()}, ${Object.entries(DEFAULTS).map(([k, v]) => `${k}=${v}`).join(", ")}${isHalogen() ? "" : "; maxTokens is halogen's cap, not reset here"}):\n` +
 						Object.entries(c).map(([k, v]) => `  ${k.padEnd(12)} ${v}`).join("\n") +
 						`\nusage: /tune <key> <value>   (compactAt in k tokens; temperature 0 for reproducible benches; ubatch needs a server restart and 2048 is the deep-fill setting)`,
 					"info",
@@ -79,16 +85,20 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			if (argv[0] === "reset") {
-				// clamp compactAt like the set path: 202k on a 65k window gave a negative reserve
-				for (const [k, v] of Object.entries(DEFAULTS)) await apply(k, k === "compactAt" ? Math.min(v, bounds().compactAt[1]) : v);
-				ctx.ui.notify(`reset to defaults: ${JSON.stringify(DEFAULTS)}`, "info");
+				// compactAt like the set path: computed from the real window, clamped to it (202k on a 65k window gave a negative reserve)
+				const compactAt = Math.min(defaultCompactAt(), bounds().compactAt[1]);
+				await apply("compactAt", compactAt);
+				if (isHalogen()) await apply("maxTokens", DEFAULTS.maxTokens);
+				await apply("temperature", DEFAULTS.temperature);
+				await apply("ubatch", DEFAULTS.ubatch);
+				ctx.ui.notify(`reset to defaults: compactAt=${compactAt}, temperature=1, ubatch=4096${isHalogen() ? ", maxTokens=8192" : " (maxTokens kept: 8192 is halogen's cap)"}`, "info");
 				return;
 			}
 
 			const [key, val] = argv;
 			const num = Number(val);
-			if (!(key in DEFAULTS)) {
-				ctx.ui.notify(`unknown key '${key}'. keys: ${Object.keys(DEFAULTS).join(", ")}`, "error");
+			if (!KEYS.includes(key)) {
+				ctx.ui.notify(`unknown key '${key}'. keys: ${KEYS.join(", ")}`, "error");
 				return;
 			}
 			if (!Number.isFinite(num) || num < 0) {
