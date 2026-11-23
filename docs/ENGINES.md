@@ -168,7 +168,8 @@ IQ2_XXS). An install that already has evo-A fetches only the 23.4 GB patch and d
 cost ~71 GB more on ext4. Shards 1 and 4 are the evo-A base, shared with this pack; evo-A's own shards 2 and 3 (~92 GB)
 are what `osmos-evo` made redundant, and removing them frees that much (the pack sources stay in `.hf`, so
 `osmos_install.py osmos-evo-a` can rebuild it). The id osmos-api serves is `osmos-osmos-evo`; `osmos-osmos-evo-a`
-still answers as an alias.
+still answers as an alias. Current libosmos names the pack `osmos-evo-1017` (`packs.json`: `osmos-evo` and `osmos-evo-a` are
+aliases of it), so the launcher's default `OSMOS_PACK=osmos-evo` installs the same pack.
 
 **Measuring.** `./harness tune` is the quick subset of `bench` (same prompts and code path): 3 short-code decodes and one 8K cold prefill,
 medians, `protocol: bench-v1`. It is still short-code decode at near-zero context, so compare it only with `bench` cells, not with the battery or other projects'. `./harness bench` is the fixed protocol (`bench-v1`: warm-up, 3 runs, median and spread; cold prefill
@@ -176,29 +177,33 @@ at 2K/8K/32K, short code and prose decode, code decode at each depth; saved to `
 protocol id, and note the power profile (`bench` records the ACPI profile, not watts). Raw `llama-bench` `tg128` or `gufo bench` rows run
 without speculative decoding and read lower than any of these.
 
-Measured here (osmos-evo, GPU only, stock, drafted, `quiet` 70 W): **~236 t/s prefill at 2K and 426 t/s at 8K,
-36.5 t/s decode**, 1M context (`./harness tune` at 70 W sustained: 494 t/s prefill, 42.4 t/s decode; the tuner's prompts differ from the A/B above), first request after start ~30 s while the expert cache fills. The pack costs about 5%
+Measured here (libosmos 0.15.1, osmos-evo stock, drafted, `fill_gib` 4 so a 98.7-99.7 GiB budget, `custom` profile,
+2026-11-23): `./harness tune` **497 t/s prefill (8K), 36.9 t/s decode (short code)** at best, 482-495 / 30-33 typical; 12 greedy
+code decodes median ~30 t/s; 4 cold 8K prompts 446-453 t/s. Earlier (0.7.x, `quiet` 70 W): ~236 t/s prefill at 2K, 426 at 8K,
+36.5 t/s decode. Short prompts read far lower than 8K because prefill streams experts per 4,096-token chunk (see the
+`fill_gib` paragraph below). The first prompts after a start read 2-4x the steady SSD traffic while the expert cache fills. The pack costs about 5%
 of decode against evo-A, as its release notes say. It appears in pi and Paseo as **osmos deepseek** (a model
 profile can name itself: `models.osmos-deepseek`; the id osmos-api serves is `osmos-osmos-evo`). Two things the
 harness handles for it:
 
-- **It decodes greedily and rejects sampling**: `temperature 0`, `top_p 1` or a 400 (`sampling is not built`).
-  `config/profiles.json` (`models.osmos-deepseek`) sends exactly those, so agents need no special casing.
+- **Greedy by the profile's choice**: since libosmos 0.14.0 osmos takes `temperature`, `top_p` and `seed` (before, anything but
+  greedy was a 400). DeepSeek packs stay greedy unless a request asks, and drafting gains less when sampling (0.14.0 notes), so
+  `config/profiles.json` (`models.osmos-deepseek`) still sends `temperature 0`, `top_p 1`.
 - **Thinking is real, with three levels**: DeepSeek maps seven effort names onto three real ones ([its docs](https://api-docs.deepseek.com/guides/thinking_mode/)): `low`, `high`, `max`. The profile keeps exactly those and marks `minimal`/`medium`/`xhigh` unsupported (`null`), so pi and Paseo offer `off, low, high, max` instead of advertising levels the model collapses anyway. `off` sends `reasoning_effort: none` and the reply carries no reasoning at all.
 - **It does not report its context window** (`/v1/models` has no `context_length`, `/props` is 404). The engine
   profile carries `ctx`, mirroring `max_context` in the pack's `osmos.json` - change both together.
 - **Stock or abliterated from `./harness config` -> weights**, like halogen and gufo: huihui-ai's UD-IQ1_M patch
   (0.6 GB) as an overlay, so the 141 GB pack is never rewritten. `server/start-osmos.sh` applies it by calling
   libosmos's own installer (`--abliterated`), which fetches only the patch and sets `overlay` in `osmos.json`;
-  the launch then waits for `/health`, because osmos lists its model while it is still loading 91 GiB.
+  the launch then waits for `/health`, because osmos lists its model while it is still loading its ~95-100 GiB budget.
 
 osmos is for DeepSeek-V4.1-Flash only: the wizard shows that model for it (never your saved Qwen choice), and the Qwen
 models run on halogen, gufo or Strata.
 
-It has no NPU tools (guard, triage, dedup need halogen), and it will not fit beside another big engine: 91 GiB of GPU
-memory is the budget on a 128 GB box. That budget is sized from the memory free when osmos starts, so close browsers and
-other big apps first: experts that do not fit are read from the SSD for every token (measured here: a budget 6 GiB
-smaller, 34 -> 24 t/s). The setup says so before each start. A remembered budget is sized again only when 4 GiB more
+It has no NPU tools (guard, triage, dedup need halogen), and it will not fit beside another big engine: its expert budget
+is ~95-100 GiB on a 128 GB box (99.69 GiB here on 0.15.1 with `fill_gib` 4), plus ~18 GiB of GPU buffers. That budget is sized from the memory free when osmos starts, so close browsers and
+other big apps first: experts that do not fit are read from the SSD for every token (measured on 0.15.1: about 1.5% decode
+per GiB of budget, table below; an older build lost 34 -> 24 t/s to a budget 6 GiB smaller). The setup says so before each start. A remembered budget is sized again only when 4 GiB more
 is free than at its sizing (`server/osmos-budget.py`).
 
 **RAM kept free (`fill_gib`).** osmos keeps 8 GiB of RAM free beside its budget by default. The harness starts it with
