@@ -66,7 +66,7 @@ the already-open upstream PR (linuxmint/timeshift#496). The other six
 missed it or suggested reporting upstream - noted per run below. The user also had GLM 5.3
 flashx rate both pi-harness answers; it picked Qwen's.
 
-![wall clock per run](charts/wallclock-by-run.png)
+![Wall-clock per run, eight runs on one real bug: only the two local Flash-Next runs found the upstream PR](charts/wallclock-by-run.png)
 
 ## What the eight runs show
 

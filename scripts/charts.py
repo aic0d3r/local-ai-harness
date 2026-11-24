@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""charts.py — render docs/charts/local-vs-cloud.png (dark, banner palette).
+"""charts.py — render the docs/charts/*.png benchmark charts (dark, banner palette).
   ./scripts/charts.py
-Numbers are hard-coded from logged runs; edit TTFT/DECODE and rerun.
+Numbers are hard-coded from logged runs (see the comment above each chart); edit and rerun.
 """
 from pathlib import Path
 
@@ -10,59 +10,120 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 
-OUT = Path(__file__).resolve().parent.parent / "docs/charts/local-vs-cloud.png"
+DIR = Path(__file__).resolve().parent.parent / "docs/charts"
 
 # docs/brand/banner.html palette
 BG, TEXT, MUTED, ACCENT, CLOUD = "#14100e", "#f4ede6", "#b3a597", "#ff7a1a", "#6fb6c4"
-
-# (label, value, is_local), all at 70 W. TTFT and GLM decode: runs 2026-10-07..10
-# (docs/local-vs-cloud-model-comparison.md); Flash-Next decode: ./harness bench, bench-v1, 2026-11-23.
-TTFT = [("Flash-Next (local)", 0.03, True), ("glm-5.3-flashx", 1.36, False)]
-DECODE = [("Flash-Next (local)", 74.1, True), ("glm-5.3-flash", 45, False),
-          ("glm-5.3", 74, False), ("glm-5.3-flashx", 151, False)]
+RIG = "ASUS ROG Flow Z13 (Strix Halo, 70 W)"
 
 
-def row(ax, rows, title, fmt, best_low):
-    rows = sorted(rows, key=lambda r: r[1], reverse=not best_low)  # best on top
-    labels, vals, local = zip(*rows)
-    y = range(len(rows))[::-1]
-    ax.barh(y, vals, height=0.62, color=[ACCENT if l else CLOUD for l in local])
-    top = max(vals)
-    for yi, v, l in zip(y, vals, local):
-        ax.text(v + top * 0.012, yi, fmt(v), va="center", fontsize=22, fontweight="bold",
-                color=ACCENT if l else TEXT)
-    ax.set_yticks(list(y), labels, fontsize=20)
-    for t, l in zip(ax.get_yticklabels(), local):
-        t.set_color(ACCENT if l else TEXT)
-        t.set_fontweight("bold" if l else "normal")
-    ax.set_xlim(0, top * 1.12)
+def mmss(s):
+    return f"{s // 60}m{s % 60:02d}s"
+
+
+def row(ax, rows, title, fmt, best_low=None):
+    """rows: (label, value, color, note?). best_low=None keeps the given order."""
+    if best_low is not None:
+        rows = sorted(rows, key=lambda r: r[1], reverse=not best_low)  # best on top
+    y = list(range(len(rows)))[::-1]
+    top = max(r[1] for r in rows)
+    for yi, (label, v, color, *note) in zip(y, rows):
+        hatch = color == "wrong"
+        c = CLOUD if hatch else color
+        ax.barh(yi, v, height=0.62, color=BG if hatch else c, edgecolor=c, hatch="//" if hatch else None,
+                linewidth=1.5 if hatch else 0)
+        hi = c == ACCENT
+        t = ax.text(v + top * 0.012, yi, fmt(v), va="center", fontsize=22, fontweight="bold",
+                    color=ACCENT if hi else TEXT)
+        if note:
+            ax.annotate("  " + note[0], xycoords=t, xy=(1, 0.5), va="center", fontsize=17,
+                        fontweight="bold" if hi else "normal", color=ACCENT if hi else MUTED)
+    ax.set_yticks(y, [r[0] for r in rows], fontsize=20)
+    for t, r in zip(ax.get_yticklabels(), rows):
+        t.set_color(ACCENT if r[2] == ACCENT else TEXT)
+        t.set_fontweight("bold" if r[2] == ACCENT else "normal")
+    ax.set_xlim(0, top * 1.3 if any(len(r) > 3 for r in rows) else top * 1.2)
     ax.set_xticks([])
     ax.tick_params(length=0, pad=12)
     ax.set_facecolor(BG)
     for s in ax.spines.values():
         s.set_visible(False)
-    ax.set_title(title, loc="left", color=MUTED, fontsize=19, pad=10)
+    if title:
+        ax.set_title(title, loc="left", color=MUTED, fontsize=19, pad=10)
+
+
+def chart(name, headline, sub, panels, legend, foot, height=9, left=0.2):
+    """panels: [(rows, title, fmt, best_low)]; legend: [(color, label)]."""
+    fig, axes = plt.subplots(len(panels), 1, figsize=(16, height), dpi=100, facecolor=BG, squeeze=False,
+                             gridspec_kw={"height_ratios": [len(p[0]) for p in panels]})
+    fig.text(0.03, 1 - 0.6 / height, headline, color=TEXT, fontsize=32, fontweight="bold")
+    fig.text(0.03, 1 - 1.1 / height, sub, color=MUTED, fontsize=19)
+    for ax, p in zip(axes[:, 0], panels):
+        row(ax, *p)
+    fig.legend(handles=[Patch(facecolor=BG if c == "wrong" else c, edgecolor=CLOUD if c == "wrong" else c,
+                              hatch="//" if c == "wrong" else None, label=l) for c, l in legend],
+               loc="lower right", bbox_to_anchor=(0.97, 0.005), ncol=len(legend), frameon=False,
+               fontsize=17, labelcolor=TEXT, handlelength=1, handleheight=1)
+    fig.text(0.03, 0.22 / height, foot, color=MUTED, fontsize=15)
+    fig.subplots_adjust(left=left, right=0.97, top=1 - 1.8 / height, bottom=0.75 / height, hspace=0.45)
+    out = DIR / name
+    fig.savefig(out, facecolor=BG)
+    plt.close(fig)
+    print(out)
 
 
 def main():
     plt.rcParams["font.family"] = ["Fira Sans", "DejaVu Sans"]
-    fig, (a, b) = plt.subplots(2, 1, figsize=(16, 9), dpi=100, facecolor=BG,
-                               gridspec_kw={"height_ratios": [len(TTFT), len(DECODE)]})
-    ratio = round(TTFT[1][1] / TTFT[0][1])
-    fig.text(0.03, 0.94, f"Local Flash-Next starts answering ~{ratio}x sooner than the cloud",
-             color=TEXT, fontsize=32, fontweight="bold")
-    fig.text(0.03, 0.885, "Qwen3.8 Flash-Next 125B on an ASUS ROG Flow Z13 (Strix Halo, 70 W) vs z.ai GLM 5.3 tiers",
-             color=MUTED, fontsize=19)
-    row(a, TTFT, "Time to first token, warm turn  ·  lower is better", lambda v: f"{v:.2f} s", True)
-    row(b, DECODE, "Decode speed  ·  higher is better", lambda v: f"{v:g} t/s", False)
-    fig.legend(handles=[Patch(color=ACCENT, label="local, this box"), Patch(color=CLOUD, label="cloud, z.ai API")],
-               loc="lower right", bbox_to_anchor=(0.97, 0.005), ncol=2, frameon=False,
-               fontsize=17, labelcolor=TEXT, handlelength=1, handleheight=1)
-    fig.text(0.03, 0.025, "Oct 7-10, 2026 runs; Flash-Next decode from ./harness bench (bench-v1), Nov 23, 2026",
-             color=MUTED, fontsize=15)
-    fig.subplots_adjust(left=0.2, right=0.97, top=0.8, bottom=0.08, hspace=0.45)
-    fig.savefig(OUT, facecolor=BG)
-    print(OUT)
+    local, cloud = (ACCENT, "local, this box"), (CLOUD, "cloud, z.ai API")
+
+    # TTFT and GLM decode: runs 2026-10-07..10 (docs/local-vs-cloud-model-comparison.md);
+    # Flash-Next decode: ./harness bench, bench-v1, 2026-11-23, 70 W.
+    ttft = [("Flash-Next (local)", 0.03, ACCENT), ("glm-5.3-flashx", 1.36, CLOUD)]
+    decode = [("Flash-Next (local)", 74.1, ACCENT), ("glm-5.3-flash", 45, CLOUD),
+              ("glm-5.3", 74, CLOUD), ("glm-5.3-flashx", 151, CLOUD)]
+    chart("local-vs-cloud.png",
+          f"Local Flash-Next starts answering ~{round(ttft[1][1] / ttft[0][1])}x sooner than the cloud",
+          f"Qwen3.8 Flash-Next 125B on an {RIG} vs z.ai GLM 5.3 tiers",
+          [(ttft, "Time to first token, warm turn  ·  lower is better", lambda v: f"{v:.2f} s", True),
+           (decode, "Decode speed  ·  higher is better", lambda v: f"{v:g} t/s", False)],
+          [local, cloud], "Oct 7-10, 2026 runs; Flash-Next decode from ./harness bench (bench-v1), Nov 23, 2026")
+
+    # docs/local-vs-cloud-model-comparison.md, Results table (runs 1-8).
+    runs = [("glm-5.3-flash (opencode)", 68, "wrong", "wrong mechanism"),
+            ("glm-5.3-flashx (opencode)", 90, CLOUD),
+            ("glm-5.3-flashx (pi)", 161, CLOUD),
+            ("Flash-Next (pi, medium)", 175, ACCENT, "upstream PR found"),
+            ("GLM 5.3 753B (opencode)", 375, CLOUD),
+            ("GLM 5.3 753B (pi)", 510, CLOUD),
+            ("Flash-Next (pi, max)", 511, ACCENT, "upstream PR found"),
+            ("glm-5.3-flash (pi)", 549, CLOUD)]
+    chart("wallclock-by-run.png", "One real bug, eight runs: only the local model found the upstream PR",
+          "Wall-clock time per run, fastest first; all eight called the bug correctly",
+          [(runs, None, mmss, None)],
+          [local, cloud, ("wrong", "cloud, wrong mechanism")],
+          "Oct 7-10, 2026; local on the Flow Z13 at 70 W", height=10, left=0.24)
+
+    # docs/BENCHMARKS.md, "Engines on Strix Halo" (halogen measured on 0.18.5; Strata 0.1.44.1 tuned; gufo 0.12.0).
+    alt = MUTED
+    dec = [("halogen", 65, ACCENT), ("Strata", 43, alt), ("gufo", 40, alt)]
+    pf = [("halogen", 1520, ACCENT), ("Strata", 990, alt), ("gufo", 1270, alt)]
+    chart("engines-strix-halo.png", "halogen is the fastest engine on Strix Halo",
+          f"Qwen3.8 Flash-Next UD-IQ4_XS, 256k context, on an {RIG}; same prompts, greedy, thinking off",
+          [(dec, "Decode, 10-prompt battery median  ·  higher is better", lambda v: f"{v:g} t/s", False),
+           (pf, "Cold prefill, ~119k-131k token prompt  ·  higher is better", lambda v: f"~{v:,} t/s", False)],
+          [(ACCENT, "default"), (alt, "open alternatives")],
+          "halogen 0.18.5 (pin now 0.19.1), Strata 0.1.44.1 tuned, gufo 0.12.0; Oct 2026", left=0.14)
+
+    # docs/BENCHMARKS.md, "Prompt prefix and tool routing (2026-11-22)", osmos-evo, thinking off.
+    before, after = MUTED, ACCENT
+    chart("prompt-prefix.png", "8 tools instead of 25: a cold turn drops from 31 s to 17.5 s",
+          "osmos (DeepSeek-V4.1-Flash) on Strix Halo, new session, a one-word message",
+          [([("before (25 tools)", 13968, before), ("after (8 tools)", 7952, after)],
+            "Cold prompt  ·  lower is better", lambda v: f"{v:,} tokens", None),
+           ([("before (25 tools)", 31.4, before), ("after (8 tools)", 17.5, after)],
+            "Cold read time  ·  lower is better", lambda v: f"{v:g} s", None)],
+          [(before, "before"), (after, "after")],
+          "Measured Nov 22, 2026; the rest of the tools are called from codemode", height=7.5, left=0.18)
 
 
 if __name__ == "__main__":

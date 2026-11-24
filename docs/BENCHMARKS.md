@@ -1,6 +1,6 @@
 # Benchmark numbers, methodology & what was removed after testing
 
-![halogen 0.16.2 to 0.17.1: NPU call latency and decode rate](charts/halogen-0171-upgrade.png)
+![Engines on Strix Halo, Qwen3.8 Flash-Next at 256k context: halogen 65 t/s decode and ~1,520 t/s cold prefill, Strata 43 and ~990, gufo 40 and ~1,270](charts/engines-strix-halo.png)
 
 Rig: ASUS ROG Flow Z13 (Ryzen AI Max+ 395, Radeon 8060S, 128 GB unified, Linux), benches at 70 W sustained. NPU driver needs IOMMU on. NPU numbers below are halogen 0.17.1 (the image pin has since moved to 0.19.1, and 0.18.0 refreshed the NPU device files); ling3.0-tiny sidecar on a strix-halo-llamacpp v0.7.6.1 build.
 
@@ -117,7 +117,7 @@ prefill time.
 
 Measured on an ASUS ROG Flow Z13 (Ryzen AI Max+ 395, Radeon 8060S, 128 GB) at 70 W sustained.
 
-![Wall-clock per run, eight runs](charts/wallclock-by-run.png)
+![Wall-clock per run, eight runs on one real bug: only the two local Flash-Next runs found the upstream PR](charts/wallclock-by-run.png)
 ![Local Qwen3.8 Flash-Next 125B vs GLM 5.3 cloud tiers on Strix Halo: time to first token and decode tokens per second](charts/local-vs-cloud.png)
 
 ## Serena: context returned per navigation task (2026-10-16)
@@ -162,6 +162,8 @@ tool list is ~2.3 ms of wait on each cold turn (new session, or anything that ch
 | before | 25 | 13,968 tokens | 31.4 s |
 | after | 8 | 7,952 tokens | 17.5 s |
 | a turn after the progress note, before / after the fix | | 0 / 13,967 reused | 32.4 / 9.4 s |
+
+![Cold prompt 13,968 to 7,952 tokens and cold read 31.4 to 17.5 s after declaring 8 tools instead of 25](charts/prompt-prefix.png)
 
 `ask_user_question` was kept with trimmed guidance (`config/ask-user-question.json`): ~2.7k chars of prompt instead of ~5.5k.
 
