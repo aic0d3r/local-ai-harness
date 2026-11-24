@@ -74,7 +74,8 @@
       "label": "Inkling 2 Mini (26B looped MoE, vision)", "short": "26B MoE, vision",
       "model": "inkling2-mini",
       "engines": [
-        {"engine": "osmos", "why": "~45.7 t/s decode drafted, ~1,018 t/s prefill, 1M context, the release's own weights (osmos 0.15.0 README, not measured here); strix-llama.cpp measured 20 t/s / 324 and fell back to the CPU"}
+        {"engine": "osmos", "why": "47.3 t/s decode, 1,038 t/s prefill at 8K, 1M context, the release's own weights (measured here 2026-11-23; osmos 0.15.0 README: 45.7 / 1,018); strix-llama.cpp measured 20 t/s / 324 and fell back to the CPU"},
+        {"engine": "strata", "why": "36.4 t/s decode, 863 t/s prefill at 8K, 128K context: its SQ-20 native pack, 19.4 GB (measured 2026-11-24 on Strata 0.2.20; decode 26.6 at 8K and 18 at 32K depth)"}
       ]
     },
   "qwen38-27b": {
@@ -114,7 +115,7 @@
     "qwen36-q4": { "label": "Qwen3.6-35B-A3B, UD-Q4_K_XL (small MoE, runs on 32 GB RAM)", "engines": ["llamacpp", "strata"], "strata": ["qwen36", "UD-Q4_K_XL"], "run": "run-qwen36-ud-q4_k_xl.sh", "ram_gb": 32, "download_gb": 24 },
     "qwen36-q6": { "label": "Qwen3.6-35B-A3B, UD-Q6_K_XL", "engines": ["strata"], "strata": ["qwen36", "UD-Q6_K_XL"], "run": "run-qwen36-ud-q6_k_xl.sh", "ram_gb": 44, "download_gb": 34 },
     "qwen36-q8": { "label": "Qwen3.6-35B-A3B, Q8_0", "engines": ["strata"], "strata": ["qwen36", "Q8_0"], "run": "run-qwen36-q8_0.sh", "ram_gb": 52, "download_gb": 39 },
-    "inkling2-mini": { "label": "Inkling 2 Mini (osmos's inkling-2-mini pack: the release's NVFP4/MXFP8 weights + its drafter, 1M context)", "engines": ["osmos"], "download_gb": 20 },
+    "inkling2-mini": { "label": "Inkling 2 Mini (osmos: its inkling-2-mini pack, the release's weights + its drafter, 1M context; Strata 0.2.20+: its SQ-20 native pack, 19.4 GB, 128K context, text only)", "engines": ["osmos", "strata"], "download_gb": 20, "ram_gb": 32, "strata": ["inkling-2-mini", "SQ-20"], "run": "run-inkling-2-mini-sq-20.sh" },
     "deepseek": { "label": "DeepSeek-V4.1-Flash (osmos's osmos-evo pack)", "engines": ["osmos"] },
     "qwen38-27b": { "label": "Qwen3.8 27B dense, UD-Q4_K_XL + DFlash2 draft (gufo, Strix Halo; 16.4 GiB target, the faster one)", "engines": ["gufo"], "download_gb": 20 },
     "qwen38-27b-q8": { "label": "Qwen3.8 27B dense, UD-Q8_K_XL + DFlash2 draft (gufo, Strix Halo; 29.3 GiB target, closer to the full model, ~40% slower decode in gufo's benchmarks)", "engines": ["gufo"], "download_gb": 34 }
@@ -131,6 +132,12 @@
                   "chatTemplateKwargs": { "reasoning_effort": { "$var": "thinking.effort" }, "enable_thinking": { "$var": "thinking.enabled" } } },
       "thinkingLevelMap": { "minimal": null, "low": "low", "medium": "medium", "high": "xhigh", "xhigh": null, "max": null },
       "samplingParams": { "temperature": 1.0, "top_p": 0.95, "top_k": 20, "min_p": 0.0 }
+    },
+    "inkling2-strata": {
+      "match": "^inkling-2-mini-",
+      "reasoning": false,
+      "maxTokens": 4096,
+      "samplingParams": { "temperature": 1.0 }
     },
     "inkling2": {
       "match": "inkling",

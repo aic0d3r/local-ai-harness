@@ -264,6 +264,16 @@ open(h.MODEL_FILE, "w").write("inkling2-mini\n")
 assert h.osmos_inkling() and "Inkling 2 Mini" in h.choices_line("osmos") and "weights" not in h.choices_line("osmos")
 open(h.MODEL_FILE, "w").write("deepseek\n")
 assert not h.osmos_inkling() and "DeepSeek-V4.1-Flash" in h.choices_line("osmos") and "weights" in h.choices_line("osmos")
+# ...and on Strata (0.2.20: its SQ-20 native pack): the same saved answer, Strata's own [family, size] and run script, still no weights answer
+ink = h.catalog()["inkling2-mini"]
+assert "strata" in ink["engines"] and ink["strata"] == ["inkling-2-mini", "SQ-20"] and ink["run"] == "run-inkling-2-mini-sq-20.sh", ink
+assert h.catalog_id("inkling-2-mini-sq-20") == "inkling2-mini" and h.engine_title("strata", "inkling-2-mini-sq-20") == "strata · Inkling 2 Mini"
+open(h.MODEL_FILE, "w").write("inkling2-mini\n")
+assert h.engine_model("strata") == "inkling2-mini" and "model inkling2-mini" in h.choices_line("strata") and "weights" not in h.choices_line("strata")
+assert h.engine_model("gufo") == h.engine_model("halogen") == "flash-next"  # an engine that cannot load it keeps Flash-Next
+sp = h.entries.model_profile("inkling-2-mini-sq-20", h.PROFILES)  # Strata's build does not think: no effort is sent, the release's temperature stays
+assert sp["reasoning"] is False and "compat" not in sp and "thinkingLevelMap" not in sp and sp["samplingParams"] == {"temperature": 1.0} and sp["maxTokens"] == 4096, sp
+assert h.entries.model_profile("osmos-inkling-2-mini", h.PROFILES)["reasoning"] is True
 open(h.MODEL_FILE, "w").write(real_model)
 assert h.catalog_id("qwen3.8-flash-next-ud-q4_k_xl") == "flash-next" and h.catalog_id("qwen3.8-flash-next-iq3_xxs") == "flash-next-iq3_xxs"
 assert "weights" in h.choices_line("gufo") and "weights" in h.choices_line("halogen")  # Q4 has an abliterated build too
@@ -458,6 +468,7 @@ npu, plain = {"npu": True, "ram_gb": 121}, {"npu": False, "ram_gb": 121}
 assert h.best_engine(R["flash-next"], npu)["engine"] == "halogen" and h.best_engine(R["flash-next"], plain)["engine"] == "gufo"
 assert h.best_engine(R["flash-next"], {"npu": True, "ram_gb": 64})["engine"] == "gufo"  # halogen needs halogen_min_ram_gb
 assert h.best_engine(R["qwen38-27b"], npu)["engine"] == "gufo" and h.best_engine(R["deepseek"], plain)["engine"] == "osmos"
+assert [e["engine"] for e in R["inkling2"]["engines"]] == ["osmos", "strata"] and h.best_engine(R["inkling2"], plain)["engine"] == "osmos"  # measured here: osmos 47.3 t/s, Strata 36.4
 assert all(e["engine"] in h.PROFILES["engines"] for r in R.values() if isinstance(r, dict) for e in r.get("engines", []))
 # ask_route saves the model answer, keeps a saved quant of the same family, and offers "pick an engine" as the way out
 saved = {n: getattr(h, n) for n in ("capacity", "hardware", "choose")}
@@ -671,6 +682,8 @@ assert sm("flash-next-iq3_s", "stock", "--print-run").stdout.strip().endswith("r
 r = sm("qwen36-q4", "stock", "--print-run"); assert r.stdout.strip() == "", r
 r = sm("qwen36-q4", "stock"); assert r.returncode == 1 and "run-qwen36-ud-q4_k_xl.sh" in r.stderr, r
 assert sm("qwen38-27b", "abliterated", "--print-run").stdout.strip().endswith("run-unsloth-ud-q4_k_xl.sh")
+r = sm("inkling2-mini", "stock", "--print-run"); assert r.stdout.strip() == "", r  # Inkling on Strata needs its own run script too: none in this checkout
+r = sm("inkling2-mini", "stock"); assert r.returncode == 1 and "run-inkling-2-mini-sq-20.sh" in r.stderr, r
 for mid, e in h.catalog().items():
     assert ("run" in e) == ("strata" in e) and ("strata" not in e or "strata" in e["engines"]), mid
 # gufo launcher: the 27B family needs its own files, and --print-model keeps meaning Flash-Next whatever the saved answer is

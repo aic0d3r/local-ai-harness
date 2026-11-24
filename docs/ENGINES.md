@@ -20,7 +20,7 @@ llama.cpp).
 **Which engine for which model (Strix Halo).** Setup asks the model first and takes the first usable engine of its route
 (`routes` in `config/profiles.json`, each with the numbers behind the order and whether they were measured here or only reported):
 Flash-Next: halogen (NPU + 110 GB RAM) > gufo > Strata; Qwen3.8-27B: gufo (DFlash2 draft) > strix-llama.cpp; DeepSeek-V4.1-Flash: osmos;
-Inkling 2 Mini: osmos.
+Inkling 2 Mini: osmos > Strata (both measured here).
 The 27B order is measured here (2026-11-18, `bench-v1`, UD-Q4_K_XL + DFlash2, 262k ctx, back to back): gufo 0.32.0 decodes
 40.2 t/s code / 30.2 prose / 28.0 at 8K / 21.6 at 32K and prefills 453-464 (401 at 32K); halo-box llama.cpp with
 `start-qwen38.sh`'s flags (4 drafts, ub 4096, f16 KV) 34.0 / 27.9 / 27.0 / 23.0 and 408-413 (360). halo-box's own 27B recipe
@@ -204,13 +204,15 @@ osmos serves DeepSeek-V4.1-Flash, or **Inkling 2 Mini** when that is the saved m
 That pack is Thinking Machines' release itself - its NVFP4 / MXFP8 experts and BF16 dense weights, 19.6 GB, all in GPU
 memory - with its own 0.4 GB drafter and a 1M context, served as `osmos-inkling-2-mini`. The first start asks, then has
 libosmos's installer fetch and check it (`start-osmos.sh --install`, ~20 GB). Stock only: there is no abliterated build, so
-the weights question is skipped. libosmos's README (0.15.0, not measured here): 45.7 / 42.2 t/s drafted decode on code /
-prose, 28.8 plain, 1,018 t/s prefill at ~3K, 1,045 at 37K, 775 at 131K; KL 2.9e-3 against upstream llama.cpp's own run.
+the weights question is skipped. Measured here 2026-11-23 (`./harness tune`, bench-v1): 47.3 t/s decode, 1,038 t/s prefill at 8K, 1M
+context. libosmos's README (0.15.0): 45.7 / 42.2 t/s drafted decode on code / prose, 28.8 plain, 1,018 t/s prefill at ~3K,
+1,045 at 37K, 775 at 131K; KL 2.9e-3 against upstream llama.cpp's own run.
 Sampled at temperature 1.0 (the release's setting: greedy looped on one tool call in long agent sessions); pi's profile
 `models.inkling2` sends that and the reasoning effort by name (`none` ... `max`). strix-llama.cpp ran the same model at
 20 t/s / 324 t/s prefill with a 194-way graph split ([LLAMACPP.md](LLAMACPP.md)). AMD's Loom (`hrx-loom`, tech preview)
 publishes faster numbers (44 t/s plain, 58.5 drafted on code, ~1,600-1,850 prefill) measured with a CPU-spinning
-completion wait; not wired here yet. The Qwen models run on halogen, gufo or Strata.
+completion wait; not wired here yet. Strata runs the same model too, slower here: [Other models on Strata and gufo](#other-models-on-strata-and-gufo).
+The Qwen models run on halogen, gufo or Strata.
 
 It has no NPU tools (guard, triage, dedup need halogen), and it will not fit beside another big engine: its expert budget
 is ~95-100 GiB on a 128 GB box (99.69 GiB here on 0.15.1 with `fill_gib` 4), plus ~18 GiB of GPU buffers. That budget is sized from the memory free when osmos starts, so close browsers and
@@ -290,10 +292,22 @@ for you). The list is `config/profiles.json` (`catalog`):
 | `qwen36-q6` / `-q8` | Strata | Qwen3.6-35B-A3B, larger quants (also run on llama.cpp with `QWEN36_ALT_MODEL`) | 44 / 52 GB RAM, 34 / 39 GB download |
 | `qwen38-27b` | gufo | Qwen3.8 27B dense, UD-Q4_K_XL + DFlash2 draft, vision; abliterated = huihui-ai's UD-Q4_K_XL | 20 GB download |
 | `qwen38-27b-q8` | gufo | same, UD-Q8_K_XL target (gufo's other qualified 27B file; its benchmarks: ~16 t/s mixed decode with DFlash2 vs ~27 for Q4) | 34 GB download, shares the draft and projector; abliterated = huihui-ai's UD-Q8_K_XL (same size) |
+| `inkling2-mini` | osmos, Strata | Inkling 2 Mini (26B looped MoE): osmos's pack of the release weights (1M ctx, the route's first engine) or Strata's SQ-20 native pack with its DSpark drafter (0.2.20+, 128K ctx, text only, no thinking: `models.inkling2-strata`) | 20 GB download; Strata: 32 GB RAM |
 Strata installs the non-default rows through its own `setup.sh --family F --model SIZE` (`scripts/install-strata.sh`,
 which downloads their files); gufo's 27B comes from `scripts/download-qwen38-27b.sh` at the revisions gufo's docs pin
 (`unsloth/Qwen3.8-27B-GGUF@4ca72078`, `z-lab/Qwen3.8-27B-DFlash2-GGUF@2d9571f8`; the sha256s match gufo's
 `model-identities.json`). Picking the 27B in the model menu asks Q4 or Q8.
+
+**Inkling 2 Mini on Strata (measured here 2026-11-24, `bench-v1`, Strata 0.2.20 image, engine 0.1.66 hip, SQ-20, 128K ctx,
+power profile `custom`, nothing else running).** `./harness tune`: 36.4 t/s short-code decode, 863 t/s prefill at 8K. Full bench:
+38.8 t/s code and 28.8 prose decode; 831 / 827 / 694 t/s prefill and 32.1 / 26.6 / 18.0 t/s code decode at 2K / 8K / 32K depth.
+osmos on the same box and protocol (2026-11-23): 47.3 t/s, 1,038 t/s at 8K, 1M context, so it stays the route's first engine.
+SQ-20 is Strata's own pick for 32+ GiB unified memory (`inkling_fit.py`); it downloads it on the first start (19.4 GB) and
+serves it as `inkling-2-mini-sq-20`. Strata's build does not think: whatever `reasoning_effort` is sent it answers without
+`reasoning_content` (its `inkling_family.py`: `HAS_THINKING = False`), so `models.inkling2-strata`, matched on Strata's
+`inkling-2-mini-*` id, registers a non-reasoning model at the release's temperature 1.0 while osmos's
+`osmos-inkling-2-mini` keeps `models.inkling2`. Tool calls work (a `read_file` call came back with the right arguments).
+The launcher leaves pictures off (`VISION` unset), and Strata served 128K where its `--plan` in a bare container said 32K.
 
 Not offered, though upstream has them: Strata's Coder IQ1_M, Swift 1.5, Unsloth UD-IQ4_XS/Q5/Q6/Q8, Gyro and NVFP4
 packs of Flash-Next. gufo qualifies Flash-Next on UD-Q4_K_XL only: the smaller quants `./harness recommend` can pick
