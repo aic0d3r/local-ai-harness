@@ -10,7 +10,7 @@ constraint (~67 GB model + ~115 MiB/slot in-place cache) — allocator fragmenta
 
 The launcher's pre-flight gate handles it: if order-9 pages are low (box up a long time,
 big-model churn) it first attempts recovery (page-cache drop, compaction) and only proceeds on a
-healthy allocator; otherwise it fails in seconds with the exact fix command instead of wedging
+healthy allocator; otherwise it falls back to 65k/2-slot and prints the exact fix command instead of wedging
 for 30+ minutes. Install the `vm-compact.timer` (`setup.sh`/`--doctor` print the one-line
 command) to keep the allocator healthy day to day.
 
@@ -19,7 +19,7 @@ HALOGEN_CTX=65536 HALOGEN_KV_SLOTS=2 ./start-halogen.sh   # small-context opt-ou
 ```
 
 After any ctx change the launcher syncs `models.json`'s `contextWindow` (so pi token-budgets
-against the real window) and scales `compaction.reserveTokens` (60k at 262k, 10k at 65k).
+against the real window) and scales `compaction.reserveTokens` (60k at 262k, 16k at 65k).
 
 ## Watching speed (prefill / decode)
 

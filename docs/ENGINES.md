@@ -1,4 +1,4 @@
-# Inference engines: halogen, gufo, Strata, strix-llama.cpp and the rest
+# Inference engines: halogen, gufo, Strata, osmos, strix-llama.cpp and the rest
 
 Any OpenAI-compatible server (or cloud provider) works with pi. Only Strix Halo was measured here. On Strix Halo,
 **halogen and gufo are the best options**. The harness can install and start halogen, gufo, Strata, osmos and
@@ -10,16 +10,19 @@ a llama-server on :8080 counts as it only when its `llamacpp-8080` container ser
 on every other engine they are off; pi keeps working and the degradation is graceful but real (all measured on gufo /
 llama.cpp).
 
-## Two first-class stacks
+## Engines the harness installs and starts
 
 | stack | what | when |
 |---|---|---|
 | **halogen** (recommended) | NPU+GPU engine, Qwen3.8 Flash-Next (125B) from a local checkpoint, no network needed to run | just works, **262k ctx** x 4 slots |
-| **strix-llama.cpp (halo-box fork, Vulkan)** | Docker image via server/start-qwen36.sh (nothing to build), release zips or source; full control, MTP/DFlash2 spec decode, vision, local GGUFs, no network needed to run, **256k ctx** max | tuning and the **27B** runs — see [the llama.cpp path](LLAMACPP.md) |
+| **strix-llama.cpp (halo-box fork, Vulkan)** | Docker image via server/start-qwen36.sh (nothing to build), release zips or source; full control, MTP/DFlash2 spec decode, vision, local GGUFs, no network needed to run, **262k ctx** max | Qwen3.6-35B-A3B (85 t/s with MTP), tuning — see [the llama.cpp path](LLAMACPP.md) |
+| **gufo** | open engine, Flash-Next and Qwen3.8-27B (DFlash2 draft), vision | open-source Flash-Next, the **27B** |
+| **Strata** | Docker image or source, ISTA packs; NVIDIA and AMD desktop GPUs too | open source, smaller boxes, Inkling 2 Mini at 128K |
+| **osmos** (libosmos) | streams experts from the SSD | DeepSeek-V4.1-Flash (~768B) or Inkling 2 Mini at **1M ctx** on one box |
 
 **Which engine for which model (Strix Halo).** Setup asks the model first and takes the first usable engine of its route
 (`routes` in `config/profiles.json`, each with the numbers behind the order and whether they were measured here or only reported):
-Flash-Next: halogen (NPU + 110 GB RAM) > gufo > Strata; Qwen3.8-27B: gufo (DFlash2 draft) > strix-llama.cpp; DeepSeek-V4.1-Flash: osmos;
+Flash-Next: halogen (NPU + 110 GB RAM) > gufo > Strata; Qwen3.6-35B-A3B: strix-llama.cpp > Strata; Qwen3.8-27B: gufo (DFlash2 draft); DeepSeek-V4.1-Flash: osmos;
 Inkling 2 Mini: osmos > Strata (both measured here).
 The 27B order is measured here (2026-11-18, `bench-v1`, UD-Q4_K_XL + DFlash2, 262k ctx, back to back): gufo 0.32.0 decodes
 40.2 t/s code / 30.2 prose / 28.0 at 8K / 21.6 at 32K and prefills 453-464 (401 at 32K); halo-box llama.cpp with
@@ -212,7 +215,7 @@ Sampled at temperature 1.0 (the release's setting: greedy looped on one tool cal
 20 t/s / 324 t/s prefill with a 194-way graph split ([LLAMACPP.md](LLAMACPP.md)). AMD's Loom (`hrx-loom`, tech preview)
 publishes faster numbers (44 t/s plain, 58.5 drafted on code, ~1,600-1,850 prefill) measured with a CPU-spinning
 completion wait; not wired here yet. Strata runs the same model too, slower here: [Other models on Strata and gufo](#other-models-on-strata-and-gufo).
-The Qwen models run on halogen, gufo or Strata.
+The Qwen models run on halogen, gufo, Strata or strix-llama.cpp.
 
 It has no NPU tools (guard, triage, dedup need halogen), and it will not fit beside another big engine: its expert budget
 is ~95-100 GiB on a 128 GB box (99.69 GiB here on 0.15.1 with `fill_gib` 4), plus ~18 GiB of GPU buffers. That budget is sized from the memory free when osmos starts, so close browsers and
@@ -286,9 +289,9 @@ for you). The list is `config/profiles.json` (`catalog`):
 
 | id | engines | what | plan for (Strata's docs) |
 |---|---|---|---|
-| `flash-next` (default) | gufo, Strata | UD-Q4_K_XL: stock = Unsloth's, abliterated = brainnxdomain's Uncensored-Gufo build (same tensor layout; unofficial on Strata) | 104 GiB download; Strata: ~88 GB RAM + VRAM for every expert |
+| `flash-next` (default) | gufo, Strata, strix-llama.cpp | UD-Q4_K_XL: stock = Unsloth's, abliterated = brainnxdomain's Uncensored-Gufo build (same tensor layout; unofficial on Strata) | 104 GiB download; Strata: ~88 GB RAM + VRAM for every expert |
 | `flash-next-iq3_s` / `-iq3_xxs` / `-iq2_xs` / `-q2_0` | Strata | ISTA-DASLab packs of the same model | 60 / 53 / 46 / 44 GB RAM, 84 / 76 / 68 / 66 GB download |
-| `qwen36-q4` | **strix-llama.cpp** (Docker) | Qwen3.6-35B-A3B (small MoE, Unsloth GGUF with the MTP head); 85.3 t/s decode, 2,048 t/s prefill with the draft (measured) | 24 GB download or Strata's copy, 32 GB RAM |
+| `qwen36-q4` | **strix-llama.cpp** (Docker), Strata | Qwen3.6-35B-A3B (small MoE, Unsloth GGUF with the MTP head); 85.3 t/s decode, 2,048 t/s prefill with the draft (measured) | 24 GB download or Strata's copy, 32 GB RAM |
 | `qwen36-q6` / `-q8` | Strata | Qwen3.6-35B-A3B, larger quants (also run on llama.cpp with `QWEN36_ALT_MODEL`) | 44 / 52 GB RAM, 34 / 39 GB download |
 | `qwen38-27b` | gufo | Qwen3.8 27B dense, UD-Q4_K_XL + DFlash2 draft, vision; abliterated = huihui-ai's UD-Q4_K_XL | 20 GB download |
 | `qwen38-27b-q8` | gufo | same, UD-Q8_K_XL target (gufo's other qualified 27B file; its benchmarks: ~16 t/s mixed decode with DFlash2 vs ~27 for Q4) | 34 GB download, shares the draft and projector; abliterated = huihui-ai's UD-Q8_K_XL (same size) |
@@ -353,7 +356,7 @@ risk. `install-strata.sh` refuses a Strata checkout older than 0.2.11.
 - **gufo:** its model page lists `UD-Q4_K_XL/*` (four shards) with the shared Q8 MTP head and `mmproj-BF16.gguf`,
   pinned to `d96201194f10`, and says it keeps the tensor types and shapes of the earlier `38bb39ee9782` with
   unchanged AR pp2048/tg128 speed. At the `v0.30.0` tag that page still named `38bb39ee`; at `v0.31.0` (the version
-  `start-gufo-flashnext.sh` pins) it names 3.1. 0.31.0 also fixes opening tensorless split shards (#1021), which
+  `start-gufo-flashnext.sh` pinned then) it names 3.1. 0.31.0 also fixes opening tensorless split shards (#1021), which
   the 10 MB metadata-only first shard of the new layout is (our inference, the changelog does not say so).
 - **Strata:** 0.2.11+ lists size and SHA-256 pins for exactly these four shards (`UNSLOTH_Q4_V31_SHARDS`) and
   accepts the layout from `--gguf-dir`; we checked all four against the Hub. Its own download of UD-Q4_K_XL still
@@ -387,12 +390,12 @@ ID, harassment), greedy, thinking off: **6/6 refused at LoRA scale 0, 0/6 at sca
 without an MTP draft, so this route is for "abliterated without a second model", not for speed. The 96 targets are
 Q8_0 in Unsloth's file, so merging the LoRA offline would remove that prefill cost.
 
-**Plug and play:** `./setup.sh` asks "Default model weights?" after you pick halogen, gufo or Strata
+**Plug and play:** `./setup.sh` asks "Default model weights?" after you pick halogen, gufo, Strata, osmos or strix-llama.cpp
 (change it later with `./harness config` -> weights). The answer is saved in
-`~/.pi/agent/harness-weights` (`stock` or `abliterated`). Both launchers read it, the wizard and
+`~/.pi/agent/harness-weights` (`stock` or `abliterated`). The launchers read it, the wizard and
 `start.sh` offer the download when the file is missing (`scripts/download-abliterated.sh
 halogen|gufo`), and a running engine is restarted on the new weights if you say yes. The model id is
-unchanged, so pi needs no other change. `HALOGEN_WEIGHTS` / `GUFO_WEIGHTS` override the saved
+unchanged, so pi needs no other change. `HALOGEN_WEIGHTS` / `GUFO_WEIGHTS` / `OSMOS_WEIGHTS` / `LLAMACPP_WEIGHTS` override the saved
 answer for one launch.
 
 **What the answer changes besides the file.** An abliterated build has no instinct to push back on

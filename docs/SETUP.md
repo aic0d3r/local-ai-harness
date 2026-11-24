@@ -26,7 +26,7 @@ The full walkthrough of `./setup.sh`, the `./harness` commands and `./start.sh`.
    **All questions come first**, then a summary ("about to: ...") and one `Continue? [Y/n]`; after that the run needs
    nothing from you. Before `Continue?` nothing has been installed or started, and **Esc** (or Ctrl-C) at any prompt
    exits cleanly. Prompts use `gum` when it is installed. The first run prints the full install output; later runs print
-   one line per step with only warnings and failures in full (everything goes to `~/.pi/agent/setup.log`; `--verbose`
+   one line per step with only warnings and failures in full (everything goes to `~/.pi/agent/setup.log`; `./harness setup --verbose`
    shows it all). One-time sudo fixes (fabric clock, vm-compact) are shown once, then only by `--doctor` until fixed.
 3. **Writes the pi provider** with per-model defaults (reasoning, sampling, compaction reserve) from
    [`config/profiles.json`](../config/profiles.json), and records the active engine in a profile that the sidecar, guard
@@ -37,12 +37,12 @@ The full walkthrough of `./setup.sh`, the `./harness` commands and `./start.sh`.
    [BENCHMARKS.md](BENCHMARKS.md#engines-on-strix-halo), which use the `halogen-cmp.py` battery and 2k-119k depth prompts.
 5. **Extras, remembered between runs** (`./harness config` changes one; `./harness setup --reconfigure` asks all
    again):
-   - whether to run the **ling-tiny sidecar**, asked on every wizard run with your saved answer pre-selected (default yes where the GPU has 24 GB or more, no on smaller cards; it holds ~8 GiB of GPU memory, and "no" means the main
+   - whether to run the **ling-tiny sidecar**, asked on every wizard run with your saved answer preselected (default yes where the GPU has 24 GB or more, no on smaller cards; it holds ~8 GiB of GPU memory, and "no" means the main
      model writes commits and summaries, with compaction blocking on it; non-interactive: `./setup.sh --no-sidecar` /
      `--sidecar`);
    - the engine update check (any engine with a known release source: halogen, gufo, Strata, osmos, plain llama.cpp, vLLM,
      Ollama; strix-llama.cpp runs an image pinned by digest, so it has none).
-     On halogen, gufo and Strata it offers the safe upgrade right away (`scripts/upgrade-<engine>.sh`: update, restart,
+     On halogen, gufo, Strata and osmos it offers the safe upgrade right away (`scripts/upgrade-<engine>.sh`: update, restart,
      check, roll back on failure); on the others it prints the upgrade command. `start.sh` repeats the one-line notice,
      and `./harness update-check` runs it on demand;
    - voice.
@@ -79,9 +79,9 @@ also works after setup: startup defaults point at the engine you chose, and exis
 | `./harness setup` | the wizard above |
 | `./harness detect` | list hardware and running engines, change nothing |
 | `./harness recommend` | pick an engine and model for the detected hardware |
-| `./harness use <engine>[/<model>]` | switch pi to another engine or model; in a terminal, if that engine is down (halogen, gufo, Strata) it asks to stop the engine holding the GPU memory, download what is missing, and starts it. Without a terminal it only switches to what is already up |
+| `./harness use <engine>[/<model>]` | switch pi to another engine or model; in a terminal, if that engine is down (halogen, gufo, Strata, osmos, strix-llama.cpp) it asks to stop the engine holding the GPU memory, download what is missing, and starts it. Without a terminal it only switches to what is already up |
 | `./harness status` | engine up/down, model, NPU, saved tuning, sidecar state |
-| `./harness config` | menu of saved answers (engine, sidecar, voice, update check, sudo hints); change one, applied right away |
+| `./harness config` | menu of saved answers (engine, model, weights, agent, sidecar, voice, update check, sudo hints) plus a `running` row that stops engines; change one, applied right away |
 | `./harness tune` | re-run the speed probe and re-size the limits |
 | `./harness monitor` | live speed for the active engine: halogen and Strata dashboards, on any other engine the prefill/decode of each pi reply (see [Operations](OPS.md#watching-speed-prefill--decode)) |
 | `./harness bench` | fixed-protocol speed benchmark (`bench-v1`, 2K/8K/32K), saved to `harness-bench.json`; compare only with other `bench` runs |
@@ -99,8 +99,8 @@ also works after setup: startup defaults point at the engine you chose, and exis
 
 `start.sh` (= `./harness up`, then pi) does five things:
 
-1. Starts the engine you picked if it is down (halogen, gufo, Strata). It asks first if another engine holds the GPU
-   memory, and never launches halogen beside gufo or Strata.
+1. Starts the engine you picked if it is down (halogen, gufo, Strata, osmos, strix-llama.cpp). It asks first if another
+   engine holds the GPU memory, and never launches one engine beside another that holds it.
 2. Re-checks the install quietly. Only problems print; the full log is `~/.pi/agent/setup.log`.
 3. Shows the update notice with the upgrade offer.
 4. Opens pi on the provider and model from the wizard.
@@ -113,8 +113,15 @@ sidecar-written message, `triage` when a decision is a one-word call, and `/tune
 budget, temperature or ubatch mid-session. Codebase search needs no setup: semble indexes on first query.
 
 The default halogen launch is its native max (**262,144 ctx x 4 slots**) behind an allocator pre-flight gate. If order-9
-pages are low it recovers or fails in seconds with the exact fix command. Context knobs, the `vm-compact.timer` and the
+pages are low it recovers or falls back to 65k/2-slot and prints the exact fix command. Context knobs, the `vm-compact.timer` and the
 small-context opt-out are in [Operations](OPS.md).
+
+### Crash recovery
+
+Kill pi or the server mid-task, then relaunch with `./start.sh <dir> -c` (pi's continue: the last session in that
+directory, whole) and say "continue". `progress-tracker` also writes a checkpoint (task, last state, changed files) to
+`~/.pi/agent/progress/` for you to read; it is not fed to the model, so it costs no context and no cache miss (set
+`PI_PROGRESS_FILE` per task for parallel work, `/progress-reset` to clear it).
 
 ## Uninstall
 

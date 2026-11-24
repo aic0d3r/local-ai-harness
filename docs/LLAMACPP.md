@@ -94,7 +94,7 @@ cp -r extensions/* ~/.pi/agent/extensions/              # dirs too: the .ts file
 
 Two numbers in the snippet you must understand, not copy: `reserveTokens` ships **60000**
 for the 262144 window both launchers serve (what the halogen launcher sets at 262k); on a smaller `CTX` use a quarter of it
-(10240 for 65536). `./harness up` and the halogen launcher resync it to the served window on their own.
+(16384 for 65536). `./harness up` and the halogen launcher resync it to the served window on their own.
 `thinkingBudgets` (per-request budgets pi sends) are what actually govern
 pi sessions; the server's `--reasoning-budget` flag is only a default for clients that do not
 send one. On this path the NPU extensions are inert — there is no halogen to serve them.

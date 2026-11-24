@@ -18,9 +18,9 @@ One box, two model servers (three with voice), three pieces of silicon:
 Flow: every prompt is screened by the NPU guard before the main model sees it. The main model generates on the iGPU with
 its prompt cache warm. Side jobs that need a judgement in milliseconds (is this an injection, which of these three is
 it, which files are near-duplicates) go to the NPU instead of the 125B model. Sidecars read diffs and transcripts
-directly so they never evict the cached prefix. Search runs on CPU against an index built at first query. Halogen is the
-only engine `setup.sh` launches and manages (`start.sh` can also start gufo and Strata); every other engine is detected
-and wired but you run it yourself ([what breaks on another engine](ENGINES.md) is measured, too).
+directly so they never evict the cached prefix. Search runs on CPU against an index built at first query. `./harness setup`
+installs and starts halogen, gufo, Strata, osmos and strix-llama.cpp, and `start.sh` restarts them when they are down;
+every other engine is detected and wired but you run it yourself ([what breaks on another engine](ENGINES.md) is measured, too).
 
 ## Model files
 

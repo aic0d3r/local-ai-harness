@@ -2,7 +2,7 @@
 
 ![halogen 0.16.2 to 0.17.1: NPU call latency and decode rate](charts/halogen-0171-upgrade.png)
 
-Rig: ASUS ROG Flow Z13 (Ryzen AI Max+ 395, Radeon 8060S, 128 GB unified, Linux), benches at 70 W sustained. NPU driver needs IOMMU on. NPU numbers below are halogen 0.17.1 (the image pin has since moved to 0.19.1, and 0.18.0 refreshed the NPU device files); ling3.0-tiny sidecar on a llama.cpp 0.7.6.1-era build.
+Rig: ASUS ROG Flow Z13 (Ryzen AI Max+ 395, Radeon 8060S, 128 GB unified, Linux), benches at 70 W sustained. NPU driver needs IOMMU on. NPU numbers below are halogen 0.17.1 (the image pin has since moved to 0.19.1, and 0.18.0 refreshed the NPU device files); ling3.0-tiny sidecar on a strix-halo-llamacpp v0.7.6.1 build.
 
 **NPU microbench (0.17.1, four models resident):**
 
@@ -86,9 +86,9 @@ UD-Q4_K_XL) report 52.8-59.9% draft acceptance and 41-45 t/s output, so the acce
 the hardware. Its MoE prompt chunk is what the parallel count decides: `--parallel 4` caps it at 1024, one slot gets 4096
 (8192 with 131k ctx is refused: "bad --chunk / --max-context"), and the chunk is worth +44% prefill here.
 
-No drafter exists on the other side either: llama.cpp has no MTP support, and a speculative draft model needs a smaller
-sibling of the same vocabulary, which Qwen3.6 does not have (smallest: 27B). No ROCm llama.cpp build is on this box
-(the local build is Vulkan-only), so llama.cpp's HIP path is not in the table.
+llama.cpp drafts with the model's own MTP head (the top row); a separate draft model would need a smaller sibling of the
+same vocabulary, which Qwen3.6 does not have (smallest: 27B). The ROCm image (`LLAMACPP_BACKEND=rocm`) measured slower
+here ([LLAMACPP.md](LLAMACPP.md)), so it is not in the table.
 
 ## Efficiency levers
 
@@ -117,7 +117,7 @@ prefill time.
 
 Measured on an ASUS ROG Flow Z13 (Ryzen AI Max+ 395, Radeon 8060S, 128 GB) at 70 W sustained.
 
-![Wall-clock per run, seven runs](charts/wallclock-by-run.png)
+![Wall-clock per run, eight runs](charts/wallclock-by-run.png)
 ![Local Qwen3.8 Flash-Next 125B vs GLM 5.3 cloud tiers on Strix Halo: time to first token and decode tokens per second](charts/local-vs-cloud.png)
 
 ## Serena: context returned per navigation task (2026-10-16)
@@ -133,8 +133,8 @@ One call each on this repo (`setup/harness.py`, 13,980 chars), characters return
 | callers of a function | 813 | 313 | n/a |
 
 Serena is ~17-36x smaller than reading the file and 1.4-2x smaller than careful grep, but **larger**
-than grep for callers (it adds the containing symbol). Limits seen: only the Python language server is
-active in this project, so `get_symbols_overview` on a `.ts` file errors.
+than grep for callers (it adds the containing symbol). Limits seen: only the Python language server was
+active in this project then, so `get_symbols_overview` on a `.ts` file errored.
 
 Real usage across 416 logged sessions (`~/.pi/agent/sessions`): `read` returned a median 2,605 and
 mean 7,029 chars over 1,246 calls; serena navigation returned a mean 213-244 chars
@@ -195,7 +195,7 @@ Limits: one run per question per arm, one model (osmos); not repeated on halogen
 
 ## Install & ops
 
-**Install - fully automated, one prompt total.** Clone github.com/aic0d3r/local-ai-harness (tagged releases, MIT, changelog in the repo) and run `./setup.sh --halogen auto` (Strix Halo; for other hardware or cloud models see [Engines](ENGINES.md)). It installs pi via npm if missing, pulls the pinned halogen image, and if you don't have the model files it downloads them for you: ~124 GB resumable (that's the one prompt you'll see - it checks your free space first), then the 35 MB portable llama-server for the sidecar, the tiny GGUF sha256-verified against Hugging Face, the extension suite, prompt templates, theme, and the systemd keep-alive unit - and your own model entries and pi settings are never touched. `./setup.sh --doctor` verifies every piece with live probes; `./setup.sh --uninstall` backs everything up and returns pi to stock in one command.
+**Install - fully automated, one prompt total.** Clone github.com/aic0d3r/local-ai-harness (tagged releases, MIT, changelog in the repo) and run `./setup.sh --halogen auto` (Strix Halo; for other hardware or cloud models see [Engines](ENGINES.md)). It installs pi via npm if missing, pulls the pinned halogen image, and if you don't have the model files it downloads them for you: ~124 GB resumable (that's the one prompt you'll see - it checks your free space first), then the pinned strix-llama.cpp image for the sidecar, the tiny GGUF sha256-verified against Hugging Face, the extension suite, prompt templates, theme, and the systemd keep-alive unit - and your own model entries and pi settings are never touched. `./setup.sh --doctor` verifies every piece with live probes; `./setup.sh --uninstall` backs everything up and returns pi to stock in one command.
 
 **Docker is the one prerequisite** we won't auto-install (system package, needs sudo). First boot pins the 47.7 GiB lookup table from disk, so a few minutes of startup is normal. The launcher pre-flights allocator fragmentation before committing to 262k context and fails in seconds with the exact fix instead of wedging for half an hour, and a 15-min systemd compaction timer keeps the allocator healthy between sessions.
 

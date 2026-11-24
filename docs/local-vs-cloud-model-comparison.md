@@ -5,7 +5,7 @@ Eight runs, one real prompt, ground truth verified on the box. Same task given t
 z.ai's GLM 5.3 tiers through two different coding clients. Every answer below was checked
 against a root-cause forensics pass done on the machine before any rating.
 
-This is the detailed companion to the [Reddit posts](../README.md#posts). All numbers here are from logged runs on
+This is the detailed companion to the Reddit posts. All numbers here are from logged runs on
 2026-10-07, 2026-10-08 and 2026-10-10.
 
 ![Flash-Next vs GLM 5.3 tiers: time to first token and decode rate](charts/local-vs-cloud.png)

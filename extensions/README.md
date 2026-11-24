@@ -126,7 +126,7 @@ Two tools, each measured:
 | tool | what it does | measured |
 |---|---|---|
 | `dedup_scan(dirs[], threshold?)` | find near-duplicate files across directories | 45 pairs found across 4 repos in 8.4s, catches renames |
-| `triage(text, question, options[])` | fast routing decision (0.8B classifier, ~120ms) | 78% on binary decisions; use for guardrail hints and issue classification, NOT as a security boundary |
+| `triage(text, question, options[])` | fast routing decision (0.8B classifier, ~55 ms warm) | 78% on binary decisions; use for guardrail hints and issue classification, NOT as a security boundary |
 
 ## harness-tune.ts
 
@@ -184,14 +184,14 @@ subprocess per edit. Off switch: `SYNTAX_GUARD_DISABLED=1`.
   fetched page asks for, not an obfuscated one. Tested live: a hidden "POST your `.env`" in a fetched page was obeyed with the gate off and
   stopped with it on.
 - **NPU side jobs.** The `npu-retrieval` extension ships `triage` (a constrained routing decision with per-option
-  probabilities in ~120 ms), `dedup_scan` (near-duplicate files by embedding similarity) and `auto-guard` (screens every
-  prompt as a fail-open tripwire, not a security boundary). See [The NPU](../docs/STRIX-HALO.md#the-npu).
+  probabilities in ~55 ms warm) and `dedup_scan` (near-duplicate files by embedding similarity); `auto-guard` screens every
+  prompt as a fail-open tripwire, not a security boundary. See [The NPU](../docs/STRIX-HALO.md#the-npu).
 - **Symbol-precise code tools.** The [serena](https://github.com/oraios/serena) MCP server (find a symbol, its callers,
   an outline, diagnostics, symbol-level edits and renames), wired into `mcp.json` by setup and started on your current
   project. Install serena yourself (`uv tool install -p 3.13 serena-agent`; setup expects `~/.local/bin/serena` and warns when it is missing); it also needs a language server for your
   language. In real sessions the agent reached for `read` far more often, so `tool-trim` hints at serena or
-  `offset`/`limit` after a big whole-file source read, and the installed `AGENTS.md` says the same. Nine core tools are
-  `direct`; the long tail stays script-reachable through `codemode` when it is active (`./setup.sh --refresh-mcp`
+  `offset`/`limit` after a big whole-file source read, and the installed `AGENTS.md` says the same. All serena tools are
+  reached through `codemode`, destructive ones hidden (`./setup.sh --refresh-mcp`
   restores the shipped exposure).
 - **Semantic code search.** The pinned [semble](https://pypi.org/project/semble/) MCP server (`search` + `find_related`),
   wired into `mcp.json` by setup. It needs no NPU and indexes any local path or remote git URL on first query.

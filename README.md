@@ -1,33 +1,28 @@
 # Local AI Harness for Coding Agents
 
-Run a coding agent on a local model, on any hardware. Built on [pi](https://github.com/earendil-works/pi). Linux, and
-Windows (beta). Tuned and measured on AMD Strix Halo.
+Run a coding agent on a local model, on any hardware. Built on [pi](https://github.com/earendil-works/pi), for Linux and
+Windows (beta), tuned and measured on AMD Strix Halo.
 
-- **Detects your GPU and RAM**, recommends an engine and model, and sizes limits to your context window.
-- **Switches engines:** Strata, strix-llama.cpp (Strix Halo), plain llama.cpp, vLLM, Ollama, LM Studio, halogen, gufo, osmos (DeepSeek-V4.1-Flash at 1M context), or a cloud model.
-- **Cuts tokens:** compressed command output, symbol-level code tools, search by meaning.
-- **Resumes after a crash:** relaunch, say "continue".
-
-```sh
-git clone https://github.com/aic0d3r/local-ai-harness && cd local-ai-harness
-./setup.sh   # detects your hardware and engines, asks a few questions, installs only after you confirm
-```
-
-On Windows, see [Windows (beta)](#windows-beta).
+- **Picks the engine and model for your hardware**, installs and starts it, and sizes limits to your context window.
+- **Switches engines:** halogen, gufo, Strata, osmos, strix-llama.cpp, plain llama.cpp, vLLM, Ollama, LM Studio, or a
+  cloud model.
+- **Stock or abliterated weights** for Qwen3.8 Flash-Next, Qwen3.8-27B and DeepSeek-V4.1-Flash, one menu toggle away.
+- **Safe engine upgrades** that roll back if the new version fails its checks.
+- **Cuts tokens:** a small prompt, compressed command output, symbol-level code tools, search by meaning.
+- **Resumes after a crash:** relaunch and say "continue" ([how](docs/SETUP.md#crash-recovery)).
 
 <div align="center">
 
 [![Release](https://img.shields.io/github/v/release/aic0d3r/local-ai-harness)](https://github.com/aic0d3r/local-ai-harness/releases/latest)
-[![Hardware](https://img.shields.io/badge/hardware-any%20%7C%20Strix%20Halo%20tuned-orange)](#install)
+[![Hardware](https://img.shields.io/badge/hardware-any%20%7C%20Strix%20Halo%20tuned-orange)](#which-engine)
 [![Cloud](https://img.shields.io/badge/cloud-optional-blueviolet)](docs/ENGINES.md#cloud-models-are-a-supported-hybrid)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 [Install](#install) •
+[Daily use](#daily-use) •
 [Which engine](#which-engine) •
-[Quick start](#quick-start) •
 [Efficiency](#efficiency) •
-[Docs](#documentation) •
-[Posts](#posts)
+[Docs](#documentation)
 
 </div>
 
@@ -35,134 +30,100 @@ On Windows, see [Windows (beta)](#windows-beta).
 
 ## Install
 
-You need pi installed first (`curl -fsSL https://pi.dev/install.sh | sh`; setup stops at "pi not found" and installs nothing
-for it) and `uvx` from [uv](https://docs.astral.sh/uv) for semantic and web search. The symbol tools are optional:
-`uv tool install -p 3.13 serena-agent` (setup warns when it is missing but does not install it on Linux).
+Needs [pi](https://pi.dev) (`curl -fsSL https://pi.dev/install.sh | sh`) and [uv](https://docs.astral.sh/uv) for search.
+Optional, for the symbol tools: `uv tool install -p 3.13 serena-agent`.
 
 ```sh
 git clone https://github.com/aic0d3r/local-ai-harness && cd local-ai-harness
-
-# Linux, any engine: start your engine first (Ollama, llama.cpp, Strata, ...), then run the guided wizard
-./setup.sh
-
-# Strix Halo with the halogen checkpoint: needs docker and the ~124 GB model files
-./setup.sh --halogen auto
-./start.sh ~/my-project
-
-# check the install any time; it ends with a live model ping
-./setup.sh --doctor
+./harness setup             # detects your hardware, asks for a model, installs and starts its engine
+./start.sh ~/my-project     # opens the coding agent on your project
 ```
 
-The wizard asks every question first, shows a summary, and installs nothing until you confirm. Flags and the full
-walkthrough: [docs/SETUP.md](docs/SETUP.md). Do not clone the whole model repo (~190 GB); `--halogen auto` fetches
-exactly the files you need.
+Setup and `./harness config` are interactive menus (arrow keys, Esc goes back), so there are no flags to remember.
+Setup asks every question first and installs nothing until you confirm. It installs and starts halogen, gufo, Strata,
+osmos and strix-llama.cpp itself; start any other engine (Ollama, vLLM, LM Studio, llama.cpp) before running it.
+`./setup.sh --doctor` checks the install with a live model ping. Flags and the full walkthrough:
+[docs/SETUP.md](docs/SETUP.md).
 
 ### Windows (beta)
 
-`setup.ps1` is verified on a clean Windows 11 VM against a stub engine, not yet on Windows hardware with a real Strata.
-In PowerShell:
+Verified on a clean Windows 11 VM against a stub engine, not yet on real hardware. In PowerShell:
 
 ```powershell
-# 1. Install Strata with its own installer and start it: https://github.com/Niko1221/Strata
-# 2. Install pi
-irm https://pi.dev/install.ps1 | iex
-# 3. Get the harness and set pi up against the running Strata
-git clone https://github.com/aic0d3r/local-ai-harness
-cd local-ai-harness
-powershell -ExecutionPolicy Bypass -File .\setup.ps1   # offers Git, Python, uv and Serena through winget; asks before each
+# 1. Install and start Strata: https://github.com/Niko1221/Strata
+irm https://pi.dev/install.ps1 | iex   # 2. install pi
+git clone https://github.com/aic0d3r/local-ai-harness; cd local-ai-harness
+powershell -ExecutionPolicy Bypass -File .\setup.ps1   # 3. offers Git and Python through winget, then uv and Serena
 ```
 
-No Git yet? Download the repo as a ZIP from GitHub, extract it, and run the last command in that folder.
-`setup.ps1` never installs or starts an engine, and the `./harness` wizard, launchers and sidecar are Linux only. Steps
-and limits: [docs/WINDOWS.md](docs/WINDOWS.md).
+`setup.ps1` wires pi to the running Strata; it never installs or starts an engine. Details:
+[docs/WINDOWS.md](docs/WINDOWS.md).
+
+## Daily use
+
+```sh
+./harness config            # menu: switch engine, model or weights; sidecar, update check; stop a running engine
+./start.sh ~/my-project     # start the engine if it is down, open pi (add -c to resume the last session)
+./harness status            # what pi is pointed at
+./harness tune              # re-measure speed and re-size the limits
+./harness monitor           # live prefill/decode speed
+```
+
+All commands and uninstall: [docs/SETUP.md](docs/SETUP.md).
+
+**Private by default:** no API key; the weights and your code stay on this machine. Only these reach the internet: web
+search, a daily `git fetch` for harness updates (`HARNESS_NO_UPDATE_CHECK=1` turns it off), the engine release check if
+you enable it, and downloads you confirm. Cloud models work as a [hybrid](docs/ENGINES.md#cloud-models-are-a-supported-hybrid).
 
 ## Which engine
 
-Any OpenAI-compatible server works. Start it, run `./setup.sh` (or `./harness use <engine>`), and skip `--halogen`. Only
-the Strix Halo numbers are measured here; nothing on NVIDIA or Apple was tested. Off halogen you lose the NPU tools
+Setup recommends an engine for your hardware. Only Strix Halo is measured here. Off halogen you lose the NPU tools
 ([list](docs/ENGINES.md#what-breaks-on-another-engine)).
 
 | your hardware | engine | why |
 |---|---|---|
-| **Strix Halo** (Ryzen AI Max, 128 GB unified) | **halogen** | fastest measured, plus the NPU tools (guard, triage, dedup) |
-| Strix Halo, want open source | gufo or Strata | both open, both lose the NPU tools; Strata decodes faster, gufo prefills faster |
-| **NVIDIA RTX 20-50 / AMD RX 7000-9000, 12 GB+ VRAM** | **[Strata](docs/ENGINES.md#strata-the-pick-for-nvidia-and-amd-desktop-gpus)** | built for it; not measured here. `./harness recommend` picks the model by RAM: an ISTA pack of Flash-Next, or [Qwen3.6-35B-A3B](docs/ENGINES.md#other-models-on-strata-and-gufo) from 32 GB |
-| Windows (beta) | Strata, then `setup.ps1` | VM-tested only; see [docs/WINDOWS.md](docs/WINDOWS.md) |
-| Apple Silicon, anything else | run Strata natively and point pi at it (`./setup.sh --strata <url>`), or llama.cpp / MLX / Ollama / LM Studio | not measured here; the launchers are bash/Linux |
+| **Strix Halo** (Ryzen AI Max, 128 GB unified) | **halogen** | Flash-Next 125B, fastest measured, plus the NPU tools (guard, triage, dedup) |
+| Strix Halo, open source | gufo or Strata | Strata decodes faster, gufo prefills faster |
+| Strix Halo, another model | picked per model | Qwen3.6-35B-A3B on **strix-llama.cpp** (85 t/s decode), Qwen3.8-27B on **gufo**, DeepSeek-V4.1-Flash (~768B) on **osmos** at 1M context from one box, Inkling 2 Mini on osmos or Strata |
+| **NVIDIA RTX 20-50 / AMD RX 7000-9000, 12 GB+ VRAM** | **[Strata](docs/ENGINES.md#strata-the-pick-for-nvidia-and-amd-desktop-gpus)** | built for it; not measured here. Flash-Next ISTA pack, or [Qwen3.6-35B-A3B](docs/ENGINES.md#other-models-on-strata-and-gufo) from 32 GB |
+| Apple Silicon, anything else | Strata natively (`./setup.sh --strata <url>`), llama.cpp, MLX, Ollama or LM Studio | not measured here; the launchers are Linux only |
 
-Measured speeds for halogen, gufo and Strata: [BENCHMARKS.md](docs/BENCHMARKS.md#engines-on-strix-halo).
-
-## Quick start
-
-```sh
-./start.sh ~/my-project   # starts your engine if it is down, re-checks the install, opens pi on it
-./harness status          # what pi is pointed at
-./harness use <engine>    # switch engine or model
-./harness tune            # re-run the speed probe and re-size the limits
-./harness monitor         # live prefill/decode dashboard for the active engine
-```
-
-Private by default: no API key, and the weights and your code stay on this machine. halogen is launched with no download
-setting, but it is a closed image, so that is configuration, not a network sandbox. What reaches the internet: the
-DuckDuckGo search tool (and Jina if you add a key), a once-a-day `git fetch` of this repo to tell you about updates
-(`HARNESS_NO_UPDATE_CHECK=1` turns it off), the engine release check if you enable it, and the downloads you confirm. Cloud models are a supported [hybrid](docs/ENGINES.md#cloud-models-are-a-supported-hybrid); screening, search
-and compaction stay on-device either way. All commands, daily use and uninstall: [docs/SETUP.md](docs/SETUP.md).
+Speeds: [BENCHMARKS.md](docs/BENCHMARKS.md#engines-on-strix-halo) and [ENGINES.md](docs/ENGINES.md).
 
 ## Efficiency
 
-Every layer keeps tokens and calls off the main model. Locally that cuts prefill time; on a cloud model it cuts the bill.
+Every layer keeps tokens off the main model: faster prefill locally, a smaller bill on cloud.
 
-- **Small, stable prompt prefix:** 8 tools declared instead of 25 (the rest via codemode) and nothing rewrites the
-  system prompt mid-session: a cold turn on osmos 31.4 s to 17.5 s (13,968 to 7,952 tokens), cached turns stay cached.
-- **Search routing:** semble first for finding code (-22% wall time, -38% output tokens on osmos), serena once the task
-  is about a known symbol (-16% wall time, -38% tool output read).
-- **Symbol tools (serena):** a function body in 822 chars instead of 13,980 to read the file.
-- **Code search (semble):** 17/18 vs 13/18 top-3 hits, 2-3x faster queries than the NPU pipeline it replaced.
-- **Sidecar for commits and compaction:** large commit diffs 18.5k to 7.1k tokens; compaction ~24 s non-blocking vs ~52 s.
-- **Screenshots:** a 1080×2400 phone screenshot drops from ~1,500 to ~600 Claude tokens.
-- Also: `rtk` output compression, `tool-trim`, `image-prune`, a warm prompt cache, and a prompt-injection gate.
+- **Small, stable prompt:** 8 tools declared instead of 25, nothing rewrites the system prompt mid-session. A cold
+  turn on osmos: 13,968 to 7,952 tokens, 31.4 s to 17.5 s.
+- **Search routing:** semble first for finding code (-22% wall time, -38% output tokens), serena for a known symbol
+  (-16% wall time, -38% tool output).
+- **Symbol tools:** a function body in 822 chars instead of 13,980 for the whole file.
+- **Sidecar for commits and compaction:** commit diffs 18.5k to 7.1k tokens; compaction ~24 s in the background vs ~52 s.
+- **Screenshots:** a phone screenshot from ~1,500 to ~600 tokens.
+- Also: `rtk` output compression, `tool-trim`, `image-prune`, a warm prompt cache, a prompt-injection gate.
 
-Every lever and how it was measured: [BENCHMARKS.md](docs/BENCHMARKS.md#efficiency-levers). What each extension does:
+How each was measured: [BENCHMARKS.md](docs/BENCHMARKS.md#efficiency-levers). Extensions:
 [extensions/README.md](extensions/README.md).
-
-## Crash recovery
-
-Kill pi or the server mid-task, then relaunch with `./start.sh <dir> -c` (pi's continue: the last session in that
-directory, whole) and say "continue". `progress-tracker` also writes a checkpoint (task, last state, changed files) to
-`~/.pi/agent/progress/` for you to read; it is not fed to the model, so it costs no context and no cache miss (set
-`PI_PROGRESS_FILE` per task for parallel work, `/progress-reset` to clear it).
-
-## Strix Halo reference setup
-
-The numbers in this repo come from an AMD Ryzen AI Max+ 395 running a 125B Qwen3.8 Flash-Next on the iGPU with
-**262k context**, NPU models screening and routing prompts, and a ling-tiny sidecar writing commits and summaries. The
-stack, model files, NPU details and the halogen upgrade procedure: [docs/STRIX-HALO.md](docs/STRIX-HALO.md).
 
 ## Evidence
 
 ![Local Qwen3.8 Flash-Next 125B vs GLM 5.3 cloud tiers on Strix Halo: time to first token and decode tokens per second](docs/charts/local-vs-cloud.png)
 
-Measured on an ASUS ROG Flow Z13 (Ryzen AI Max+ 395, Radeon 8060S, 128 GB) at 70 W sustained. More charts and every
-number in this README, with its logged run: [BENCHMARKS.md](docs/BENCHMARKS.md).
+ASUS ROG Flow Z13 (Ryzen AI Max+ 395, 128 GB) at 70 W: Flash-Next 125B on the iGPU at 262k context, NPU models
+screening prompts, a ling-tiny sidecar for commits and summaries. The stack: [STRIX-HALO.md](docs/STRIX-HALO.md); every
+number with its logged run: [BENCHMARKS.md](docs/BENCHMARKS.md).
 
 ## Documentation
 
-- **[SETUP.md](docs/SETUP.md):** the wizard step by step, flags, all commands, daily use, uninstall.
-- **[ENGINES.md](docs/ENGINES.md):** which engine fits which hardware, what breaks off halogen, weights, cloud hybrid.
-- **[WINDOWS.md](docs/WINDOWS.md):** the beta setup steps and what is tested.
+- **[SETUP.md](docs/SETUP.md):** the wizard, flags, all commands, crash recovery, uninstall.
+- **[ENGINES.md](docs/ENGINES.md):** engines, models, weights, what breaks off halogen, cloud hybrid.
 - **[STRIX-HALO.md](docs/STRIX-HALO.md):** the halogen stack, model files, NPU, upgrading.
-- **[BENCHMARKS.md](docs/BENCHMARKS.md):** measured numbers and methodology.
-- **[Local vs cloud comparison](docs/local-vs-cloud-model-comparison.md):** seven runs on one real debugging task.
-- **[llama.cpp path](docs/LLAMACPP.md)** and **[Operations](docs/OPS.md):** the full-control engine; context size,
-  watching speed, troubleshooting.
-- **[extensions/README.md](extensions/README.md)** and **[CHANGELOG.md](CHANGELOG.md):** per-extension notes; release
-  history.
-
-## Posts
-
-- [Qwen3.8-27B on Strix Halo at 31 t/s decode, the full stack guide](https://www.reddit.com/r/LocalLLaMA/comments/1vsw6nz/) (r/LocalLLaMA)
-- [Running a local coding agent on Strix Halo with pi + llama.cpp](https://www.reddit.com/r/StrixHalo/comments/1w6c5nz/) (r/StrixHalo)
-- [Qwen3.8-Flash-Next on Strix Halo: 40 t/s sustained decode](https://www.reddit.com/r/StrixHalo/comments/1w6cf5t/) (r/StrixHalo)
+- **[BENCHMARKS.md](docs/BENCHMARKS.md)** and **[local vs cloud](docs/local-vs-cloud-model-comparison.md):** measured
+  numbers; eight runs on one real debugging task.
+- **[LLAMACPP.md](docs/LLAMACPP.md)**, **[OPS.md](docs/OPS.md)**, **[WINDOWS.md](docs/WINDOWS.md):** llama.cpp,
+  context size and troubleshooting, Windows.
+- **[extensions/README.md](extensions/README.md)** and **[CHANGELOG.md](CHANGELOG.md).**
 
 ## License
 
