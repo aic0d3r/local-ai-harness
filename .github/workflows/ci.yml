@@ -45,3 +45,4 @@ jobs:
         run: |
           bash tests/upgrade-osmos.test.sh
           bash tests/upgrade-strata.test.sh
+          bash tests/upgrade-llamacpp.test.sh

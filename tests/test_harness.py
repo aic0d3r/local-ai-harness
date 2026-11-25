@@ -58,7 +58,18 @@ for img, d, want in (("0.2.13", "v0.2.9", "0.2.13"), ("", "v0.2.9", "v0.2.9"), (
     h._have = lambda e, s, i=img, dd=d: {"image": i, "dir": dd}[s[0]]
     assert h.engine_have("strata") == want, (img, d)
 h._have = _src
-assert h.PROFILES["engines"]["llamacpp"]["update"]["have"].startswith("image ") and h.engine_update("llamacpp") == ""  # shown, never checked upstream
+# strix-llama.cpp, releases only: offered when the running image's commit (revision label) does not contain the latest release
+_eh, _http, _tool = h.engine_have, h.http, h.tool
+h.engine_have = lambda e: "b13600"
+h.tool = lambda *a, **k: types.SimpleNamespace(stdout="abc123\n")
+seen = []
+for status, want in (("behind", True), ("diverged", True), ("ahead", False), ("identical", False)):
+    h.http = lambda url, *a, _s=status, **k: (seen.append(url), __import__("io").BytesIO(json.dumps({"tag_name": "v1.2.0", "status": _s}).encode()))[1]
+    msg = h.engine_update("llamacpp")
+    assert bool(msg) == want and (not want or ("v1.2.0 available (running b13600)" in msg and "upgrade-llamacpp.sh" in msg)), (status, msg)
+assert seen[-1].endswith("/compare/v1.2.0...abc123"), seen
+h.engine_have, h.http, h.tool = _eh, _http, _tool
+assert h.upgrader("llamacpp").endswith("upgrade-llamacpp.sh")
 assert h.engine_title("gufo", None) == "gufo · no model" and "/" not in h.engine_title("strata", "flash-next-iq3_s")
 q = h.bench("llamacpp", "Qwen3-8B", runs=2, quick=True)  # tune is this quick subset: one prefill cell, decode repeats
 assert set(q["median"]) == {"decode_code", "prefill_8192"} and q["quick"], q

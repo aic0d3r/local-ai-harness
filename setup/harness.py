@@ -1904,9 +1904,15 @@ def engine_update(engine):
     try:
         have = engine_have(engine)
         src, repo = u["latest"].split(":", 1)
-        if src == "gh":
+        if src in ("gh", "ghrev"):
             new = json.load(http(f"https://api.github.com/repos/{repo}/releases/latest"))["tag_name"]
-        else:  # ghcr: highest x.y.z tag
+        if src == "ghrev":  # strix-llama.cpp: releases (v1.1.0), but images are tagged by build: does the image's commit contain it?
+            img = subprocess.run(["bash", os.path.join(REPO, u["have"].split()[1]), "--print-image"], capture_output=True, text=True).stdout.strip()
+            rev = tool("docker", "image", "inspect", "-f", '{{index .Config.Labels "org.opencontainers.image.revision"}}', img).stdout.strip()
+            if json.load(http(f"https://api.github.com/repos/{repo}/compare/{new}...{rev}"))["status"] in ("ahead", "identical"):
+                return ""
+            return f"{ename(engine)} {new} available (running {have}): {u['how']}"
+        if src == "ghcr":  # highest x.y.z tag
             tok = json.load(http(f"https://ghcr.io/token?scope=repository:{repo}:pull"))["token"]
             req = urllib.request.Request(f"https://ghcr.io/v2/{repo}/tags/list?n=1000", headers={"Authorization": f"Bearer {tok}"})
             tags = [t for t in json.load(urllib.request.urlopen(req, timeout=3))["tags"] if re.fullmatch(r"\d+\.\d+\.\d+", t)]
@@ -1920,7 +1926,7 @@ def engine_update(engine):
 
 
 def upgrader(eng):
-    """scripts/upgrade-<engine>.sh (halogen, gufo): pull, restart, check, pin, roll back on failure. -> path or None."""
+    """scripts/upgrade-<engine>.sh (halogen, gufo, strata, osmos, llamacpp): pull, restart, check, pin, roll back on failure. -> path or None."""
     p = os.path.join(REPO, "scripts", f"upgrade-{eng}.sh")
     return p if os.path.exists(p) else None
 

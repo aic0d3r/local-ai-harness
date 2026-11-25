@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Per-user image pins. scripts/upgrade-halogen.sh and upgrade-gufo.sh store a validated newer version HERE instead of
+# Per-user image pins. scripts/upgrade-halogen.sh, upgrade-gufo.sh and upgrade-llamacpp.sh store a validated newer version HERE instead of
 # editing the tracked launchers, so an engine upgrade never dirties the checkout (a dirty tree blocks harness updates).
 # The launchers keep the repo's own reviewed pin as the default; a stored pin only counts while the launcher default is
 # still the one it was made on top of (BASE_<name>), so a harness update that ships a newer pin wins.

@@ -14,7 +14,11 @@ Use `./setup.sh --no-halogen` for the pi wiring on this path, or wire it by hand
 (`llama-b<build>-ubuntu-vulkan-x64.zip`, `-ubuntu-rocm-gfx1151-x64.zip`, ROCm 10.1 bundled) and container images --
 `ghcr.io/halo-box/strix-llama.cpp:server-vulkan` (1.3 GB, Mesa RADV bundled, entrypoint `/app/llama-server`) and
 `:server-rocm`. `server/start-qwen36.sh` runs the Vulkan image (pinned by digest: `server-vulkan-b13600`, Halobox v1.1.0 +
-11 commits) for Qwen3.6-35B-A3B, so nothing is built here. Release zips: v1.1.0 is build `b1069`
+11 commits) for Qwen3.6-35B-A3B, so nothing is built here. Updates follow releases only: images are tagged by build
+(no `:v1.1.0`), so the update check offers one when the pinned image's commit does not contain the latest GitHub release, and
+`scripts/upgrade-llamacpp.sh` then pulls the newest build, confirms it contains that release, restarts on it, runs the
+acceptance check and stores the new digest per user (`harness-pins`) only if it passes, else restarts the old pin.
+`scripts/upgrade-llamacpp.sh b<N>` installs a specific build the same way; `LLAMACPP_BACKEND=rocm` upgrades the ROCm image. Release zips: v1.1.0 is build `b1069`
 (`llama-b1069-ubuntu-vulkan-x64.zip` / `-ubuntu-rocm-gfx1151-x64.zip`); they keep the execute bit now, no `chmod +x`.
 
 ```bash

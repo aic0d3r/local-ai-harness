@@ -17,6 +17,6 @@ For a pull request:
   bash tests/upgrade-osmos.test.sh                           # scripts/upgrade-osmos.sh against a fake libosmos repo (needs :18091 free)
   ```
 
-  CI (`.github/workflows/ci.yml`) runs the same four plus `tests/upgrade-strata.test.sh` and `shellcheck -S error` on every push to master and every pull request.
+  CI (`.github/workflows/ci.yml`) runs the same four plus `tests/upgrade-strata.test.sh`, `tests/upgrade-llamacpp.test.sh` and `shellcheck -S error` on every push to master and every pull request.
 
 - New hardware or engine paths: say what you tested on and what you didn't, as the Windows page does.

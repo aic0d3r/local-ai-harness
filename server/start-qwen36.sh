@@ -16,6 +16,7 @@
 #   --print-model   the GGUF it serves (empty when none is on disk)
 #   --print-image   the image it runs
 #   --print-lora    the abliteration LoRA path (Flash-Next only; may not exist yet)
+#   --check         exit 0 when every model file it would serve is on disk
 # Qwen3.8-Flash-Next instead when the wizard's saved model is flash-next (harness-model; LLAMACPP_FAMILY overrides): the
 # stock Unsloth UD-Q4_K_XL that gufo and Strata share (scripts/download-stock.sh), and with the saved weights answer
 # "abliterated" (LLAMACPP_WEIGHTS overrides) huihui's v2 abliteration as a 2.3 MB rank-1 LoRA on top (--lora,
@@ -30,7 +31,10 @@ SPEC=${QWEN36_SPEC:-2}
 BATCH=${QWEN36_BATCH:-2048}
 VULKAN_IMAGE=ghcr.io/halo-box/strix-llama.cpp@sha256:30370c206723e1c110052e7f1a82cbbf71ca1c7dd865aeca3461df394bc03cc1  # server-vulkan-b13600
 ROCM_IMAGE=ghcr.io/halo-box/strix-llama.cpp@sha256:1eaf1f2e7b2a7c02d4b8fd559dd7f65a81fdd6968b8ed08af492cb1559be5bd1    # server-rocm-b13600
-[ "${LLAMACPP_BACKEND:-vulkan}" = rocm ] && IMAGE=${QWEN36_IMAGE:-$ROCM_IMAGE} || IMAGE=${QWEN36_IMAGE:-$VULKAN_IMAGE}
+# scripts/upgrade-llamacpp.sh stores a validated newer digest per user (harness-pins); a harness update with a newer default wins
+. "$HERE/../scripts/lib-pins.sh"
+[ "${LLAMACPP_BACKEND:-vulkan}" = rocm ] && IMAGE=${QWEN36_IMAGE:-$(pin_value LLAMACPP_ROCM_IMAGE "$ROCM_IMAGE")} \
+  || IMAGE=${QWEN36_IMAGE:-$(pin_value LLAMACPP_VULKAN_IMAGE "$VULKAN_IMAGE")}
 
 find_gguf() {
   [ -n "${QWEN36_GGUF:-}" ] && { echo "$QWEN36_GGUF"; return; }
@@ -78,11 +82,12 @@ case "${1:-}" in
   --print-model) echo "$GGUF"; exit 0 ;;
   --print-image) echo "$IMAGE"; exit 0 ;;
 esac
-[ -n "$GGUF" ] || {
+[ -f "$GGUF" ] || {  # -f: a QWEN36_GGUF pointing nowhere too
   echo "$GGUF_NAME is not on disk: put it in ~/LLMBench/models/qwen36-35b-a3b/, set QWEN36_GGUF to its path, or" >&2
   echo "let Strata download it (scripts/install-strata.sh) - this launcher reuses that copy. ~22.4 GB." >&2
   exit 1
 }
+[ "${1:-}" = --check ] && exit 0  # upgrade-llamacpp.sh's preflight: the model files are on disk (each missing one exits 1, named)
 # one engine at a time on the shared heap: a Strata (or another llama-server) on the same port must go first
 if [ -n "$(docker ps -q --filter "publish=$PORT")" ]; then
   echo "  something already serves :$PORT in docker (stop it first: ./harness config, running; or docker stop <name>)" >&2

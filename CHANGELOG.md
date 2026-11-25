@@ -3,6 +3,11 @@
 <!-- One block per section per release, in the order Added, Changed, Fixed. Add new entries to the
      existing block instead of opening a second one, so a release never has two "### Fixed" lists. -->
 
+## Unreleased
+
+### Added
+- strix-llama.cpp gets the same safe upgrade as halogen, gufo, Strata and osmos: releases only - halo-box tags images by build, not release, so the update check offers one when the pinned image's commit does not contain the latest GitHub release (`v1.1.0`), and `scripts/upgrade-llamacpp.sh` pulls the newest build, confirms it contains that release (`b<N>` picks a build instead), restarts `server/start-qwen36.sh` on it (same backend), runs the acceptance check, and pins the new digest per user in `harness-pins` only on success; any failure restarts the old pin. `server/start-qwen36.sh --check` is its preflight (a missing model file refuses before anything is stopped). Tested against a fake docker in `tests/upgrade-llamacpp.test.sh`.
+
 ## 2.2.0 - 2026-11-24
 
 Model-first setup on Strix Halo and more engines: osmos (DeepSeek-V4.1-Flash), Strata and llama.cpp from ready-made Docker images, Qwen3.6-35B-A3B and Qwen3.8-27B Q8, a custom-endpoint option, `./harness bench`, and cold prompts halved.
