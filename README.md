@@ -1,5 +1,7 @@
 # Local AI Harness for Coding Agents
 
+**Install, update and switch local LLM engines and models.**
+
 Run a coding agent on a local model, on any hardware. Built on [pi](https://github.com/earendil-works/pi), for Linux and
 Windows (beta), tuned and measured on AMD Strix Halo.
 
