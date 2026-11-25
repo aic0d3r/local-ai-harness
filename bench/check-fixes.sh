@@ -14,7 +14,7 @@ T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 ( mkdir -p "$T/pi/agent/extensions" "$T/home/.config/systemd/user"
   echo x > "$T/pi/agent/settings.json"; echo x > "$T/pi/agent/rag-index.py"; echo x > "$T/home/.config/systemd/user/ling-tiny.service"
   PI_HOME="$T/pi" HOME="$T/home" AG="$T/pi/agent" BACKUP="$T/bk.tgz"
-  eval "$(grep -E 'TAR_ARGS\+?=' scripts/uninstall.sh)"
+  eval "$(awk '/^AGPARENT=/{f=1} /^tar czf/{f=0} f' scripts/uninstall.sh)"  # the whole block that builds TAR_ARGS (STATE spans lines)
   tar czf "$BACKUP" "${TAR_ARGS[@]}" 2>/dev/null
   M=$(tar tzf "$BACKUP" 2>/dev/null)
   echo "$M" | grep -q "ling-tiny.service" && echo "$M" | grep -q "agent/rag-index.py" ) \
@@ -44,7 +44,9 @@ done
 
 
 # [7] git-commit guard + message tidy (the real exported functions; bun imports .ts directly)
-if command -v bun >/dev/null; then bun -e 'import { isDirectCommit as t, tidyMessage as m } from "./extensions/ling-tiny-commit.ts";
+# pi stubbed as in tests/commit-guard.test.ts: the real package only resolves through bun's auto-install cache, which breaks offline
+if command -v bun >/dev/null; then bun -e 'import { mock } from "bun:test"; mock.module("@earendil-works/pi-coding-agent", () => ({ getAgentDir: () => "/tmp" }));
+const { isDirectCommit: t, tidyMessage: m } = await import("./extensions/ling-tiny-commit.ts");
 for (const c of ["git commit -m x", "git add -A && git commit -m x", "git commit --amend -m y", "cd r; git commit", "git commit -m \"fix: it\"", "git -C repo commit -am x"])
   if (!t(c)) throw new Error("should block: " + c);
 for (const c of ["git commit --amend --no-edit", "git commit --amend -C HEAD", "echo committing history", "git log --oneline", "git log -- src/commit.ts", "git log --grep commit",
@@ -83,9 +85,9 @@ else echo "  skip: task-label gate check needs bun"; fi
 
 # [11] launcher reserveTokens sync (the real heredoc): a 262k-day /tune value must not survive a 65k day
 R=$(T2=$(mktemp -d); echo '{"compaction":{"reserveTokens":60144}}' > "$T2/settings.json"; echo '{}' > "$T2/models.json"
-  awk '/python3 - "\$CTX" <<.PY./{f=1;next} f&&/^PY$/{exit} f' server/start-halogen.sh > "$T2/s.py"
-  PI_CODING_AGENT_DIR="$T2" python3 "$T2/s.py" 65536 >/dev/null; python3 -c "import json;print(json.load(open('$T2/settings.json'))['compaction']['reserveTokens'])"; rm -rf "$T2")
-[ "$R" = 10240 ] && ok "launcher resets a reserve that no longer fits the window (60144 -> 10240 at 65k)" \
+  awk '/python3 - "\$CTX" .*<<.PY./{f=1;next} f&&/^PY$/{exit} f' server/start-halogen.sh > "$T2/s.py"
+  PI_CODING_AGENT_DIR="$T2" python3 "$T2/s.py" 65536 "$PWD/setup" >/dev/null; python3 -c "import json;print(json.load(open('$T2/settings.json'))['compaction']['reserveTokens'])"; rm -rf "$T2")
+[ "$R" = 16384 ] && ok "launcher resets a reserve that no longer fits the window (60144 -> 16384, a quarter of 65k)" \
   || bad "launcher kept reserve $R on a 65k window"
 
 [ "$FAIL" = 0 ] && echo "check-fixes: all checks pass" || { echo "check-fixes: FAILURES above"; exit 1; }
