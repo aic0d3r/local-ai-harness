@@ -3,7 +3,9 @@
 <!-- One block per section per release, in the order Added, Changed, Fixed. Add new entries to the
      existing block instead of opening a second one, so a release never has two "### Fixed" lists. -->
 
-## Unreleased
+## 2.3.0 - 2026-11-25
+
+Safe updates: the harness itself and strix-llama.cpp now update only to tagged releases, and both roll back if the update fails.
 
 ### Added
 - Harness self-update rolls back: if `./harness refresh` fails after `/harness-update`, the checkout resets to the previous commit and re-installs it. Without pi (`--no-pi`), `./start.sh` prints the same once-a-day notice (shared stamp, `HARNESS_NO_UPDATE_CHECK=1` still turns it off). Tested in `tests/harness-update.test.ts` and `tests/test_harness.py`.
