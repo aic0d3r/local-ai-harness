@@ -5,30 +5,38 @@
 Run a coding agent on a local model, on any hardware. Built on [pi](https://github.com/earendil-works/pi), for Linux and
 Windows (beta), tuned and measured on AMD Strix Halo.
 
-- **Picks the engine and model for your hardware**, installs and starts it, and sizes limits to your context window.
-- **Switches engines:** halogen, gufo, Strata, osmos, strix-llama.cpp, plain llama.cpp, vLLM, Ollama, LM Studio, or a
-  cloud model.
-- **Stock or abliterated weights** for Qwen3.8 Flash-Next, Qwen3.8-27B and DeepSeek-V4.1-Flash, one menu toggle away.
-- **Safe engine upgrades** that roll back if the new version fails its checks.
-- **Cuts tokens:** a small prompt, compressed command output, symbol-level code tools, search by meaning.
-- **Resumes after a crash:** relaunch and say "continue" ([how](docs/SETUP.md#crash-recovery)).
+- **Install:** detects your hardware, recommends an engine and model, then installs, starts and tunes it.
+- **Update:** checks for new engine releases; halogen, Strata, gufo and osmos upgrade from the menu and roll back if
+  the new version fails its checks.
+- **Switch:** halogen, gufo, Strata, osmos, strix-llama.cpp, plain llama.cpp, vLLM, Ollama, LM Studio or a cloud model;
+  stock or abliterated weights for Qwen3.8 Flash-Next, Qwen3.8-27B and DeepSeek-V4.1-Flash. One menu, limits re-sized
+  on every switch.
+- **Plus:** fewer tokens per turn ([efficiency](#efficiency)), crash recovery ([how](docs/SETUP.md#crash-recovery)) and
+  NPU side jobs on Strix Halo.
 
 <div align="center">
 
 [![Release](https://img.shields.io/github/v/release/aic0d3r/local-ai-harness)](https://github.com/aic0d3r/local-ai-harness/releases/latest)
-[![Hardware](https://img.shields.io/badge/hardware-any%20%7C%20Strix%20Halo%20tuned-orange)](#which-engine)
+[![Hardware](https://img.shields.io/badge/hardware-any%20%7C%20Strix%20Halo%20tuned-orange)](#what-setup-picks-for-you)
 [![Cloud](https://img.shields.io/badge/cloud-optional-blueviolet)](docs/ENGINES.md#cloud-models-are-a-supported-hybrid)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 [Install](#install) •
 [Daily use](#daily-use) •
-[Which engine](#which-engine) •
+[What setup picks](#what-setup-picks-for-you) •
 [Efficiency](#efficiency) •
 [Docs](#documentation)
 
 </div>
 
 ![Local AI harness: one command, ./harness use, switches the coding agent between Strata, halogen, gufo, llama.cpp, vLLM, Ollama and LM Studio. Linux, Windows (beta)](docs/brand/hero.png)
+
+## Why not just Ollama or LM Studio?
+
+Ollama and LM Studio each run models in their own engine. This harness installs and upgrades the engines tuned for your
+hardware (halogen, Strata, gufo, osmos, strix-llama.cpp), switches between them and any Ollama, LM Studio, vLLM or
+llama.cpp you already run, and re-sizes the coding agent's limits for each engine and model. Keep Ollama: it is one of
+the engines you can switch to.
 
 ## Install
 
@@ -64,8 +72,9 @@ powershell -ExecutionPolicy Bypass -File .\setup.ps1   # 3. offers Git and Pytho
 ## Daily use
 
 ```sh
-./harness config            # menu: switch engine, model or weights; sidecar, update check; stop a running engine
 ./start.sh ~/my-project     # start the engine if it is down, open pi (add -c to resume the last session)
+./harness config            # menu: switch engine, model or weights; upgrade the engine; sidecar; stop an engine
+./harness update-check      # newer engine release? upgrade it from ./harness config (rolls back on failure)
 ./harness status            # what pi is pointed at
 ./harness tune              # re-measure speed and re-size the limits
 ./harness monitor           # live prefill/decode speed
@@ -77,7 +86,7 @@ All commands and uninstall: [docs/SETUP.md](docs/SETUP.md).
 search, a daily `git fetch` for harness updates (`HARNESS_NO_UPDATE_CHECK=1` turns it off), the engine release check if
 you enable it, and downloads you confirm. Cloud models work as a [hybrid](docs/ENGINES.md#cloud-models-are-a-supported-hybrid).
 
-## Which engine
+## What setup picks for you
 
 Setup recommends an engine for your hardware. Only Strix Halo is measured here. Off halogen you lose the NPU tools
 ([list](docs/ENGINES.md#what-breaks-on-another-engine)).
