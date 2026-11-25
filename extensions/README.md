@@ -209,7 +209,7 @@ subprocess per edit. Off switch: `SYNTAX_GUARD_DISABLED=1`.
   `check-sidecar.sh` + `check-fixes.sh` (offline regression checks), plus `models.json.example` and the compaction
   snippet. Two numbers there must be understood, not copied: `reserveTokens` is per-model, and on halogen `maxTokens`
   must stay <= 8192 or the server 400s past ~32.7k ctx.
-- **Also shipped.** `harness-tune` (`/tune` live knobs), `harness-update` (daily behind-origin notice +
+- **Also shipped.** `harness-tune` (`/tune` live knobs), `harness-update` (daily new-release notice +
   `/harness-update`; `HARNESS_AUTOUPDATE=1` applies it at startup), `turn-timer`, `subagent/` (worker/scout/reviewer/
   planner, session-model inheritance), `/gauntlet` and `/speedtest` prompt templates, and opt-in voice
   (`./setup.sh --voice`: [privateer-speak](https://npm.im/privateer-speak) on a local Lemonade server, whisper STT 0.43 s,
@@ -222,7 +222,7 @@ subprocess per edit. Off switch: `SYNTAX_GUARD_DISABLED=1`.
 
 - `harness-profile/` - shared helper, not a feature: loads the active engine profile from `<agent dir>/harness-profile.json` (legacy halogen defaults if absent) and registers nothing; imported by the ling-tiny-*, harness-tune, auto-guard and npu-retrieval extensions.
 - `harness-status/` - `/usage` runs `scripts/usage-stats.py` inside pi; a footer status shows halogen load from `:8731/metrics` (hidden when unreachable); on any other engine a `speed` footer times each reply client-side (logged to `harness-speed.jsonl` for `./harness monitor`); and a session already open in another live pi process (Paseo's background agent, a second terminal) gets a warning at start, from a pid lock in `<agent dir>/session-locks/`.
-- `harness-update.ts` - once-a-day notice when the harness repo is behind origin; `/harness-update` applies it (fast-forward only, refuses on a dirty tree, then `./harness refresh` re-installs for the engine you saved; `HARNESS_NO_UPDATE_CHECK=1` turns the daily `git fetch` off).
+- `harness-update.ts` - once-a-day notice when a newer harness release (`vX.Y.Z` tag) is out; `/harness-update` applies it (fast-forward to the tag only, refuses on a dirty tree, then `./harness refresh` re-installs for the engine you saved, and a failed refresh resets to the previous commit and re-installs that; `HARNESS_NO_UPDATE_CHECK=1` turns the daily `git fetch` off).
 - `tool-trim/` - keeps big tool output out of context: cleans and caps long bash output (full text saved to a file) and turns identical re-reads of unchanged files into a pointer. Off switch: `TOOL_TRIM_DISABLED=1`.
 - `turn-timer.ts` - per-turn elapsed wall time in the footer.
 - `work-guard.ts` - enforces AGENTS.md rules: blocks source edits via bash, blocks UI edits until the ui-ux-work skill is read, warns on committing UI changes with no render viewed. Off switch: `WORK_GUARD_DISABLED=1`.

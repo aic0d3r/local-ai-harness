@@ -6,9 +6,9 @@ The full walkthrough of `./setup.sh`, the `./harness` commands and `./start.sh`.
 
 `./setup.sh` in a terminal (same as `./harness setup`) runs a wizard that works for any engine:
 
-0. **Checks for harness updates.** If your checkout is behind origin it lists the new commits, offers
-   `git pull --ff-only`, then restarts on the new code. It stays quiet offline, with local edits, or when there is
-   nothing new.
+0. **Checks for harness updates.** If a newer release (`vX.Y.Z` tag) is out it lists the new commits, offers
+   a fast-forward to that tag, then restarts on the new code. Unreleased master commits are not offered. Local edits
+   that block the update are named in one line; it stays quiet offline or when there is nothing new.
 1. **Detects** your hardware and which engines are already serving: halogen, gufo, strix-llama.cpp, Strata, osmos,
    a plain llama.cpp llama-server, vLLM, Ollama, LM Studio.
 2. **Asks which model, then which engine, every run.** On Strix Halo the first menu is the model (each on its fastest

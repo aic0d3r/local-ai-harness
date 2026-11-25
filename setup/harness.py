@@ -1813,26 +1813,57 @@ def git(*a, timeout=15):
     return r.returncode, r.stdout.strip()
 
 
+def harness_release():
+    """Newest release tag (vX.Y.Z) this checkout does not contain yet -> (tag, commits it adds), or None (also offline)."""
+    if git("fetch", "--quiet", "--tags", timeout=10)[0]:
+        return None
+    rc, tags = git("tag", "--list", "v*", "--sort=-v:refname")
+    tag = "" if rc else tags.split("\n")[0]
+    rc, n = git("rev-list", "--count", f"HEAD..{tag}") if tag else (1, "")
+    return (tag, int(n)) if not rc and n.isdigit() and int(n) else None
+
+
 def harness_update_offer():
-    """If this checkout is behind its upstream, offer a fast-forward pull, then restart the wizard on the new code."""
+    """If a newer harness release is out, offer a fast-forward to it, then restart the wizard on the new code."""
     if not sys.stdin.isatty() or os.environ.get("HARNESS_NO_UPDATE_CHECK") == "1":
         return
     try:
-        if git("fetch", "--quiet", timeout=10)[0] or git("status", "--porcelain")[1]:
-            return  # offline / no remote, or local edits: stay quiet (the /harness-update command explains)
-        rc, n = git("rev-list", "--count", "HEAD..@{u}")
-        if rc or not n.isdigit() or int(n) == 0:
+        rel = harness_release()
+        if not rel:
             return
-        print(f"harness is {n} commit(s) behind origin:")
-        print(git("log", "--oneline", "-8", "HEAD..@{u}")[1])
-        if not ask_yn("Update now? git pull --ff-only, then setup restarts"):
+        tag, n = rel
+        if git("status", "--porcelain")[1]:
+            return print(f"harness {tag} is out, but local edits in {REPO} block the update: commit or stash them, then rerun setup")
+        print(f"harness {tag} is out ({n} commit(s) newer):")
+        print(git("log", "--oneline", "-8", f"HEAD..{tag}")[1])
+        if not ask_yn(f"Update to {tag} now? git merge --ff-only, then setup restarts"):
             return
-        if git("pull", "--ff-only", "--quiet", timeout=60)[0]:
-            return print("! pull failed (diverged from origin?): run git pull yourself")
+        if git("merge", "--ff-only", "--quiet", tag, timeout=60)[0]:
+            return print(f"! update failed (local commits?): run git merge --ff-only {tag} yourself")
         print("updated; restarting setup on the new code\n")
         os.execv(sys.executable, [sys.executable, "-u", *sys.argv])
     except (subprocess.TimeoutExpired, OSError):
         return
+
+
+def harness_release_notice():
+    """start.sh without pi (no harness-update extension): the same once-a-day release check, as one line."""
+    stamp = os.path.join(AGENT, "harness-update-stamp")  # shared with extensions/harness-update.ts
+    if os.environ.get("HARNESS_NO_UPDATE_CHECK") == "1":
+        return
+    try:
+        if time.time() - os.path.getmtime(stamp) < 86400:
+            return
+    except OSError:
+        pass
+    try:
+        rel = harness_release()
+        os.makedirs(AGENT, exist_ok=True)
+        open(stamp, "w").close()
+    except (subprocess.TimeoutExpired, OSError):
+        return
+    if rel:
+        notice(f"harness {rel[0]} is out: run ./setup.sh to update")
 
 
 UPDATE_PREF = os.path.join(AGENT, "harness-update-check")  # same answer file setup.sh and start.sh use
@@ -2058,6 +2089,8 @@ def cmd_up(_):
             print(f"! custom endpoint {ep['url']} is not answering; {'continuing' if no_pi() else 'pi opens anyway'}", file=sys.stderr)
         if not install_extensions(CUSTOM, verbose=False, show_ok=False):
             print(f"! setup.sh reported problems (details: {SETUP_LOG})", file=sys.stderr)
+        if no_pi():
+            harness_release_notice()
         return
     running = {x["engine"]: x for x in detect()["engines"]}
     if eng not in running:
@@ -2069,6 +2102,7 @@ def cmd_up(_):
     sync_ctx(eng)
     if no_pi():
         print(f"{ename(eng)}: http://127.0.0.1:{PROFILES['engines'][eng]['port']}/v1  (pi not wired; ./harness config to change)")
+        harness_release_notice()
     if update_pref() == "1":
         msg = engine_update(eng)
         if msg:

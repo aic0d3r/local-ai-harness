@@ -6,6 +6,10 @@
 ## Unreleased
 
 ### Added
+- Harness self-update rolls back: if `./harness refresh` fails after `/harness-update`, the checkout resets to the previous commit and re-installs it. Without pi (`--no-pi`), `./start.sh` prints the same once-a-day notice (shared stamp, `HARNESS_NO_UPDATE_CHECK=1` still turns it off). Tested in `tests/harness-update.test.ts` and `tests/test_harness.py`.
+
+### Changed
+- Harness updates follow releases only: the daily notice, `/harness-update` and the setup wizard offer the newest `vX.Y.Z` tag the checkout does not contain, never unreleased master commits. The wizard now says when local edits block an update instead of staying silent.
 - strix-llama.cpp gets the same safe upgrade as halogen, gufo, Strata and osmos: releases only - halo-box tags images by build, not release, so the update check offers one when the pinned image's commit does not contain the latest GitHub release (`v1.1.0`), and `scripts/upgrade-llamacpp.sh` pulls the newest build, confirms it contains that release (`b<N>` picks a build instead), restarts `server/start-qwen36.sh` on it (same backend), runs the acceptance check, and pins the new digest per user in `harness-pins` only on success; any failure restarts the old pin. `server/start-qwen36.sh --check` is its preflight (a missing model file refuses before anything is stopped). Tested against a fake docker in `tests/upgrade-llamacpp.test.sh`.
 
 ## 2.2.0 - 2026-11-24

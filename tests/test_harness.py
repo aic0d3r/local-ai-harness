@@ -1053,4 +1053,33 @@ try:
 finally:
     os.execvp = real_execvp
     GUFO = False
+# harness self-update: release tags only, a dirty tree is named not skipped, no-pi start.sh gets the daily notice
+def run(f):
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf): f()
+    return buf.getvalue()
+def g(cwd, *a): return subprocess.run(["git", "-C", cwd, *a], capture_output=True, text=True, check=True).stdout.strip()
+t = tempfile.mkdtemp(); work, clone = f"{t}/work", f"{t}/clone"
+g(t, "init", "-q", "--bare", "-b", "main", f"{t}/o.git"); g(t, "clone", "-q", f"{t}/o.git", work)
+def rel(msg, tag=None):
+    open(f"{work}/f", "w").write(msg); g(work, "add", "-A"); g(work, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", msg)
+    g(work, "push", "-q", "origin", "HEAD")
+    if tag: g(work, "tag", tag); g(work, "push", "-q", "origin", tag)
+rel("one", "v1.0.0"); g(t, "clone", "-q", f"{t}/o.git", clone)
+real = h.REPO, h.AGENT, h.ask_yn, h.sys.stdin, h.notice
+h.REPO, h.AGENT, h.sys.stdin = clone, tempfile.mkdtemp(), types.SimpleNamespace(isatty=lambda: True)
+rel("wip")
+assert h.harness_release() is None  # unreleased master commits are not offered
+rel("two", "v1.10.0"); rel("three", "v1.9.0")
+assert h.harness_release() == ("v1.10.0", 2), h.harness_release()  # version sort, not lexical
+open(f"{clone}/dirty", "w").close()
+out = run(h.harness_update_offer)
+assert "local edits" in out and "v1.10.0" in out, out
+os.remove(f"{clone}/dirty")
+h.ask_yn = lambda *a, **k: False
+assert "v1.10.0 is out (2 commit(s) newer)" in run(h.harness_update_offer) and open(f"{clone}/f").read() == "one"
+notes = []; h.notice = notes.append
+h.harness_release_notice(); h.harness_release_notice()  # second call: stamp is fresh, no second fetch or notice
+assert notes == ["harness v1.10.0 is out: run ./setup.sh to update"], notes
+h.REPO, h.AGENT, h.ask_yn, h.sys.stdin, h.notice = real
 print("ok: detect, model-info, recommend, update-check, refresh, status, monitor, up, use, tune, config, report")
