@@ -148,5 +148,11 @@ assert open(toml).read() == "mine"
 adopt.shutil.which = lambda n: None
 adopt.RTK_BIN = os.path.join(HOME, "nowhere")
 run(adopt.rtk_config)  # no rtk at all: silent no-op
+# unpinned packages: one warning naming them all, one command to paste; the pinned one is just present
+P = adopt.PACKAGES
+json.dump({"packages": ["git:github.com/DietrichGebert/ponytail", "npm:@juicesharp/rpiv-ask-user-question", P[2][1]]}, open(os.path.join(AGENT, "settings.json"), "w"))
+adopt.pi_cmd, adopt.rtk_binary, adopt.rtk_config = (lambda: "pi"), (lambda: None), (lambda: None)
+out = run(adopt.packages)
+assert out.count("reviewed version") == 1 and f"pi install {P[0][1]}; pi install {P[1][1]}" in out and "pi-rtk-optimizer package present" in out, out
 
 print("ok")

@@ -35,6 +35,10 @@ export const swapModel = (line: string, provider: string, id: string, text: stri
 // shortcut: inkling is the only such pack; a per-model profiles.json lookup when osmos serves a second
 export const footerLabel = (m: { id: string; name: string }, e: { model_label: string }, weights: string) =>
 	/inkling/i.test(m.id) ? m.name : `${e.model_label} · ${weights}`;
+// engine update hint: setup/harness.py saves its last answer here; it reads `strata v0.2.22 → v0.2.23 · notes: …` or ''
+const ENGINE_UPDATE = path.join(getAgentDir(), "harness-engine-update.json");
+export const updateHint = (saved: { engine?: string; line?: string } | undefined, engine: string) =>
+	saved?.line && saved.engine === engine ? `↑ ${saved.line.split(" · ")[0]}` : undefined;
 const proto: any = FooterComponent.prototype;
 if (!proto[FOOTER_LABEL]) {
 	proto[FOOTER_LABEL] = true;
@@ -171,7 +175,21 @@ export default function harnessStatus(pi: ExtensionAPI) {
 	// file and run the same work twice: warn the second one
 	let lock: string | undefined;
 	const lockFor = (f: string) => path.join(getAgentDir(), "session-locks", `${path.basename(f)}.pid`);
+	// only with the update check on (./harness config); an answer older than an hour is asked again in the background
+	const engineHint = async (ctx: any) => {
+		const read = (f: string) => { try { return fs.readFileSync(f, "utf8"); } catch { return ""; } };
+		if (read(path.join(getAgentDir(), "harness-update-check")).trim() !== "1") return ctx.ui.setStatus("engine-update", undefined);
+		let age = Infinity;
+		try { age = Date.now() - fs.statSync(ENGINE_UPDATE).mtimeMs; } catch { /* never checked, or an upgrade just cleared it */ }
+		if (age > 3600_000) await pi.exec("python3", [path.join(REPO, "setup", "harness.py"), "update-check"], { timeout: 20_000 }).catch(() => {});
+		let saved;
+		try { saved = JSON.parse(read(ENGINE_UPDATE)); } catch { /* offline on the first check: no hint */ }
+		const t = updateHint(saved, profile().engine);
+		ctx.ui.setStatus("engine-update", t && ctx.ui.theme.fg("warning", t));
+	};
+
 	pi.on("session_start", async (_e: any, ctx: any) => {
+		void engineHint(ctx);
 		const f = ctx.sessionManager?.getSessionFile?.();
 		if (f) {
 			lock = lockFor(f);

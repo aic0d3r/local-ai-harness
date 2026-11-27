@@ -2035,8 +2035,8 @@ def engine_update(engine):
             img = subprocess.run(["bash", os.path.join(REPO, u["have"].split()[1]), "--print-image"], capture_output=True, text=True).stdout.strip()
             rev = tool("docker", "image", "inspect", "-f", '{{index .Config.Labels "org.opencontainers.image.revision"}}', img).stdout.strip()
             if json.load(http(f"https://api.github.com/repos/{repo}/compare/{new}...{rev}"))["status"] in ("ahead", "identical"):
-                return ""
-            return update_line(engine, have, new, notes)
+                return remember_update(engine, "")
+            return remember_update(engine, update_line(engine, have, new, notes))
         if src == "ghcr" and not img:  # highest x.y.z tag
             tok = json.load(http(f"https://ghcr.io/token?scope=repository:{repo}:pull"))["token"]
             req = urllib.request.Request(f"https://ghcr.io/v2/{repo}/tags/list?n=1000", headers={"Authorization": f"Bearer {tok}"})
@@ -2045,15 +2045,37 @@ def engine_update(engine):
     except Exception:
         return ""
     a, b = _ver(have), _ver(new)
-    if not a or not b or a[0] != b[0] or b[1] <= a[1]:  # different schemes (llama.cpp b1234 vs v0.7.0): can't tell, stay quiet
+    if not a or not b or a[0] != b[0]:  # different schemes (llama.cpp b1234 vs v0.7.0): can't tell, stay quiet
         return ""
-    return update_line(engine, have, new, notes)
+    return remember_update(engine, update_line(engine, have, new, notes) if b[1] > a[1] else "")
 
 
 def update_line(engine, have, new, notes):
+    u = PROFILES["engines"][engine]["update"]
+    notes = notes or u.get("notes", "").format(new=vtag(new).lstrip("v"))  # halogen, gufo: their changelog, not a ghcr page
     line = f"{ename(engine)} {vtag(have)} → {vtag(new)}" + (f" · notes: {notes}" if notes else "")
-    how = PROFILES["engines"][engine]["update"]["how"].format(new=vtag(new).lstrip("v"))
-    return line if upgrader(engine) else f"{line} · {how}"
+    return line if upgrader(engine) else f"{line} · {u['how'].format(new=vtag(new).lstrip('v'))}"
+
+
+ENGINE_UPDATE = os.path.join(AGENT, "harness-engine-update.json")  # the last answer, for pi's footer (extensions/harness-status)
+
+
+def remember_update(engine, line):
+    """Save a definite answer of engine_update (newer or current; never offline/unknown) and return it."""
+    try:
+        jput(ENGINE_UPDATE, {"engine": engine, "line": line})
+    except OSError:
+        pass  # the footer hint is a nicety: a read-only agent dir must not break the check
+    return line
+
+
+def run_upgrade(eng):
+    """Run eng's upgrader. -> True on success, which also drops the saved update line (it names what is now installed)."""
+    if subprocess.run(["bash", upgrader(eng)]).returncode:
+        return False
+    if os.path.exists(ENGINE_UPDATE):
+        os.remove(ENGINE_UPDATE)
+    return True
 
 
 def upgrader(eng):
@@ -2431,7 +2453,7 @@ def cmd_up(_):
         harness_release_notice()
     if update_pref() == "1":
         msg = engine_update(eng)
-        if msg and offer_upgrade(eng, msg) and subprocess.run(["bash", upgrader(eng)]).returncode:
+        if msg and offer_upgrade(eng, msg) and not run_upgrade(eng):
             print("! upgrade failed; continuing on the pinned version", file=sys.stderr)
 
 
@@ -2686,7 +2708,8 @@ def speed_line(eng, mod, tuned, weights=None):
 
 
 def finish(eng, mod, no_tune, launch=False):
-    tuned = jget(os.path.join(AGENT, "harness-tuned.json"), {}).get(hw_key(eng, mod), {}) if no_tune else {}
+    saved = jget(os.path.join(AGENT, "harness-tuned.json"), {}).get(hw_key(eng, mod), {})
+    tuned = saved if no_tune else {}
     if not no_tune:
         print(f"== probing {engine_title(eng, mod)} (prefill + decode, <2 min) ==")
         tuned = tune(eng, mod)
@@ -2694,7 +2717,11 @@ def finish(eng, mod, no_tune, launch=False):
             print(f"  probe failed ({tuned['error']}) - keeping shipped defaults")
             tuned = {}
         else:
-            print(f"  {tuned['prefill_tps']} t/s prefill (8K prompt), {tuned['decode_tps']} t/s decode (short code), median of {tuned['samples']}")
+            was = saved.get("decode_tps")  # same engine, model and hardware: after an upgrade, the version before it
+            print(f"  {tuned['prefill_tps']} t/s prefill (8K prompt), {f'{was} → ' if was else ''}{tuned['decode_tps']} t/s decode (short code), median of {tuned['samples']}")
+            if was and tuned["decode_tps"] < 0.95 * was:
+                print(f"  ! decode is {round(100 - 100 * tuned['decode_tps'] / was)}% slower than the last probe"
+                      + (": ./harness config → rollback restores the version before the upgrade" if rollback_pins(eng) else ""))
             sp = tuned["spread"]["decode_code"]
             if tuned["decode_tps"] and sp > 0.15 * tuned["decode_tps"]:
                 print(f"  ! decode varied by {sp} t/s between runs: if other apps were busy, close them and re-run ./harness tune")
@@ -2823,7 +2850,7 @@ def cmd_setup(a):
                  + " Re-run ./setup.sh to resume: downloads continue where they stopped.")
     if upgrade:  # a gufo upgrade needs halogen already stopped; the upgraders start/restart the server themselves
         print(f"\n== upgrading {ename(eng)} ==")
-        if subprocess.run(["bash", upgrader(eng)]).returncode:
+        if not run_upgrade(eng):
             print("! upgrade failed; continuing on the pinned version")
         d["engines"] = detect()["engines"]
         if plan and served_models(PROFILES["engines"][eng]["port"], eng):
@@ -3114,7 +3141,7 @@ def cmd_config(a):
             os.makedirs(AGENT, exist_ok=True)
             open(UPDATE_PREF, "w").write("0\n" if upd == "1" else "1\n")
         elif k == "upgrade":
-            if offer_upgrade(eng, newer) and subprocess.run(["bash", upgrader(eng)]).returncode:
+            if offer_upgrade(eng, newer) and not run_upgrade(eng):
                 print("! upgrade failed; still on the previous version")
             newer = None
         elif k == "rollback":

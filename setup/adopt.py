@@ -269,11 +269,15 @@ def packages():
     if not pi:
         return
     have = " ".join(read_json(os.path.join(AGENT, "settings.json"), {}).get("packages", []))
+    loose = [(label, spec) for key, spec, label in PACKAGES if spec not in have and key in have]  # older, unpinned: `pi update` would move them
+    if loose:  # one warning, one paste: "; " chains commands in bash and every PowerShell
+        warn(f"{', '.join(l for l, _ in loose)} {'is' if len(loose) == 1 else 'are'} not on the reviewed version; to pin, run:\n      "
+             + "; ".join(f"pi install {s}" for _, s in loose))
     for key, spec, label in PACKAGES:
         if spec in have:
             ok(f"{label} package present")
-        elif key in have:  # an older, unpinned install: `pi update` would move it to whatever is published
-            warn(f"{label} is not on the reviewed version; to pin it run:\n      pi install {spec}")  # own line: the spec is too long to wrap mid-version
+        elif key in have:
+            continue
         elif subprocess.run([pi, "install", spec], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
             ok(f"{label} installed (pi package)")
         else:

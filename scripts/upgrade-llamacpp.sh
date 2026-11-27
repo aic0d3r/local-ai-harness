@@ -101,4 +101,4 @@ echo "[4/4] updating pin $CUR -> $TAG"
 pin_set "$PIN" "$DEF" "$NEW" || { echo "FAIL: could not write $PINS - pin unchanged (still running $TAG until the next restart)"; exit 1; }
 # keep only the builds in force (both backends) and the rollback: older images go
 python3 "$REPO/setup/harness.py" prune llamacpp --yes || echo "      WARN: could not prune old versions (./harness prune)"
-echo "OK: validated and pinned $BACKEND to $TAG in $PINS (running now). A harness update that ships a newer reviewed pin replaces it."
+echo "OK: strix-llama.cpp $CUR → $TAG ($BACKEND), running and pinned (a harness update that ships a newer reviewed pin replaces it)"

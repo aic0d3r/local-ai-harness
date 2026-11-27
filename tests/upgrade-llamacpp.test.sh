@@ -83,7 +83,7 @@ setsid nohup bash "$REPO/server/start-qwen36.sh" > "$T/start.log" 2>&1 < /dev/nu
 for _ in $(seq 1 40); do up && break; sleep 0.25; done
 check "b13600 is up" 'up && [ "$(serving)" = "$DEF" ]'
 release b13605 bbbb; runp server-vulkan-b13605
-check "exits 0 and says OK" '[ "$RC" = 0 ] && echo "$OUT" | grep -q "^OK: validated and pinned vulkan to b13605"'
+check "exits 0 and says OK" '[ "$RC" = 0 ] && echo "$OUT" | grep -q "^OK: strix-llama.cpp .* → b13605 (vulkan), running and pinned"'
 check "the new digest runs and is pinned" '[ "$(serving)" = "$IMG@sha256:bbbb" ] && up && grep -qx "LLAMACPP_VULKAN_IMAGE=$IMG@sha256:bbbb" "$PINS"'
 check "the launcher now runs the pin" '[ "$(bash "$REPO/server/start-qwen36.sh" --print-image)" = "$IMG@sha256:bbbb" ]'
 runp b13605; check "same build again: nothing to do" '[ "$RC" = 0 ] && echo "$OUT" | grep -q "already on b13605"'

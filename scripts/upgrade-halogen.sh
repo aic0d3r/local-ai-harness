@@ -155,4 +155,4 @@ pin_set HALOGEN_IMAGE_TAG "$DEF_TAG" "$TAG" && pin_set HALOGEN_IMAGE_DIGEST "$DE
 # sets a rollback kept for diagnosis too, once an upgrade passed on top of them)
 python3 "$REPO/setup/harness.py" prune halogen --yes || echo "      WARN: could not prune old versions (./harness prune)"
 echo "      $(bash "$START" --print-image)"
-echo "OK: validated and pinned to $TAG in $PINS (a harness update that ships a newer reviewed pin replaces it)."
+echo "OK: halogen $CUR → $TAG, validated and pinned (a harness update that ships a newer reviewed pin replaces it)"

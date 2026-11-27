@@ -219,7 +219,21 @@ h.subprocess.run = lambda *a, **k: types.SimpleNamespace(stdout="ghcr.io/niko122
 for reg, want in (("0.2.22", ""), ("0.2.23", "strata v0.2.22 → v0.2.23 · notes: https://github.com/Niko1221/Strata/releases/tag/v0.2.23")):
     h.image_version = lambda ref, _r=reg: _r
     assert h.engine_update("strata") == want, (reg, h.engine_update("strata"))
+    assert h.jget(h.ENGINE_UPDATE, {}) == {"engine": "strata", "line": want}  # what pi's footer shows
+h.image_version = lambda ref: 1 / 0  # offline: no answer, the saved one stays
+assert h.engine_update("strata") == "" and h.jget(h.ENGINE_UPDATE, {})["line"].startswith("strata v0.2.22")
 h.engine_have, h.image_version, h.subprocess.run = _eh, _iv, _run
+# a passing upgrade drops the saved line (it names what is now installed); a failed one keeps it
+real_up = h.upgrader
+for script, kept in (("exit 1", True), ("exit 0", False)):
+    p = os.path.join(AGENT, "fake-upgrade.sh")
+    open(p, "w").write(script + "\n")
+    h.upgrader = lambda e, _p=p: _p
+    assert h.run_upgrade("strata") is not kept and os.path.exists(h.ENGINE_UPDATE) is kept
+h.upgrader = real_up
+os.remove(p)
+# halogen and gufo publish on ghcr only: their notes link comes from profiles.json
+assert "notes: https://github.com/gufo-org/gufo/releases/tag/v0.37.0" in h.update_line("gufo", "0.36.0", "0.37.0", "")
 # no upgrader: the line says how to update instead
 h.engine_have, h.http = (lambda e: "v0.5.0"), (lambda url, *a, **k: __import__("io").BytesIO(b'{"tag_name": "v0.6.0"}'))
 assert h.engine_update("vllm") == "vllm v0.5.0 → v0.6.0 · pip install -U vllm (or pull the new vllm image)", h.engine_update("vllm")
@@ -381,7 +395,7 @@ assert m == "81 of 124 GiB GPU memory in use", m  # the total only: a per-part b
 assert h.gufo_memory("qwen3.8-27b") == ""
 # ready screen: status in plain units, then the next step; a failed check points at the doctor instead of start.sh
 import contextlib, io
-saved = {n: getattr(h, n) for n in ("verified", "apply", "launch_offer")}
+saved = {n: getattr(h, n) for n in ("verified", "apply", "launch_offer", "tune", "rollback_pins")}
 h.launch_offer = lambda *a: None
 for ok, ctx, want in ((True, 262144, "256K tokens"), (False, 1048576, "1M tokens")):
     h.verified, h.apply, out = (lambda e, ok=ok: ok), (lambda e, m, t, ctx=ctx: ("osmos", "m", ctx)), io.StringIO()
@@ -390,6 +404,14 @@ for ok, ctx, want in ((True, 262144, "256K tokens"), (False, 1048576, "1M tokens
     s = out.getvalue()
     assert want in s and ("./start.sh ~/your-project" in s) == ok and "(pi: " not in s and "choices" not in s, s
     assert s.count("status") == 1, s  # the doctor/status pair is not listed twice
+# a fresh probe on the same engine and model (after an upgrade) shows the decode before it, and warns when it dropped
+h.tune = lambda e, m: {"prefill_tps": 1400, "decode_tps": 25.0, "samples": 3, "spread": {"decode_code": 0}}
+h.rollback_pins = lambda e: {"STRATA_IMAGE": ("a", "b")}
+h.jput(os.path.join(AGENT, "harness-tuned.json"), {h.hw_key("osmos", "osmos-inkling-2-mini"): {"decode_tps": 31.8}})
+out = io.StringIO()
+with contextlib.redirect_stdout(out), contextlib.suppress(SystemExit):
+    h.finish("osmos", "osmos-inkling-2-mini", False)
+assert "31.8 → 25.0 t/s decode" in out.getvalue() and "21% slower" in out.getvalue() and "rollback" in out.getvalue(), out.getvalue()
 for n, f in saved.items():
     setattr(h, n, f)
 h.engine_log = real_log

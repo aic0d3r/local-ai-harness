@@ -100,4 +100,4 @@ echo "[5/5] done"
 # the tag it replaced is the ./harness config rollback (only an exact tag: this script checks out tags)
 . "$REPO/scripts/lib-pins.sh"
 pin_set OSMOS_TAG "" "$TAG" "$(git -C "$DIR" describe --tags --exact-match "$OLD" 2>/dev/null)" || echo "      WARN: could not write $PINS"
-echo "OK: osmos $CUR -> $TAG, running (previous commit kept as rollback point: git -C $DIR checkout $OLD)"
+echo "OK: osmos $CUR → $TAG, running (previous commit kept as rollback point: git -C $DIR checkout $OLD)"
