@@ -39,8 +39,13 @@ if [ -n "$IMAGE" ]; then
   if ! MISS=$(bash "$REPO/server/start-strata.sh" --check); then
     echo "FAIL: the model is missing files, so no image would load it - nothing stopped:"; echo "$MISS" | sed 's/^/      /'; exit 1
   fi
-  echo "[1/3] pulling the newest $IMAGE"
-  docker pull "$IMAGE" || { echo "FAIL: docker pull failed (offline, or the tag moved) - nothing changed"; exit 1; }
+  ver(){ docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$1" 2>/dev/null | sed 's/^<no value>$//'; }
+  OLDV=$(ver "$OLD")
+  echo "[1/3] pulling the newest $IMAGE (log: $LOG.pull)"
+  docker pull "$IMAGE" > "$LOG.pull" 2>&1 || { tail -3 "$LOG.pull"; echo "FAIL: docker pull failed (offline, or the tag moved) - nothing changed"; exit 1; }
+  NEWD=$(docker image inspect -f '{{index .RepoDigests 0}}' "$IMAGE" 2>/dev/null)
+  # the running container is already on what the tag holds: a restart would change nothing
+  [ -n "$CID" ] && [ "$NEWD" = "$OLD" ] && { echo "OK: Strata ${OLDV:+v$OLDV }is already the newest image - nothing restarted"; exit 0; }
   echo "[2/3] restarting it (server/start-strata.sh)"
   stop_it
   start_it "$LOG.server"
@@ -53,11 +58,11 @@ if [ -n "$IMAGE" ]; then
   # the image serves only with its key: without it the battery is a 401, and every upgrade "failed" and rolled back
   STRATA_KEY="$KEY" python3 "$REPO/scripts/engine-acceptance.py" "$URL" 15 || rollback "acceptance failed (log: $LOG.server)"
   # float on the tag again (drops a rollback pin); the digest that ran before is the ./harness config rollback
-  NEWD=$(docker image inspect -f '{{index .RepoDigests 0}}' "$IMAGE" 2>/dev/null)
   pin_set STRATA_IMAGE "$IMAGE" "$IMAGE" "$([ "$OLD" != "$NEWD" ] && echo "$OLD")" || echo "      WARN: could not write $PINS"
   # keep only the new image and the rollback: older ones go
   python3 "$REPO/setup/harness.py" prune strata --yes || echo "      WARN: could not prune old versions (./harness prune)"
-  echo "OK: Strata image updated and answering ($IMAGE)"
+  NEWV=$(ver "$IMAGE")
+  echo "OK: Strata ${OLDV:+v$OLDV → }${NEWV:+v$NEWV }updated and answering ($IMAGE)"
   exit 0
 fi
 

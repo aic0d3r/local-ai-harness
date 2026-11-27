@@ -66,7 +66,7 @@ seen = []
 for status, want in (("behind", True), ("diverged", True), ("ahead", False), ("identical", False)):
     h.http = lambda url, *a, _s=status, **k: (seen.append(url), __import__("io").BytesIO(json.dumps({"tag_name": "v1.2.0", "status": _s}).encode()))[1]
     msg = h.engine_update("llamacpp")
-    assert bool(msg) == want and (not want or ("v1.2.0 available (running b13600)" in msg and "upgrade-llamacpp.sh" in msg)), (status, msg)
+    assert bool(msg) == want and (not want or "b13600 → v1.2.0" in msg), (status, msg)
 assert seen[-1].endswith("/compare/v1.2.0...abc123"), seen
 h.engine_have, h.http, h.tool = _eh, _http, _tool
 assert h.upgrader("llamacpp").endswith("upgrade-llamacpp.sh")
@@ -212,6 +212,18 @@ assert "! careful" in open(h.SETUP_LOG).read()
 # engine update check: versions compare across the formats engines report; different schemes never compare
 assert h._ver("Strata 0.1.44.1") < h._ver("v0.1.45") and h._ver("b6312-abc") == ("b", (6312,)) and h._ver("") is None
 assert h.engine_update("lmstudio") == ""  # no update source: silent
+# Strata in Docker: the latest is what the registry's moving tag holds, not the GitHub release (published first); notes link the release
+_eh, _iv, _run, real_http_u = h.engine_have, h.image_version, h.subprocess.run, h.http
+h.engine_have = lambda e: "0.2.22"
+h.subprocess.run = lambda *a, **k: types.SimpleNamespace(stdout="ghcr.io/niko1221/strata:latest-x\n") if "--print-image" in a[0] else _run(*a, **k)
+for reg, want in (("0.2.22", ""), ("0.2.23", "strata v0.2.22 → v0.2.23 · notes: https://github.com/Niko1221/Strata/releases/tag/v0.2.23")):
+    h.image_version = lambda ref, _r=reg: _r
+    assert h.engine_update("strata") == want, (reg, h.engine_update("strata"))
+h.engine_have, h.image_version, h.subprocess.run = _eh, _iv, _run
+# no upgrader: the line says how to update instead
+h.engine_have, h.http = (lambda e: "v0.5.0"), (lambda url, *a, **k: __import__("io").BytesIO(b'{"tag_name": "v0.6.0"}'))
+assert h.engine_update("vllm") == "vllm v0.5.0 → v0.6.0 · pip install -U vllm (or pull the new vllm image)", h.engine_update("vllm")
+h.engine_have, h.http = _eh, real_http_u
 # osmos: the running version is the libosmos checkout's tag (start-osmos.sh --print-dir), the latest the GitHub release; the upgrader is found
 co = tempfile.mkdtemp()
 for g in ("init -q", "-c user.name=t -c user.email=t@t commit -q --allow-empty -m x", "tag v0.7.1"):
@@ -221,7 +233,7 @@ os.environ["OSMOS_DIR"] = co
 for latest, want in (("v0.7.5", True), ("v0.7.1", False), ("v0.7.0", False)):
     h.http = lambda url, *a, _l=latest, **k: __import__("io").BytesIO(json.dumps({"tag_name": _l}).encode())
     msg = h.engine_update("osmos")
-    assert bool(msg) == want and (not want or ("osmos v0.7.5 available (running v0.7.1)" in msg and "upgrade-osmos.sh" in msg)), (latest, msg)
+    assert bool(msg) == want and (not want or msg == "osmos v0.7.1 → v0.7.5"), (latest, msg)
 h.http = real_http
 if real_od is None: os.environ.pop("OSMOS_DIR")
 else: os.environ["OSMOS_DIR"] = real_od
@@ -452,7 +464,7 @@ h.ask_agent = lambda r: calls.append("agent")
 h.ask_once = lambda *a: False
 # ask=False: setup asks no stop/download/start question one by one, its "about to" list and Continue? confirm them
 h.pick_engine = lambda d, yes, want=None, on_pick=None, ask=True: (on_pick("gufo"), calls.append(f"plan_start ask={ask}"), ("gufo", {"stop": ["halogen"], "download": False}))[2]
-h.update_offer = lambda e: calls.append("update_offer") or True
+h.update_offer = lambda e: calls.append("update_offer") or "gufo v1 → v2"
 h.upgrader = lambda e: "/bin/true"
 h.install_extensions = lambda e, x, v, launch=True: calls.append(f"install launch={launch}") or True
 h.prepare_start = lambda p, r: calls.append("prepare") or True

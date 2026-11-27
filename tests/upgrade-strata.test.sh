@@ -82,7 +82,7 @@ echo "== Strata aaaa serving, the tag moved to bbbb: pull, restart on the new di
 start; check "aaaa is up" 'wait_up'
 echo "sha256:bbbb" > "$S/tagref:latest-test"
 runp
-check "exits 0 and says OK" '[ "$RC" = 0 ] && echo "$OUT" | grep -q "^OK: Strata image updated"'
+check "exits 0 and says OK" '[ "$RC" = 0 ] && echo "$OUT" | grep -q "^OK: Strata .*updated and answering"'
 check "the acceptance battery answered (with the image key sent)" 'echo "$OUT" | grep -q "answer: .OK."'
 check "the new digest is what runs" '[ "$(serving_digest)" = "ghcr.io/niko1221/strata@sha256:bbbb" ] && up'
 check "the old container was stopped by id, the new one started once" '[ "$(grep -c "^stop c1" "$S/log")" = 1 ] && [ "$(grep -c "^run " "$S/log")" = 2 ]'
@@ -90,12 +90,16 @@ check "the gufo container on the same port was not stopped" '! grep -q "^stop g1
 PINS=$PI_CODING_AGENT_DIR/harness-pins
 check "floats on the tag, aaaa kept as the ./harness config rollback" 'grep -qx "STRATA_IMAGE=ghcr.io/niko1221/strata:latest-test" "$PINS" && grep -qx "PREV_STRATA_IMAGE=ghcr.io/niko1221/strata@sha256:aaaa" "$PINS"'
 
+echo "== the tag has not moved: nothing restarted"
+runp
+check "exits 0, says so, no stop or run" '[ "$RC" = 0 ] && echo "$OUT" | grep -q "nothing restarted" && [ "$(grep -c "^run " "$S/log")" = 2 ] && [ "$(grep -c "^stop c1" "$S/log")" = 1 ] && up'
+
 echo "== a release that fails the decode check is rolled back to the digest that was running"
 echo "sha256:cccc" > "$S/tagref:latest-test"; echo "sha256:cccc" > "$S/slow"
 runp
 check "exit 1, says it rolls back to bbbb" '[ "$RC" = 1 ] && echo "$OUT" | grep -q "rolling back to sha256:bbbb"'
 check "bbbb is serving again before the script exits" 'echo "$OUT" | grep -q "sha256:bbbb is serving again" && [ "$(serving_digest)" = "ghcr.io/niko1221/strata@sha256:bbbb" ] && up'
-check "the failed image was run first, its container stopped after" 'grep -q "^run ghcr.io/niko1221/strata@sha256:cccc" "$S/log" && [ "$(grep -c "^pull " "$S/log")" = 4 ] && [ "$(grep -c "^stop c1" "$S/log")" = 3 ]'
+check "the failed image was run first, its container stopped after" 'grep -q "^run ghcr.io/niko1221/strata@sha256:cccc" "$S/log" && [ "$(grep -c "^pull " "$S/log")" = 5 ] && [ "$(grep -c "^stop c1" "$S/log")" = 3 ]'
 rm -f "$S/slow"
 
 echo "== a release that never answers is rolled back too"

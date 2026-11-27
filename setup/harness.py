@@ -1987,30 +1987,57 @@ def installed_version(engine):
     """engine_have for a menu row: 'v0.11.3', or '' when it has none, cannot be told, or the engine is down and only
     its server reports it (llama-server, vLLM, Ollama)."""
     try:
-        v = str(engine_have(engine) or "").split()
+        return vtag(engine_have(engine))
     except Exception:
         return ""
-    v = v[-1] if v else ""
+
+
+def vtag(v):
+    """'Strata 0.2.22' / '0.2.22' / 'v0.2.22' -> 'v0.2.22'; 'b13600' stays as it is."""
+    v = (str(v or "").split() or [""])[-1]
     return f"v{v}" if v[:1].isdigit() else v
 
 
+def image_version(ref):
+    """The org.opencontainers.image.version label of a ghcr.io image tag, read from the registry without pulling it."""
+    repo, tag = ref.removeprefix("ghcr.io/").rsplit(":", 1)
+    tok = json.load(http(f"https://ghcr.io/token?scope=repository:{repo}:pull"))["token"]
+    get = lambda path, accept: json.load(urllib.request.urlopen(urllib.request.Request(  # noqa: E731
+        f"https://ghcr.io/v2/{repo}/{path}", headers={"Authorization": f"Bearer {tok}", "Accept": accept}), timeout=3))
+    m = get(f"manifests/{tag}", "application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,"
+                                "application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json")
+    if "manifests" in m:  # multi-arch index: the amd64 image (every engine image here is x86 only)
+        m = get(f"manifests/{next(x['digest'] for x in m['manifests'] if x.get('platform', {}).get('architecture') == 'amd64')}",
+                "application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json")
+    return get(f"blobs/{m['config']['digest']}", "*/*")["config"]["Labels"]["org.opencontainers.image.version"]
+
+
 def engine_update(engine):
-    """-> one line if a newer release of engine exists; '' when current, unknown or offline. Never installs."""
+    """-> 'Strata v0.2.22 → v0.2.23 · notes: <release url>' if a newer release of engine exists (engines without an upgrader
+    get how to update instead of the notes); '' when current, unknown or offline. Never installs."""
     u = PROFILES["engines"].get(engine, {}).get("update")
     if not u:
         return ""
+    notes = ""
     try:
         have = engine_have(engine)
         src, repo = u["latest"].split(":", 1)
-        if src in ("gh", "ghrev"):
-            new = json.load(http(f"https://api.github.com/repos/{repo}/releases/latest"))["tag_name"]
+        # a Docker install updates by image, published after the GitHub release: ask the registry what the moving tag holds
+        img = u.get("image") and subprocess.run(["bash", os.path.join(REPO, u["image"]), "--print-image"], capture_output=True,
+                                                text=True, env=dict(os.environ, STRATA_FLOAT="1")).stdout.strip()
+        if img:
+            new = image_version(img)
+            notes = src == "gh" and f"https://github.com/{repo}/releases/tag/{vtag(new)}"
+        elif src in ("gh", "ghrev"):
+            rel = json.load(http(f"https://api.github.com/repos/{repo}/releases/latest"))
+            new, notes = rel["tag_name"], rel.get("html_url")
         if src == "ghrev":  # strix-llama.cpp: releases (v1.1.0), but images are tagged by build: does the image's commit contain it?
             img = subprocess.run(["bash", os.path.join(REPO, u["have"].split()[1]), "--print-image"], capture_output=True, text=True).stdout.strip()
             rev = tool("docker", "image", "inspect", "-f", '{{index .Config.Labels "org.opencontainers.image.revision"}}', img).stdout.strip()
             if json.load(http(f"https://api.github.com/repos/{repo}/compare/{new}...{rev}"))["status"] in ("ahead", "identical"):
                 return ""
-            return f"{ename(engine)} {new} available (running {have}): {u['how']}"
-        if src == "ghcr":  # highest x.y.z tag
+            return update_line(engine, have, new, notes)
+        if src == "ghcr" and not img:  # highest x.y.z tag
             tok = json.load(http(f"https://ghcr.io/token?scope=repository:{repo}:pull"))["token"]
             req = urllib.request.Request(f"https://ghcr.io/v2/{repo}/tags/list?n=1000", headers={"Authorization": f"Bearer {tok}"})
             tags = [t for t in json.load(urllib.request.urlopen(req, timeout=3))["tags"] if re.fullmatch(r"\d+\.\d+\.\d+", t)]
@@ -2020,7 +2047,13 @@ def engine_update(engine):
     a, b = _ver(have), _ver(new)
     if not a or not b or a[0] != b[0] or b[1] <= a[1]:  # different schemes (llama.cpp b1234 vs v0.7.0): can't tell, stay quiet
         return ""
-    return f"{ename(engine)} {new} available (running {str(have).split()[-1]}): {u['how'].format(new=new.lstrip('v'))}"
+    return update_line(engine, have, new, notes)
+
+
+def update_line(engine, have, new, notes):
+    line = f"{ename(engine)} {vtag(have)} → {vtag(new)}" + (f" · notes: {notes}" if notes else "")
+    how = PROFILES["engines"][engine]["update"]["how"].format(new=vtag(new).lstrip("v"))
+    return line if upgrader(engine) else f"{line} · {how}"
 
 
 def upgrader(eng):
@@ -2253,20 +2286,23 @@ def rollback_engine(eng):
 
 
 def update_offer(eng):
-    """Ask once whether to check for engine updates, then check eng. -> True if the user wants the safe
-    upgrade (engines with an upgrader; run later, after all questions); others get a notice with the command."""
+    """Ask once whether to check for engine updates, then check eng. -> 'Strata v0.2.22 → v0.2.23' if the user wants the safe
+    upgrade (engines with an upgrader; run later, after all questions), else ''; others get a notice with the command."""
     pref = update_pref()
     if not pref and sys.stdin.isatty():
         pref = "1" if ask_yn("Check for engine updates on setup/start? one short network call; never installs without asking") else "0"
         os.makedirs(AGENT, exist_ok=True)
         open(UPDATE_PREF, "w").write(pref + "\n")
     if pref != "1" or not sys.stdin.isatty():
-        return False
+        return ""
     msg = engine_update(eng)
-    if msg:
-        notice(msg)
-        return bool(upgrader(eng)) and ask_yn(f"Upgrade {ename(eng)} now? restarts the server, rolls back on failure")
-    return False
+    return msg.split(" · ")[0] if msg and offer_upgrade(eng, msg) else ""
+
+
+def offer_upgrade(eng, msg):
+    """The update notice, then 'Upgrade now?' when eng has an upgrader. -> True if yes."""
+    notice(msg)
+    return bool(upgrader(eng)) and ask_yn(f"Upgrade {ename(eng)} now? restarts it, checks it, rolls back on failure")
 
 
 def monitor_cmd(eng, url=None, once=False):
@@ -2395,19 +2431,17 @@ def cmd_up(_):
         harness_release_notice()
     if update_pref() == "1":
         msg = engine_update(eng)
-        if msg:
-            notice(msg)
-            if upgrader(eng) and ask_yn(f"Upgrade {ename(eng)} now? restarts the server, rolls back on failure"):
-                if subprocess.run(["bash", upgrader(eng)]).returncode:
-                    print("! upgrade failed; continuing on the pinned version", file=sys.stderr)
+        if msg and offer_upgrade(eng, msg) and subprocess.run(["bash", upgrader(eng)]).returncode:
+            print("! upgrade failed; continuing on the pinned version", file=sys.stderr)
 
 
 def cmd_update_check(a):
     """start.sh: one line if the active (or named) engine has a newer release; silent when off/offline."""
     if update_pref() == "1":
-        msg = engine_update(a.engine or saved_engine() or "halogen")
+        eng = a.engine or saved_engine() or "halogen"
+        msg = engine_update(eng)
         if msg:
-            notice(msg)
+            notice(msg + (f" · upgrade: {os.path.relpath(upgrader(eng), REPO)}" if upgrader(eng) else ""))
 
 
 def notice(msg):
@@ -2743,7 +2777,7 @@ def cmd_setup(a):
     up = []  # the update check runs as soon as the engine is chosen, before "Start <engine>?"
     # ask=False: no stop/download/start question one by one, the "about to" list below names them all and Continue? confirms
     eng, plan = pick_engine(d, a.yes, on_pick=None if a.yes else lambda e: up.append(update_offer(e)) or up[0], ask=False)
-    upgrade = bool(up and up[0])
+    upgrade = up[0] if up else ""  # 'Strata v0.2.22 → v0.2.23' when chosen
     if not a.yes:
         ask_sidecar(a.reconfigure)
     if not sidecar_pref() and not sidecar_default():  # not asked (--yes, no terminal) on a small card: do not reserve 8 GiB of it unasked
@@ -2765,7 +2799,7 @@ def cmd_setup(a):
             [f"download the stock {plan['stock']} (~{quant_gb(plan['stock'])} GB, {free}, resumable)"] if plan and plan.get("stock") else []) + (
             [f"download the abliterated {ename(eng)} weights (~{plan.get('weights_gb')} GB, {free}, resumable"
              + ("; gated: accept its terms on Hugging Face and run `hf auth login` first)" if eng == "strata" else ")")] if plan and plan.get("weights") else []) + (
-            [f"upgrade {ename(eng)} (restart, rolls back on failure)"] if upgrade else []) + (
+            [f"upgrade {upgrade}"] if upgrade else []) + (
             [f"restart {ename(eng)} on {model_name(engine_model(eng))}" if eng in plan["stop"] else f"start {ename(eng)}"] if plan else [f"use the running {ename(eng)}"]) + (
             [] if a.no_tune or tuned else ["measure speed (<2 min)"])
         items = choices_items(eng)
@@ -2955,6 +2989,7 @@ def cmd_config(a):
     IN_MENU = True
     hints = os.path.join(AGENT, "harness-hints-shown")
     last = None  # (key, row) picked last round: its row changed = say so above the redrawn menu
+    newer = None  # the engine update line, checked once (network) and again after an upgrade
     while True:
         p = active() or {}
         upd = update_pref()
@@ -2976,6 +3011,8 @@ def cmd_config(a):
         ours = [e for e in live if PROFILES["engines"][e].get("script")]  # vllm, ollama, lmstudio, your own llama-server: not ours to stop
         tiny = sidecar_up()
         rb = next(iter(rollback_pins(eng).values()), None)
+        if newer is None:
+            newer = engine_update(eng) if eng and upd == "1" and upgrader(eng) else ""
         old = prune_plans(ENGINE_REPOS)[1]  # ~0.5 s: docker inspects and the launchers' --print-image
         # (key, name, value, what it means), grouped under a title row each; Esc or q closes, so there is no done row
         groups = {"what runs": [
@@ -2992,6 +3029,7 @@ def cmd_config(a):
             ("update", "update check", "on" if upd == "1" else "off", "never installs"),
             *([("osmos-budget", "osmos memory", *osmos_budget_row())] if eng == "osmos" else [])],
             "upkeep": [
+            *([("upgrade", "upgrade", newer.split(" · ")[0], "restarts, rolls back on failure")] if newer else []),
             *([("rollback", "rollback", f"{ename(eng)} {pin_label(rb[0])} -> {pin_label(rb[1])}", "undoes the last upgrade")] if rb else []),
             *([("prune", "old versions", f"{old / 1e9:.1f} GB", "engine images and backups")] if old else []),
             *([("hints", "sudo hints", "shown", "one-time system tips")] if os.path.exists(hints) else [])]}
@@ -3075,6 +3113,10 @@ def cmd_config(a):
         elif k == "update":
             os.makedirs(AGENT, exist_ok=True)
             open(UPDATE_PREF, "w").write("0\n" if upd == "1" else "1\n")
+        elif k == "upgrade":
+            if offer_upgrade(eng, newer) and subprocess.run(["bash", upgrader(eng)]).returncode:
+                print("! upgrade failed; still on the previous version")
+            newer = None
         elif k == "rollback":
             rollback_engine(eng)
         elif k == "prune":
