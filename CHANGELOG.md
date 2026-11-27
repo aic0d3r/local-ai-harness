@@ -3,6 +3,11 @@
 <!-- One block per section per release, in the order Added, Changed, Fixed. Add new entries to the
      existing block instead of opening a second one, so a release never has two "### Fixed" lists. -->
 
+## 2.3.1 - unreleased
+
+### Changed
+- Setup and `./harness config` menus and yes/no prompts use the brand orange (`#ff7a1a`, as in `docs/brand`) for the cursor, the selected row and the `>` before the picked answer, instead of gum's default pink; the answer itself is no longer dimmed. Exact on truecolor terminals, nearest 256-colour elsewhere; `NO_COLOR` still turns colour off. Tested in `tests/test_harness.py`.
+
 ## 2.3.0 - 2026-11-25
 
 Safe updates: the harness itself and strix-llama.cpp now update only to tagged releases, and both roll back if the update fails.

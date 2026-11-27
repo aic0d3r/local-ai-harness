@@ -176,6 +176,11 @@ try:
     os.environ["NO_COLOR"] = "1"
     assert h.paint("1;32", "ok") == "ok"
     del os.environ["NO_COLOR"]
+    ct = os.environ.pop("COLORTERM", None)
+    assert h.orange() == "38;5;208"  # 256-colour fallback
+    os.environ["COLORTERM"] = "truecolor"
+    assert h.orange() == "38;2;255;122;26" and h.BRAND == "#ff7a1a"  # same orange as docs/brand
+    os.environ.pop("COLORTERM") if ct is None else os.environ.update(COLORTERM=ct)
     tty_row = h.summary_row("choices", [f"{it} ·" for it in items[:-1]] + [items[-1], "(change: ./harness config)"], 52)
     assert tty_row.startswith("  \033[2mchoices  \033[0mmodel"), tty_row
     plain = re.sub(r"\033\[[0-9;]*m", "", tty_row).split("\n")

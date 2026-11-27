@@ -681,10 +681,10 @@ def choose(question, options, yes, esc=None, notes=()):
         print(question_text(question, notes))  # also the fallback: labels too wide for gum wrap here instead of being cut off
         print(gum_hint(esc))
         # stdout only: gum draws its menu on stderr, so capturing stderr leaves the user a blank screen
-        r = subprocess.run(["gum", "choose", "--no-show-help", "--header", "", *options], stdout=subprocess.PIPE, text=True)
+        r = subprocess.run([*GUM_CHOOSE, *options], stdout=subprocess.PIPE, text=True)
         out = r.stdout.strip()
         if out:  # gum trims the line it prints: map it back to the exact option (labels can start with a space)
-            print(paint("2", f"> {out}"))  # gum clears its menu: keep the answer on screen, as a yes/no does
+            print(paint(orange(), ">") + f" {out}")  # gum clears its menu: keep the answer on screen, as a yes/no does
             return next((o for o in options if o.strip() == out), out)
         if r.returncode == 130:  # Ctrl-C: quit everything, even in a submenu (gum exits 1 for a bare Esc)
             cancel()
@@ -1689,7 +1689,7 @@ def ask_yn(question, default=False):
         print(question_text(question))  # our headline and detail: gum cuts a --header off, and would put it under them
         print(gum_hint("no" if IN_MENU else None))
         # stdout only: gum draws its menu on stderr, so capturing stderr leaves a blank prompt
-        r = subprocess.run(["gum", "choose", "--no-show-help", "--header", "", "--selected", "Yes" if default else "No", "Yes", "No"],
+        r = subprocess.run([*GUM_CHOOSE, "--selected", "Yes" if default else "No", "Yes", "No"],
                            stdout=subprocess.PIPE, text=True)
         out = r.stdout.strip()
         if out in ("Yes", "No"):
@@ -2155,6 +2155,16 @@ def choices_items(eng=None):
 def choices_line(eng=None):
     """One line with every saved answer, for the config menu and the wizard's steps list."""
     return " · ".join(choices_items(eng))
+
+
+BRAND = "#ff7a1a"  # docs/brand palette orange; gum maps hex down on 256-colour terminals itself
+# every gum menu (choose() and ask_yn()) goes through this, so none falls back to gum's default pink
+GUM_CHOOSE = ["gum", "choose", "--no-show-help", "--header", "", f"--cursor.foreground={BRAND}", f"--selected.foreground={BRAND}"]
+
+
+def orange():
+    """The brand orange as an ANSI code: exact on truecolor terminals, the nearest 256-colour (208) elsewhere."""
+    return "38;2;255;122;26" if os.environ.get("COLORTERM") in ("truecolor", "24bit") else "38;5;208"
 
 
 def paint(code, text):
