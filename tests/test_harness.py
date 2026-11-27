@@ -103,9 +103,9 @@ assert h.pick_target(h.detect(), True, "gufo")[0] == "gufo"
 gport = h.PROFILES["engines"]["gufo"]["port"]
 h.PROFILES["engines"]["gufo"]["port"] = 1  # nothing answers there
 real_plan = h.plan_start
-h.plan_start = lambda e, r, ask_start=True: {"stop": "halogen", "download": False, "weights": None, "for": e}
+h.plan_start = lambda e, r, ask_start=True, **kw: {"stop": "halogen", "download": False, "weights": None, "for": e}
 assert h.pick_engine({"engines": []}, True, "gufo") == ("gufo", {"stop": "halogen", "download": False, "weights": None, "for": "gufo"})
-h.plan_start = lambda e, r, ask_start=True: None  # the user declined
+h.plan_start = lambda e, r, ask_start=True, **kw: None  # the user declined
 try:
     h.pick_engine({"engines": []}, True, "gufo")
     raise AssertionError("declined start must exit")
@@ -159,7 +159,7 @@ open(f"{AGENT}/harness-sidecar", "w").write("0\n")
 assert h.sidecar_pref() == "0"
 # on a terminal: asked once; a saved answer is not asked again unless --reconfigure
 real_in, real_yn, asked = h.sys.stdin, h.ask_yn, []
-h.sys.stdin, h.ask_yn = types.SimpleNamespace(isatty=lambda: True), (lambda q, d=False: asked.append(d) or True)
+h.sys.stdin, h.ask_yn = types.SimpleNamespace(isatty=lambda: True), (lambda q, d=False, notes=(): asked.append(d) or True)
 h.ask_sidecar()
 assert asked == [] and h.sidecar_pref() == "0"
 h.ask_sidecar(True)
@@ -321,12 +321,10 @@ assert h.ask_weights("gufo", back=True) is True and h.weights_pref() == "stock" 
 open(h.MODEL_FILE, "w").write("qwen38-27b-q8\n")
 h.choose = lambda q, o, y, esc=None, notes=(): seen.clear() or seen.extend(o) or next(x for x in o if x.startswith("abliterated"))
 assert h.ask_weights("gufo", back=True) is True and "abliterated UD-Q8_K_XL (huihui-ai" in " ".join(seen), seen
-assert h.abl_model("qwen36-q4") == "flash-next" and h.abl_model("qwen38-27b") == "qwen38-27b-q8"
-# llama.cpp on Qwen3.6: no abliterated build, so the menu offers the switch to Flash-Next, not a Qwen3.6 that does not exist
+# llama.cpp on Qwen3.6: no abliterated build, so no weights question (the model menu switches to a model that has one)
 open(h.MODEL_FILE, "w").write("qwen36-q4\n")
-h.choose = lambda q, o, y, esc=None, notes=(): seen.clear() or seen.extend(o) or o[0]
-h.ask_weights("llamacpp", back=True)
-assert any("its only build" in x for x in seen) and any("switch to Qwen3.8-Flash-Next" in x for x in seen), seen
+h.choose = lambda q, o, y, esc=None, notes=(): (_ for _ in ()).throw(AssertionError(f"asked: {q}"))
+assert h.ask_weights("llamacpp", back=True) is False
 h.choose, h.ask_yn = real_choose, real_yn
 h.sys.stdin = real_stdin
 os.remove(h.WEIGHTS)  # back to never asked, as the tests below expect
@@ -336,7 +334,7 @@ open(h.MODEL_FILE, "w").write("qwen38-27b-q8\n")  # saved: the Q8
 asked = []
 real_yn, real_stdin = h.ask_yn, h.sys.stdin
 h.sys.stdin = types.SimpleNamespace(isatty=lambda: True)
-h.ask_yn = lambda q, d=False: asked.append(q) or False
+h.ask_yn = lambda q, d=False, notes=(): asked.append(q) or False
 assert h.pick_engine(up, True, "gufo") == ("gufo", None) and asked, asked  # declined: warned, not restarted
 h.ask_yn, h.sys.stdin = real_yn, real_stdin
 open(h.MODEL_FILE, "w").write("qwen38-27b\n")  # saved Q4 == served Q4: no question
@@ -344,8 +342,8 @@ assert not h.serves_other("gufo", {x["engine"]: x for x in up["engines"]})
 # switch_now (a model change in ./harness config): start it, restart it only where the change needs it, then rewire pi
 calls = []
 saved = {n: getattr(h, n) for n in ("detect", "plan_start", "start_engine", "stop_engine", "served_models", "install_extensions", "finish", "ask_yn")}
-h.ask_yn = lambda q, d=False: True
-h.plan_start = lambda e, r, ask_start=True: calls.append(f"plan ask_start={ask_start}") or {"stop": None, "download": False}
+h.ask_yn = lambda q, d=False, notes=(): True
+h.plan_start = lambda e, r, ask_start=True, **kw: calls.append(f"plan ask_start={ask_start}") or {"stop": None, "download": False}
 h.start_engine = lambda e, r, plan=None, wait_s=900: calls.append(f"start {e}") or True
 h.stop_engine = lambda e, r: calls.append(f"stop {e}") or True
 h.served_models = lambda port, e=None, base=None, key=None: ["qwen3.8-27b-q8"]
@@ -416,7 +414,7 @@ h.jput(os.path.join(AGENT, "harness-tuned.json"), {h.hw_key("osmos", "osmos-osmo
 assert set(h.speeds("osmos")) == {"stock", "abliterated"}, h.speeds("osmos")
 assert h.route_speed({"engine": "osmos", "why": "36-42 t/s"}, "deepseek") == "33.5 t/s"  # the model menu shows the measured one, not the published ~
 open(h.WEIGHTS, "w").write("abliterated\n")  # a row names the weights only when they are not the ones you run
-assert h.route_speed({"engine": "halogen", "why": ""}, "flash-next") == "60 t/s stock" and h.route_speed({"engine": "gufo", "why": ""}, "qwen38-27b-q8") == "16 t/s"
+assert h.route_speed({"engine": "halogen", "why": ""}, "flash-next") == "60.0 t/s stock" and h.route_speed({"engine": "gufo", "why": ""}, "qwen38-27b-q8") == "16.0 t/s"  # one decimal, so columns line up
 os.remove(h.WEIGHTS)
 assert "stock 33.5 t/s" in h.speed_text("osmos") and "abliterated 34.3 t/s" in h.speed_text("osmos")
 assert h.speed_text("gufo", "flash-next") == "" and "36.0" in h.speed_text("gufo", "qwen38-27b")
@@ -452,7 +450,8 @@ h.harness_update_offer = lambda: calls.append("restart_offer")
 h.ask_sidecar = lambda *a: None
 h.ask_agent = lambda r: calls.append("agent")
 h.ask_once = lambda *a: False
-h.pick_engine = lambda d, yes, want=None, on_pick=None: (on_pick("gufo"), calls.append("plan_start"), ("gufo", {"stop": "halogen", "download": False}))[2]
+# ask=False: setup asks no stop/download/start question one by one, its "about to" list and Continue? confirm them
+h.pick_engine = lambda d, yes, want=None, on_pick=None, ask=True: (on_pick("gufo"), calls.append(f"plan_start ask={ask}"), ("gufo", {"stop": ["halogen"], "download": False}))[2]
 h.update_offer = lambda e: calls.append("update_offer") or True
 h.upgrader = lambda e: "/bin/true"
 h.install_extensions = lambda e, x, v, launch=True: calls.append(f"install launch={launch}") or True
@@ -466,22 +465,27 @@ h.cmd_setup(argparse.Namespace(yes=False, verbose=False, reconfigure=False, no_t
 h.subprocess.run = real_run
 h.capacity = real_cap
 for n, f in saved.items(): setattr(h, n, f)
-assert calls == ["restart_offer", "agent", "update_offer", "plan_start", "install launch=False", "prepare", "upgrade", "start plan=True", "probe=True"], calls
+assert calls == ["restart_offer", "agent", "update_offer", "plan_start ask=False", "install launch=False", "prepare", "upgrade", "start plan=True", "probe=True"], calls
 # upgrade chosen: pick_engine must not ask "Start <engine>?" (declining it used to exit setup); without one it does
 asked, saved = [], {n: getattr(h, n) for n in ("engine_menu", "plan_start", "ask_weights", "ask_yn", "ask_route")}
 h.engine_menu = lambda r, esc=None: "halogen"
 h.ask_route = lambda esc=None: None  # the model-first menu is tested below
 h.ask_weights = lambda e, back=False: False
-h.plan_start = lambda e, r, ask_start=True: asked.append(ask_start) or {"stop": [], "download": False}
+h.plan_start = lambda e, r, ask_start=True, ask=True: asked.append(ask_start) or {"stop": [], "download": False, "ask": ask}
 real_stdin, h.sys.stdin = h.sys.stdin, types.SimpleNamespace(isatty=lambda: True)
 for want in (True, False):
     h.pick_engine({"engines": []}, False, on_pick=lambda e: want)
 # new weights default while halogen runs: restart = a start plan that stops halogen first; declined = keep it running
-h.ask_weights, h.ask_yn = (lambda e, back=False: True), (lambda q, d=False: True)
+h.ask_weights, h.ask_yn = (lambda e, back=False: True), (lambda q, d=False, notes=(): True)
 hal = {"engines": [{"engine": "halogen", "port": 8731, "models": ["m"]}]}
 assert h.pick_engine(hal, False)[1]["stop"] == ["halogen"] and asked[-1] is False
-h.ask_yn = lambda q, d=False: False
+h.ask_yn = lambda q, d=False, notes=(): False
 assert h.pick_engine(hal, False) == ("halogen", None)
+asked.pop()
+# setup (ask=False): the restart is in its list, not a question, and plan_start asks nothing either
+h.ask_yn = lambda q, d=False, notes=(): (_ for _ in ()).throw(AssertionError(f"asked: {q}"))
+p = h.pick_engine(hal, False, ask=False)[1]
+assert p["stop"] == ["halogen"] and p["ask"] is False, p
 asked.pop()
 h.sys.stdin = real_stdin
 for n, f in saved.items(): setattr(h, n, f)
@@ -501,18 +505,29 @@ assert h.choose_engine({}, None, engine_first=True) == ("halogen", None) and h.c
 picks, plans = iter([("gufo", None), ("halogen", None)]), iter([None, {"stop": None, "download": False}])
 h.choose_engine = lambda r, esc, engine_first=False: next(picks)
 h.offer_recommendation, h.ask_weights = (lambda e: True), (lambda e, back=False: False)
-h.plan_start = lambda e, r, ask_start=True: next(plans)
+h.plan_start = lambda e, r, ask_start=True, **kw: next(plans)
 real_stdin, h.sys.stdin = h.sys.stdin, types.SimpleNamespace(isatty=lambda: True)
 assert h.pick_engine({"engines": []}, False) == ("halogen", {"stop": None, "download": False})
 # ./harness config: a model row for every engine that loads several models (osmos: Inkling and DeepSeek), none for halogen
 saved2 = {n: getattr(h, n) for n in ("active", "running_engines", "sidecar_up", "rollback_pins", "prune_plans", "choose", "osmos_budget_row", "installed_version")}
 h.running_engines, h.sidecar_up, h.rollback_pins, h.prune_plans = (lambda: []), (lambda: False), (lambda e: {}), (lambda r: ({}, 0))
-h.osmos_budget_row, h.installed_version = (lambda: "osmos memory  x"), (lambda e: "v1")
-rows = {}
+h.osmos_budget_row, h.installed_version = (lambda: ("x", "what x means")), (lambda e: "v1")
+rows, titles = {}, {}
 for e in ("osmos", "halogen", "gufo", "strata"):
     h.active, rows[e] = (lambda e=e: {"engine": e, "model": "m"}), []
-    h.choose = lambda q, o, y, esc=None, notes=(), e=e: rows[e].extend(o) or esc
+    h.choose = lambda q, o, y, esc=None, notes=(), e=e, headers=(), start=None: titles.update({e: list(headers)}) or rows[e].extend(o) or esc
     h.cmd_config(None)
+# grouped under title rows, and no done row: Esc or q closes
+assert titles["osmos"] == ["── what runs", "── extras"] and rows["osmos"][0] == "── what runs" and "done" not in rows["osmos"], rows["osmos"]
+rows = {e: [o for o in r if o not in titles[e]] for e, r in rows.items()}
+# a model without an abliterated build has no weights row (strata's saved model here is Flash-Next, which has one)
+h.MODEL_FILE_SAVED = open(h.MODEL_FILE).read() if os.path.exists(h.MODEL_FILE) else None
+open(h.MODEL_FILE, "w").write("qwen36-q4\n")
+h.active, nab = (lambda: {"engine": "strata", "model": "m"}), []
+h.choose = lambda q, o, y, esc=None, notes=(), headers=(), start=None: nab.extend(o) or esc
+h.cmd_config(None)
+assert not any(o.startswith("weights") for o in nab) and any(o.startswith("weights") for o in rows["strata"]), (nab, rows["strata"])
+os.remove(h.MODEL_FILE) if h.MODEL_FILE_SAVED is None else open(h.MODEL_FILE, "w").write(h.MODEL_FILE_SAVED)
 model_row = lambda e: next((o for o in rows[e] if o.startswith("model ")), None)  # noqa: E731
 assert model_row("osmos") and model_row("gufo") and model_row("strata") and model_row("halogen") is None, rows
 assert "DeepSeek" in model_row("osmos") or "Inkling" in model_row("osmos"), model_row("osmos")  # osmos's fallback is DeepSeek, not Flash-Next
@@ -525,10 +540,12 @@ assert ":8091" not in next(o for o in rows["osmos"] if o.startswith("running"))
 # a change is confirmed by one line above the redrawn menu: the row's new value, without its help
 import contextlib, io
 h.active, picks, out = (lambda: {"engine": "halogen", "model": "m"}), [], io.StringIO()
-h.choose = lambda q, o, y, esc=None, notes=(): picks.append(o) or (next(x for x in o if x.startswith("update check")) if len(picks) == 1 else esc)
+starts = []
+h.choose = lambda q, o, y, esc=None, notes=(), headers=(), start=None: starts.append(start) or picks.append(o) or (next(x for x in o if x.startswith("update check")) if len(picks) == 1 else esc)
 with contextlib.redirect_stdout(out):
     h.cmd_config(None)
 assert re.search(r"✓ update check (on|off)\n", out.getvalue()) and "never installs" not in out.getvalue(), out.getvalue()
+assert starts[0] is None and starts[1].startswith("update check"), starts  # the redrawn menu keeps the cursor on the row just changed
 h.IN_MENU = False
 for n, f in saved2.items(): setattr(h, n, f)
 h.sys.stdin = real_stdin
@@ -577,17 +594,33 @@ assert routes_seen[0].endswith("  recommended") and not any(o.endswith("recommen
 bare = [o.removesuffix("recommended").rstrip() for o in routes_seen]
 assert all(len(o) + 2 <= 80 for o in bare), [o for o in bare if len(o) + 2 > 80]
 # model menus: one row per model in aligned columns, this engine's tag only, 80 columns whichever row is current
+# (in an 80-column window the current tag moves to a note, as the route menu's recommended one does)
+real_fits, h.fits = h.fits, lambda o: all(len(x) + 2 <= 80 for x in o)
 for e in ("strata", "gufo", "osmos", "llamacpp"):
     ids = [m for m in h.catalog() if e in h.catalog()[m]["engines"]]
     for c in ids:
-        rows, _ = h.model_rows(ids, e, c)
-        assert all(len(r) + 2 <= 80 for r in rows) and sum(r.endswith("current") for r in rows) == 1, rows
+        rows, notes = h.model_rows(ids, e, c)
+        tagged = sum(r.endswith("current") for r in rows)
+        assert all(len(r) + 2 <= 80 for r in rows) and (tagged == 1 or tagged == 0 and notes[0].startswith("first = current")), (rows, notes)
+h.fits = real_fits
 ink = lambda e: next(r for r in h.model_rows(["inkling2-mini"], e, "")[0])  # noqa: E731
 assert "text, 128K" in ink("strata") and "RAM" in ink("strata") and "vision" in ink("osmos") and "RAM" not in ink("osmos")
 assert h.quant_of("qwen38-27b-q8") == "UD-Q8_K_XL" and h.quant_of("nope") == ""
 h.fits = lambda o: all(len(x) + 2 <= 80 for x in o)  # an 80-column window
-h.choose = lambda q, o, y, esc=None, notes=(): routes_seen.append((q, o)) or h.BACK
-assert h.ask_route(h.BACK) is h.BACK and "the first is recommended" in routes_seen[-1][0] and "recommended" not in routes_seen[-1][1][0]
+h.choose = lambda q, o, y, esc=None, notes=(): routes_seen.append((q, o, notes)) or h.BACK
+assert h.ask_route(h.BACK) is h.BACK and "first = recommended" in routes_seen[-1][2][0] and "recommended" not in routes_seen[-1][1][0]
+# the model you run stays on your engine (Inkling on Strata, though osmos is first for it), tagged current, the faster one named
+saved_active, h.active, h.MODEL_FILE_SAVED = h.active, (lambda: {"engine": "strata"}), open(h.MODEL_FILE).read()
+open(h.MODEL_FILE, "w").write("inkling2-mini\n")
+h.ask_route(h.BACK)
+ink = next(o for o in routes_seen[-1][1] if o.startswith("Inkling"))
+assert "strata" in ink and ink.endswith("current") and any("stays on strata" in n and "osmos" in n for n in routes_seen[-1][2]), routes_seen[-1]
+# the text rule: the question is one line, at most 2 notes under it
+assert all(len(q) <= 78 and len(n) <= 2 for q, _, n in routes_seen[-2:]), routes_seen[-2:]
+h.choose = lambda q, o, y, esc=None, notes=(): next(x for x in o if x.startswith("Inkling"))
+assert h.ask_route() == ("strata", "inkling2-mini")
+h.active = saved_active
+open(h.MODEL_FILE, "w").write(h.MODEL_FILE_SAVED)
 h.fits = saved_fits
 h.capacity = lambda: {"gpu_name": "NVIDIA RTX 4090"}
 assert h.ask_route() is None  # other hardware keeps the engine menu
@@ -608,7 +641,7 @@ assert h.weights_download_gb("osmos") == 0
 h.weights_file = real_wf
 # strata missing: plan_start asks to install it, prepare_start runs install-strata.sh before the start
 saved = {n: getattr(h, n) for n in ("strata_installed", "ask_yn", "heap_holder")}
-h.strata_installed, h.ask_yn, h.heap_holder = (lambda: False), (lambda q, d=False: True), (lambda r: None)
+h.strata_installed, h.ask_yn, h.heap_holder = (lambda: False), (lambda q, d=False, notes=(): True), (lambda r: None)
 h.stock_ready = lambda *a: True  # the stock GGUF is on disk (this box's real state must not decide the test)
 plan = h.plan_start("strata", {})
 assert plan["install"] == "strata" and not plan.get("stock"), plan
@@ -625,9 +658,9 @@ ran = []
 h.subprocess.run = lambda a, **k: ran.append(os.path.basename(a[1])) or types.SimpleNamespace(returncode=0)
 assert h.prepare_start(plan, {}) and ran == ["download-abliterated.sh", "install-strata.sh"], ran
 h.subprocess.run = real_run
-h.ask_yn = lambda q, d=False: "orca-uncensored" not in q
+h.ask_yn = lambda q, d=False, notes=(): "orca-uncensored" not in q
 assert h.plan_start("strata", {}) is None
-h.ask_yn = lambda q, d=False: True
+h.ask_yn = lambda q, d=False, notes=(): True
 for n, f in saved_w.items(): setattr(h, n, f)
 # stock weights missing: gufo and Strata both download the one shared UD-Q4_K_XL first (before any Strata install); declining stops it
 h.stock_ready = lambda *a: False
@@ -639,9 +672,9 @@ ran = []
 h.subprocess.run = lambda a, **k: ran.append(os.path.basename(a[1])) or types.SimpleNamespace(returncode=0)
 assert h.prepare_start(plan, {}) and ran == ["download-stock.sh", "install-strata.sh"], ran
 h.subprocess.run = real_run
-h.ask_yn = lambda q, d=False: "UD-Q4_K_XL" not in q
+h.ask_yn = lambda q, d=False, notes=(): "UD-Q4_K_XL" not in q
 assert h.plan_start("gufo", {}) is None
-h.ask_yn = lambda q, d=False: True
+h.ask_yn = lambda q, d=False, notes=(): True
 h.stock_ready = lambda *a: True
 assert not h.plan_start("gufo", {}).get("stock")
 for n, f in saved.items(): setattr(h, n, f)
@@ -656,14 +689,14 @@ assert all(len(o) + 2 <= 80 for o in seen), [o for o in seen if len(o) + 2 > 80]
 names = [o.split()[0] for o in seen]
 assert names.index("strata") < names.index("gufo"), names
 # words, not marks; engines we cannot start share one row until they answer, and picking it asks which
-assert seen[0].endswith("current, not running") and seen[1].startswith("strata") and seen[1].endswith("recommended") and not any(s in o for o in seen for s in (" | ", "*", " !")), seen
+assert seen[0].endswith("Qwen3.8-Flash-Next   current") and seen[1].startswith("strata")  # current without running: it is down and seen[1].endswith("recommended") and not any(s in o for o in seen for s in (" | ", "*", " !")), seen
 assert seen[-1].startswith("Another server on this box (") and "vllm" not in names, seen
 seen.clear()
 h.choose = lambda q, opts, yes, esc=None, notes=(): seen.append((q, notes)) or next((o for o in opts if o.startswith(("Another", "vllm on"))), opts[0])
 assert h.engine_menu({}) == "vllm" and seen[1][0].startswith("Which server will you run?")
 h.choose = lambda q, opts, yes, esc=None, notes=(): seen.append(opts) or h.BACK
 h.engine_menu({"vllm": {"engine": "vllm", "port": 8000, "models": ["some-model"]}}, h.BACK)
-assert any(o.startswith("vllm") and o.endswith("running: some-model") for o in seen[-1]) and "vllm" not in seen[-1][-1], seen[-1]
+assert any(o.startswith("vllm") and re.search(r"some-model +running$", o) for o in seen[-1]) and "vllm" not in seen[-1][-1], seen[-1]  # the served model in its column
 h.hardware, h.choose = real_hw, real_choose
 # Strata keys its repacked dense weights by model name, so a start on the other weights answer must be refused, not run on the wrong pack
 sd = tempfile.mkdtemp()
@@ -714,7 +747,7 @@ saved = {n: getattr(h, n) for n in ("hardware", "capacity", "ask_yn", "PICK", "Q
 h.hardware, h.capacity = (lambda: {"gpu": "amd", "ram_gb": 96, "npu": False, "cpus": 8}), (lambda: {"gpu_name": "Strix Halo", "vram_gb": 0, "fast_gb": 96, "disk_free_gb": 500})
 h.PICK, h.QUANT_FILE, h.MODEL_FILE = f"{AGENT}/pick.json", f"{AGENT}/quant", f"{AGENT}/model"
 asked = []
-h.ask_yn = lambda q, d=False: asked.append(q) or True
+h.ask_yn = lambda q, d=False, notes=(): asked.append(q) or True
 real_stdin, sys.stdin = sys.stdin, types.SimpleNamespace(isatty=lambda: True)
 h.offer_recommendation("gufo")
 assert open(h.QUANT_FILE).read().strip() == "UD-Q3_K_XL" and json.load(open(h.PICK)) == {"engine": "gufo", "model": "flash-next", "quant": "UD-Q3_K_XL", "ctx": 65536}, asked
@@ -735,7 +768,7 @@ saved = {n: getattr(h, n) for n in ("MODEL_FILE", "strata_installed", "ask_yn", 
 h.MODEL_FILE = f"{AGENT}/model2"
 h.strata_installed, h.heap_holder, h.stock_ready = (lambda: False), (lambda r: None), (lambda *a: False)
 asked = []
-h.ask_yn = lambda q, d=False: asked.append(q) or True
+h.ask_yn = lambda q, d=False, notes=(): asked.append(q) or True
 open(h.MODEL_FILE, "w").write("qwen36-q4\n")
 plan = h.plan_start("strata", {})
 assert plan["install"] == "strata" and not plan.get("stock") and not plan.get("weights") and "Qwen3.6-35B-A3B" in asked[0] and "~24 GB" in asked[0], (plan, asked)

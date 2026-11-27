@@ -112,14 +112,14 @@
     "flash-next-iq3_s":   { "label": "Qwen3.8-Flash-Next, ISTA IQ3_S (matches the full model on Strata's tests)", "tags": {"strata": "full quality"}, "engines": ["strata"], "strata": ["qwen", "IQ3_S"],   "run": "run-iq3_s.sh",   "ram_gb": 60, "download_gb": 84 },
     "flash-next-iq3_xxs": { "label": "Qwen3.8-Flash-Next, ISTA IQ3_XXS", "engines": ["strata"], "strata": ["qwen", "IQ3_XXS"], "run": "run-iq3_xxs.sh", "ram_gb": 53, "download_gb": 76 },
     "flash-next-iq2_xs":  { "label": "Qwen3.8-Flash-Next, ISTA IQ2_XS", "engines": ["strata"], "strata": ["qwen", "IQ2_XS"],  "run": "run-iq2_xs.sh",  "ram_gb": 46, "download_gb": 68 },
-    "flash-next-q2_0":    { "label": "Qwen3.8-Flash-Next, ISTA Q2_0 (smallest, fastest)", "tags": {"strata": "fastest"}, "engines": ["strata"], "strata": ["qwen", "Q2_0"],    "run": "run-q2_0.sh",    "ram_gb": 44, "download_gb": 66 },
+    "flash-next-q2_0":    { "label": "Qwen3.8-Flash-Next, ISTA Q2_0 (smallest, fastest)", "tags": {"strata": "smallest"}, "engines": ["strata"], "strata": ["qwen", "Q2_0"],    "run": "run-q2_0.sh",    "ram_gb": 44, "download_gb": 66 },
     "qwen36-q4": { "label": "Qwen3.6-35B-A3B, UD-Q4_K_XL (small MoE, runs on 32 GB RAM)", "tags": {"strata": "small MoE", "llamacpp": "small MoE"}, "engines": ["llamacpp", "strata"], "strata": ["qwen36", "UD-Q4_K_XL"], "run": "run-qwen36-ud-q4_k_xl.sh", "ram_gb": 32, "download_gb": 24 },
     "qwen36-q6": { "label": "Qwen3.6-35B-A3B, UD-Q6_K_XL", "engines": ["strata"], "strata": ["qwen36", "UD-Q6_K_XL"], "run": "run-qwen36-ud-q6_k_xl.sh", "ram_gb": 44, "download_gb": 34 },
     "qwen36-q8": { "label": "Qwen3.6-35B-A3B, Q8_0", "engines": ["strata"], "strata": ["qwen36", "Q8_0"], "run": "run-qwen36-q8_0.sh", "ram_gb": 52, "download_gb": 39 },
     "inkling2-mini": { "label": "Inkling 2 Mini (osmos: its inkling-2-mini pack, the release's weights + its drafter, 1M context; Strata 0.2.20+: its SQ-20 native pack, 19.4 GB, 128K context, text only)", "tags": {"osmos": "vision, 1M ctx", "strata": "text, 128K"}, "engines": ["osmos", "strata"], "download_gb": 20, "ram_gb": 32, "strata": ["inkling-2-mini", "SQ-20"], "run": "run-inkling-2-mini-sq-20.sh" },
     "deepseek": { "label": "DeepSeek-V4.1-Flash (osmos's osmos-evo pack)", "tags": {"osmos": "from SSD, 1M ctx"}, "engines": ["osmos"] },
-    "qwen38-27b": { "tags": {"gufo": "faster"}, "label": "Qwen3.8 27B dense, UD-Q4_K_XL (+ DFlash2 draft; gufo, Strix Halo; 16.4 GiB target, the faster one)", "engines": ["gufo"], "download_gb": 20 },
-    "qwen38-27b-q8": { "tags": {"gufo": "~40% slower, closer to full"}, "label": "Qwen3.8 27B dense, UD-Q8_K_XL (+ DFlash2 draft; gufo, Strix Halo; 29.3 GiB target, closer to the full model, ~40% slower decode in gufo's benchmarks)", "engines": ["gufo"], "download_gb": 34 }
+    "qwen38-27b": { "label": "Qwen3.8 27B dense, UD-Q4_K_XL (+ DFlash2 draft; gufo, Strix Halo; 16.4 GiB target, the faster one)", "engines": ["gufo"], "download_gb": 20 },
+    "qwen38-27b-q8": { "tags": {"gufo": "closer to full"}, "label": "Qwen3.8 27B dense, UD-Q8_K_XL (+ DFlash2 draft; gufo, Strix Halo; 29.3 GiB target, closer to the full model, ~40% slower decode in gufo's benchmarks)", "engines": ["gufo"], "download_gb": 34 }
   },
   "models": {
     "default": {

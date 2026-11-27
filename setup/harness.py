@@ -242,21 +242,27 @@ def ask_route(esc=None):
     hw, routes = hardware(), {k: v for k, v in PROFILES["routes"].items() if not k.startswith("_")}
     other = "Pick an engine instead"
     cur = (active() or {}).get("engine")
-    rows = [(k, b, route_speed(b, r["model"])) for k, r in routes.items() for b in [best_engine(r, hw)] if b]
+    runs = lambda k: cur and menu_model(cur).startswith(routes[k]["model"] or "")  # noqa: E731
+    stay = {}  # route -> (your engine's entry, the fastest one): the model you run stays on your engine
+    for k, r in routes.items():
+        mine, best = next((e for e in r["engines"] if e["engine"] == cur), None), best_engine(r, hw)
+        if runs(k) and mine and best and mine is not best:
+            stay[k] = (mine, best)
+    rows = [(k, b, route_speed(b, r["model"])) for k, r in routes.items() for b in [stay[k][0] if k in stay else best_engine(r, hw)] if b]
     w = [max(len(c) for c in col) for col in zip(*[(routes[k]["label"].split(" (")[0], routes[k].get("short", ""), ename(b["engine"]), s) for k, b, s in rows])]
-    is_cur = lambda k, b: b["engine"] == cur and engine_model(cur).startswith(routes[k]["model"] or "")  # noqa: E731
+    is_cur = lambda k, b: b["engine"] == cur and runs(k)  # noqa: E731
     # routes are in preference order: the first row is the recommendation
     build = lambda rec: {(f"{routes[k]['label'].split(' (')[0]:<{w[0]}}  {routes[k].get('short', ''):<{w[1]}}  {ename(b['engine']):<{w[2]}}  {s:<{w[3]}}  "  # noqa: E731
-                          + ", ".join(t for t, on in (("recommended", rec and i == 0), ("current", is_cur(k, b))) if on)).rstrip(): (k, b)
+                          + ", ".join(t for t, on in (("current", is_cur(k, b)), ("recommended", rec and i == 0)) if on)).rstrip(): (k, b)
                          for i, (k, b, s) in enumerate(rows)}
     labels, first = build(True), ""
     if not fits([*labels]):  # an 80-column window: the tag moves to the detail line
-        labels, first = build(False), "the first is recommended; "
-    mine = "stock weights" if weights_pref() == "stock" else "abliterated weights where a model has them"
-    detail = f"{first}each runs on its fastest engine here; t/s = decode speed with your {mine}" + (
-        "; ~ = published, not measured here yet (./harness tune measures the running engine)" if any(s.startswith("~") for *_, s in rows) else "")
+        labels, first = build(False), "first = recommended; "
+    notes = [f"{first}each on its fastest engine; t/s: {weights_pref()} weights" + (", ~ = published" if any(s.startswith("~") for *_, s in rows) else "")]
+    notes += [f"{routes[k]['label'].split(' (')[0]} stays on {ename(cur)}, your engine; {ename(b['engine'])} runs it faster ({route_speed(b, routes[k]['model'])})"
+              for k, (_, b) in stay.items()]
     while True:
-        pick = choose(f"Which model do you want to run? {detail}", [*labels, other], False, esc)
+        pick = choose("Which model do you want to run?", [*labels, other], False, esc, notes)
         if pick is BACK:
             return BACK
         if pick == other:
@@ -292,17 +298,23 @@ def ask_variant(model, engine, esc=None):
 
 def model_rows(ids, engine, cur, name=None):
     """-> ({row: catalog id}, notes) for a model menu on engine: name, download, RAM (Strata's figure, so Strata only), the
-    catalog's tag for this engine and 'current', in aligned columns. Empty columns are left out."""
+    catalog's tag for this engine, t/s and 'current', in aligned columns. Empty columns are left out."""
     cat, name = catalog(), name or model_name
     dl = lambda m: cat[m].get("download_gb") or (quant_gb(DEFAULT_QUANT) if m == DEFAULT_MODEL else None)  # noqa: E731
     ram = lambda m: (f"~{cat[m]['ram_gb']} GB RAM" if "ram_gb" in cat[m] else  # noqa: E731
                      f"~{PROFILES['recommend']['strata_min_gb']} GB RAM" if m == DEFAULT_MODEL else "") if engine == "strata" else ""
-    rows = [[name(m), f"~{dl(m)} GB" if dl(m) else "", ram(m), ", ".join(t for t in (cat[m].get("tags", {}).get(engine), "current" * (m == cur)) if t)]
+    rows = [[name(m), f"~{dl(m)} GB" if dl(m) else "", ram(m), cat[m].get("tags", {}).get(engine, ""), model_speed(engine, m), "current" * (m == cur)]
             for m in ids]
-    w = [max(len(r[i]) for r in rows) for i in range(4)]
-    rows = {"  ".join(f"{c:<{w[i]}}" for i, c in enumerate(r) if w[i]).rstrip(): m for r, m in zip(rows, ids)}
-    note = "GB = download" + ("; RAM = what Strata's docs say to plan for (Flash-Next UD-Q4_K_XL: RAM + VRAM)" if engine == "strata" else "") if any(w[1:3]) else ""
-    return rows, [note] if note else []
+    w = [max(len(r[i]) for r in rows) for i in range(6)]
+    pub = any(r[4].startswith("~") for r in rows)
+    build = lambda n: {"  ".join(f"{c:<{w[i]}}" for i, c in enumerate(r[:n]) if w[i]).rstrip(): m for r, m in zip(rows, ids)}  # noqa: E731
+    first = ""
+    if not fits(list(build(6))):  # an 80-column window: the tag moves to a note, as in the model menu
+        w[5], first = 0, "first = current; " * (cur in ids)
+    rows = build(6)
+    note = first + "GB = download" + ("; RAM = Strata's figure (Flash-Next: RAM+VRAM)" if engine == "strata" else "") if any(w[1:3]) else ""
+    speed = f"t/s = decode measured here with your {weights_pref()} weights" + (", ~ = published" if pub else "") if w[4] else ""
+    return rows, [n for n in (note, speed) if n]
 
 
 def routes_label(model):
@@ -313,18 +325,30 @@ def route_speed(b, model):
     """Decode speed for a model menu row: this box's ./harness tune result for the saved variant and weights, else the published one with ~."""
     if model and model_pref().startswith(model):  # the saved variant (27B Q8), not the route's first one
         model = model_pref()
-    got = decode_text(b["engine"], model)
-    if got:
-        return got
-    m = re.search(r"~?[\d.]+(?:-[\d.]+)? t/s", b["why"])
+    return decode_text(b["engine"], model) or published(b["why"])
+
+
+def published(why):
+    """'~65 t/s' from a profiles.json route's why ('65 t/s decode, ...'), '' when it names no speed."""
+    m = re.search(r"~?[\d.]+(?:-[\d.]+)? t/s", why or "")
     return "~" + m.group().lstrip("~") if m else ""
+
+
+def model_speed(engine, m):
+    """A model menu row's t/s: measured here, else the route's published figure for exactly this model on engine, else ''."""
+    why = next((e.get("why") for k, r in PROFILES["routes"].items() if not k.startswith("_") and r.get("model") == m
+                for e in r["engines"] if e["engine"] == engine), None)
+    return decode_text(engine, m) or published(why)
+
+
+def tps(v):
+    """Every measured speed the menus show: one decimal, so 35.0 and 70.4 line up."""
+    return f"{float(v):.1f} t/s"
 
 
 def measured(engine, model):
     """-> (weights, newest ./harness tune result) for engine running model (a catalog or served id), the weights you run
     first; None when nothing was measured."""
-    if engine == "osmos" and model == "deepseek":  # catalog_id() files osmos's osmos-evo results under the default id
-        model = DEFAULT_MODEL
     got = speeds(engine, model)
     w = next((x for x in (weights_pref(), "stock") if x in got), next(iter(got), None))
     return None if w is None else (w, got[w])
@@ -333,7 +357,7 @@ def measured(engine, model):
 def decode_text(engine, model):
     """'35 t/s' measured here, the weights named only when they are not the ones you run ('60 t/s stock'); '' when unmeasured."""
     m = measured(engine, model)
-    return f"{m[1]['decode_tps']:g} t/s" + (f" {m[0]}" if m[0] in WEIGHTS_LABELS and m[0] != weights_pref() else "") if m else ""
+    return tps(m[1]["decode_tps"]) + (f" {m[0]}" if m[0] in WEIGHTS_LABELS and m[0] != weights_pref() else "") if m else ""
 
 
 def describe(rec, cap):
@@ -377,7 +401,7 @@ def offer_recommendation(eng):
     if jget(PICK, None) == want and engine_model(eng) == rec["model"] and (eng != "gufo" or saved_quant() == rec["quant"]):
         return True
     what = catalog()[rec["model"]]["label"] + (f", {rec['quant']}" if rec["quant"] else "") + (f", context {rec['ctx']}" if rec["ctx"] else "")
-    if not ask_yn(f"Use the recommended settings? {what}; {rec['why']}", True):
+    if not ask_yn(f"Use the recommended settings? {what}", True, [rec["why"]]):
         return False
     os.makedirs(AGENT, exist_ok=True)
     open(MODEL_FILE, "w").write(rec["model"] + "\n")
@@ -706,39 +730,56 @@ def fits(options):
     return all(len(o) + 2 <= w for o in options)  # +2: gum's cursor prefix
 
 
-def choose(question, options, yes, esc=None, notes=()):
+def choose(question, options, yes, esc=None, notes=(), headers=(), start=None):
     """notes: detail lines printed wrapped under the question. A row's detail goes here, not into its label: gum cuts a
-    label at the window edge, and a label too wide drops the menu to the numbered list."""
-    if len(options) == 1 or yes:
-        return options[0]
+    label at the window edge, and a label too wide drops the menu to the numbered list.
+    headers: options that only title the rows under them (dim; picking one redraws the menu), never returned.
+    start: the row the cursor starts on (a redrawn menu keeps it on the row just changed)."""
+    real = [o for o in options if o not in headers]
+    if len(real) == 1 or yes:
+        return real[0]
     if not sys.stdin.isatty():
-        no_terminal(question, options[0])
-        return options[0]
+        no_terminal(question, real[0])
+        return real[0]
     if shutil.which("gum") and fits(options):
         print(question_text(question, notes))  # also the fallback: labels too wide for gum wrap here instead of being cut off
         print(gum_hint(esc))
         # stdout only: gum draws its menu on stderr, so capturing stderr leaves the user a blank screen
         # gum shows 10 rows by default and pages the rest behind a bare "••"; every row fits unless the window is short
         h = min(len(options), max(5, shutil.get_terminal_size().lines - 4))
-        r = subprocess.run([*GUM_CHOOSE, f"--height={h}", *options], stdout=subprocess.PIPE, text=True)
-        out = r.stdout.strip()
+        at = start if start in real else real[0]  # the cursor starts on a row you can pick, not on a title
+        while True:
+            shown = [paint("2", o) if o in headers else o for o in options]
+            r = subprocess.run([*GUM_CHOOSE, f"--height={h}", *([f"--selected={at}"] if headers or start else []), *shown],
+                               stdout=subprocess.PIPE, text=True)
+            out = r.stdout.strip()  # gum prints the plain text of a painted row
+            if out and out in [t.strip() for t in headers]:  # a title: nothing to pick, the menu stays with the cursor there
+                at = shown[[o.strip() for o in options].index(out)]  # --selected matches the row as drawn, paint included
+                continue
+            break
         if out:  # gum trims the line it prints: map it back to the exact option (labels can start with a space)
             print(paint(orange(), ">") + f" {out}")  # gum clears its menu: keep the answer on screen, as a yes/no does
-            return next((o for o in options if o.strip() == out), out)
-        if r.returncode == 130:  # Ctrl-C: quit everything, even in a submenu (gum exits 1 for a bare Esc)
+            return next((o for o in real if o.strip() == out), out)
+        if r.returncode == 130:  # Ctrl-C: quit everything, even in a submenu (gum exits 1 for a bare Esc, and for q)
             cancel()
-        if r.returncode == 1:  # Esc: back one level
+        if r.returncode == 1:  # Esc or q: back one level
             return escape(esc)
     print(question_text(question, notes))
-    for i, o in enumerate(options, 1):
+    i = 0
+    for o in options:
+        if o in headers:
+            print(paint("2", f"  {o}"))
+            continue
+        i += 1
         print("\n".join(textwrap.wrap(f"{i}) {o}", term_width(), initial_indent="  ", subsequent_indent="     ")))
+    options = real
     back = esc_label(esc)
     if len(options) <= 9:  # one keypress picks
         prompt = f"pick 1-{len(options)} " + paint("2", f"(Enter = 1, {back})") + ": "
         print(prompt, end="", flush=True)
         while True:
             k = key()
-            if k == "\x1b":
+            if k in ("\x1b", "q"):  # q too, as gum takes it
                 return escape(esc)
             if k in ("\r", "\n") or (k.isdigit() and 0 < int(k) <= len(options)):
                 i = int(k) if k.isdigit() else 1
@@ -1122,6 +1163,8 @@ def catalog_id(served):
 def speeds(engine, model=None):
     """{weights: newest ./harness tune result} for engine, stock and abliterated apart ("?" when an old result's key cannot
     tell). model: a served or catalog id; only results of that model."""
+    if engine == "osmos" and model == "deepseek":  # catalog_id() files osmos's osmos-evo results under the default id
+        model = DEFAULT_MODEL
     out = {}
     for k, v in sorted(jget(os.path.join(AGENT, "harness-tuned.json"), {}).items(), key=lambda kv: kv[1].get("when", "")):
         if v.get("engine") != engine or not v.get("decode_tps") or (model and catalog_id(v.get("model")) != catalog_id(model)):
@@ -1140,7 +1183,7 @@ def speeds(engine, model=None):
 
 def speed_text(engine, model=None):
     """'stock 34.3 t/s decode, 469 prefill (2026-11-15); abliterated ...', or '' when nothing was measured."""
-    return "; ".join(f"{'' if w in ('?', '') else w + ' '}{v['decode_tps']} t/s decode, {v.get('prefill_tps', '?')} prefill "
+    return "; ".join(f"{'' if w in ('?', '') else w + ' '}{tps(v['decode_tps'])} decode, {v.get('prefill_tps', '?')} prefill "
                      f"({v.get('when', '?')}{'' if v.get('protocol') == BENCH_ID else ', old probe'})" for w, v in speeds(engine, model).items())
 
 
@@ -1164,24 +1207,23 @@ def engine_menu(running, esc=None):
     vers = {e: installed_version(e) for e in shown}
     # the model each would run: what it serves, else the saved answer (start-qwen36.sh serves Qwen3.6 unless that answer is flash-next)
     would = lambda e: (running.get(e, {}).get("models") or [None])[0] or ("qwen36-q4" if e == "llamacpp" and model_pref() != DEFAULT_MODEL else engine_model(e))  # noqa: E731
-    tps = {e: decode_text(e, would(e)) or "not measured" for e in shown}
-    w, wv, wt = max(len(ename(e)) for e in shown), max(map(len, vers.values())), max(map(len, tps.values()))
-
-    def status(e):
-        mods = running[e]["models"] if e in running else []
-        name = engine_title(e, mods[0]).split(" · ", 1)[1].split(" (")[0] if mods else ""
-        name = name if len(name) <= 28 else name[:27] + "…"  # a served id can be ~40 columns: gum cuts a row at the window edge
-        state = (f"{'current' if e == cur else 'running'}{': ' + name if name else ''}" if e in running
-                 else "current, not running" if e == cur else "")
-        return ", ".join(s for s in (state, "recommended" if e == rec else "") if s)
-    labels = {f"{ename(e):{w}s}  {vers[e]:{wv}s}{'  ' if wv else ''}{tps[e]:{wt}s}  {status(e)}".rstrip(): e for e in shown}
+    speed = {e: decode_text(e, would(e)) for e in shown}
+    # the family only (the quant is in the model menu), except the 27B, whose Q4/Q8 differ a lot
+    mod = {e: short_model(catalog_id(would(e))) if "27B" in model_name(catalog_id(would(e))) else
+           engine_title(e, would(e)).split(" · ", 1)[1].split(" (")[0].split(", ")[0] for e in shown}
+    mod = {e: n if len(n) <= 24 else n[:23] + "…" for e, n in mod.items()}  # a served id can be ~40 columns: gum cuts a row at the window edge
+    tag = {e: ", ".join(t for t, on in (("current", e == cur), ("running", e in running), ("recommended", e == rec)) if on) for e in shown}
+    cols = [{e: ename(e) for e in shown}, vers, mod, speed, tag]
+    w = [max(map(len, c.values())) for c in cols]
+    labels = {"  ".join(f"{c[e]:<{w[i]}}" for i, c in enumerate(cols) if w[i]).rstrip(): e for e in shown}
     other = f"Another server on this box ({', '.join(map(ename, others))})"
     keep = [ename(e) for e in order if PROFILES["engines"][e].get("loses") == "nothing"]
     lost = sorted({PROFILES["engines"][e].get("loses") for e in order} - {"nothing", None})
+    lost = [x.split(" (")[0] for x in lost]  # 'NPU tools (guard, triage, dedup)': the name is enough on one line
     notes = ["; ".join(([f"only {', '.join(keep)} keep{'s' if len(keep) == 1 else ''} the {', '.join(lost)}"] if keep and lost else [])
                        + ([f"starting another stops {', '.join(map(ename, holder))}"] if holder else []))]
-    if any(t != "not measured" for t in tps.values()):
-        notes.append("t/s = decode speed of the model each would run, from ./harness tune")
+    if any(speed.values()):
+        notes.append("model = what each would run; t/s measured here, blank = not yet")
     while True:
         choice = choose("Which engine?", [*labels] + ([other] if others else []), False, esc, [n for n in notes if n])
         if choice is BACK or choice in labels:
@@ -1289,28 +1331,26 @@ def weights_labels(engine):
 
 
 def ask_weights(engine, back=False):
-    """Which weights the engine loads by default; current answer first. -> True if the answer changed, or BACK."""
-    if engine not in WEIGHTS_ASK or not sys.stdin.isatty() or engine == "osmos" and osmos_inkling():
-        return False
+    """Which weights the engine loads by default; current answer first. -> True if the answer changed, or BACK.
+    Not asked for a model without an abliterated build (Qwen3.6, Strata's packs, Inkling): the model menu switches to one."""
     m = engine_model(engine)
-    own = engine in ("gufo", "strata", "llamacpp") and m not in ABLITERATED  # a model without an abliterated build (Qwen3.6, Strata's packs)
-    cur = "stock" if own else weights_pref()
-    labels = {"stock": f"stock {short_model(m)} (its only build)",
-              "abliterated": f"abliterated: switch to {short_model(abl_model(m))}, which has one"} if own else (
-        {"stock": f"stock {quant_of(m)} (Unsloth)", "abliterated": f"abliterated {quant_of(m)} (huihui-ai; refusals removed)"}
-        if m != DEFAULT_MODEL else weights_labels(engine))
+    if engine not in WEIGHTS_ASK or not sys.stdin.isatty() or engine == "osmos" and osmos_inkling() or \
+            engine in ("gufo", "strata", "llamacpp") and m not in ABLITERATED:
+        return False
+    cur = weights_pref()
+    labels = {"stock": f"stock {quant_of(m)} (Unsloth)", "abliterated": f"abliterated {quant_of(m)} (huihui-ai; refusals removed)"} \
+        if m != DEFAULT_MODEL else weights_labels(engine)
     opts = sorted(labels, key=lambda k: k != cur)
-    measured = speeds(engine, engine_model(engine) if engine in ("gufo", "strata") else None)
-    notes = [f"measured here: {w + ' ' if w else ''}{v['decode_tps']} t/s decode, {v.get('prefill_tps', '?')} prefill ({v.get('when', '?')})"
-             for w, v in measured.items() if w != "?"]
-    choice = choose(f"Which weights should {ename(engine)} load? one answer for every engine, used on its next start"
-                    + ("; abliterated on Strata = gufo's orca-uncensored shards" if engine == "strata" else ""),
-                    [labels[k] for k in opts], False, BACK if back else None, notes)
+    measured = speeds(engine, m)  # this model only: another model's speed is not what these weights give
+    got = " · ".join(f"{w + ' ' if w else ''}{tps(v['decode_tps'])}" for w, v in measured.items() if w != "?")
+    notes = ["one answer for every engine, used on its next start" + ("; Strata's abliterated = gufo's shards" if engine == "strata" else "")]
+    w = max(map(len, labels.values()))
+    rows = {(f"{labels[k]:<{w}}  current" if k == cur else labels[k]): k for k in opts}
+    choice = choose(f"Which weights for {ename(engine)}?", list(rows), False, BACK if back else None,
+                    notes + ([f"measured here: {got}"] if got else []))
     if choice is BACK:
         return BACK
-    pick = {labels[k]: k for k in opts}[choice]
-    if own and pick == "stock":
-        return False  # nothing to change, and the saved answer still holds for the Flash-Next engines
+    pick = rows[choice]
     os.makedirs(AGENT, exist_ok=True)
     open(WEIGHTS, "w").write(pick + "\n")
     return pick != cur
@@ -1375,10 +1415,12 @@ def halogen_preflight():
     return out
 
 
-def plan_start(engine, running, ask_start=True):
+def plan_start(engine, running, ask_start=True, ask=True):
     """Ask everything starting engine needs (stop the memory holder, download, start); nothing runs yet.
     ask_start=False (start.sh): starting the saved engine needs no question, only stopping another one does.
+    ask=False (./setup.sh): no question at all, its "about to" list and Continue? confirm the whole plan.
     -> plan dict, or None when there is no launcher or the user declined."""
+    yes = ask_yn if ask else (lambda q, default=False, notes=(): True)
     c = PROFILES["engines"][engine]
     if not c.get("script"):
         print(f"{ename(engine)} is not running on :{c['port']}: {c.get('start', 'start it yourself, then pick it again')}")
@@ -1394,7 +1436,7 @@ def plan_start(engine, running, ask_start=True):
             return None
     holder = [e for e in heap_holder(running) or [] if e != engine]
     if holder:
-        if not ask_yn(f"Stop {', '.join(map(ename, holder))}? only one engine stays loaded, {ename(engine)} needs the GPU memory; the ling-tiny sidecar stops too"):
+        if not yes(f"Stop {', '.join(map(ename, holder))}? only one engine stays loaded, {ename(engine)} needs the GPU memory; the ling-tiny sidecar stops too"):
             return None
         plan["stop"] = holder
     if engine == "halogen" and not os.path.isfile(halogen_ckpt()):
@@ -1404,7 +1446,7 @@ def plan_start(engine, running, ask_start=True):
             print(f"halogen needs ~{need} GB for its download and only {free} GB are free where {base} is.\n"
                   f"  Free some space, or put it on a bigger disk: HALOGEN_MODELS=/path/to/models ./setup.sh (the folder is remembered).")
             return None
-        if not ask_yn(f"Download the halogen checkpoint? not on this box yet: ~124 GB into {base}, {free} GB free, "
+        if not yes(f"Download the halogen checkpoint? not on this box yet: ~124 GB into {base}, {free} GB free, "
                       "resumable, checked against the repo afterwards"):
             return None
         plan["download"] = True
@@ -1413,22 +1455,21 @@ def plan_start(engine, running, ask_start=True):
     if engine == "strata" and not strata_installed() and own:
         free = shutil.disk_usage(os.path.expanduser("~")).free // 2**30
         e = catalog()[m]
-        if not ask_yn(f"Install Strata for {model_name(m)}? not installed yet. {strata_how()}; "
-                      f"Strata downloads ~{e['download_gb']} GB, {free} GB free, resumable"):
+        if not yes(f"Install Strata for {model_name(m)}? not installed yet; it downloads ~{e['download_gb']} GB, {free} GB free, resumable",
+                   False, [f"the install {strata_how()}"]):
             return None
         plan["install"] = "strata"
     elif engine == "strata" and not strata_installed():
         free = shutil.disk_usage(os.path.expanduser("~")).free // 2**30
         what = "uses gufo's orca-uncensored shards in place" if weights_pref() == "abliterated" else "uses the stock UD-Q4_K_XL that gufo shares in place"
-        if not ask_yn(f"Install Strata for the {weights_pref()} weights? not installed yet. {strata_how()}; it {what}; "
-                      "switching answers rebuilds its small pack, no weights download"):
+        if not yes(f"Install Strata for the {weights_pref()} weights? not installed yet; it {what}",
+                   False, [f"the install {strata_how()}; no weights download"]):
             return None
         plan["install"] = "strata"
         # abliterated Strata runs gufo's orca-uncensored shards in place: say so now, not when the install fails
         if weights_pref() == "abliterated" and not os.path.isfile(weights_file("gufo")):
-            if not ask_yn(f"Download gufo's abliterated GGUF? the abliterated Strata model; ~{WEIGHTS_ENGINES['gufo'][1]} GB, "
-                          f"gated: accept the terms on its Hugging Face page and run `hf auth login` first; "
-                          f"{free} GB free, resumable"):
+            if not yes(f"Download gufo's abliterated GGUF? the abliterated Strata model; ~{WEIGHTS_ENGINES['gufo'][1]} GB, {free} GB free, resumable",
+                       False, ["gated: accept its terms on Hugging Face and run `hf auth login` first"]):
                 return None
             plan["weights"], plan["weights_gb"] = "gufo", WEIGHTS_ENGINES["gufo"][1]
     # gufo and Strata share one stock GGUF (Unsloth's UD-Q4_K_XL, latest Dynamic): fetch it once, whichever comes first.
@@ -1437,7 +1478,7 @@ def plan_start(engine, running, ask_start=True):
     # llama.cpp needs the stock GGUF for both answers: abliterated is a LoRA on top of it
     if (engine in ("gufo", "strata") and weights_pref() == "stock" or engine == "llamacpp") and not own and not stock_ready(q):
         free = shutil.disk_usage(os.path.expanduser("~")).free // 2**30
-        if not ask_yn(f"Download the stock weights? Unsloth {q}, "
+        if not yes(f"Download the stock weights? Unsloth {q}, "
                       f"{'shared by gufo and Strata' if q == DEFAULT_QUANT else 'picked for this hardware'}; "
                       f"~{quant_gb(q)} GB, {free} GB free, resumable"):
             return None
@@ -1448,26 +1489,26 @@ def plan_start(engine, running, ask_start=True):
         r = subprocess.run(["bash", os.path.join(REPO, "scripts", "download-qwen38-27b.sh"), "--print-gb"], capture_output=True, text=True,
                            env=dict(os.environ, GUFO_FAMILY=m)).stdout.strip()
         gb = int(r) if r.isdigit() else catalog()[m]["download_gb"]
-        if not ask_yn(f"Download Qwen3.8 27B {'UD-Q8_K_XL' if m.endswith('-q8') else 'UD-Q4_K_XL'}{' abliterated (huihui-ai)' if m in ABLITERATED and weights_pref() == 'abliterated' else ''}? "
+        if not yes(f"Download Qwen3.8 27B {'UD-Q8_K_XL' if m.endswith('-q8') else 'UD-Q4_K_XL'}{' abliterated (huihui-ai)' if m in ABLITERATED and weights_pref() == 'abliterated' else ''}? "
                       f"~{gb} GB of {catalog()[m]['download_gb']} still to fetch (target, DFlash2 draft, vision projector), {free} GB free, resumable"):
             return None
         plan["g27"], plan["g27_gb"] = m, gb
     if engine == "osmos" and osmos_inkling() and subprocess.run(["bash", os.path.join(REPO, c["script"]), "--check"], capture_output=True).returncode:
         free = shutil.disk_usage(os.path.expanduser("~")).free // 2**30
-        if not ask_yn(f"Download osmos's Inkling 2 Mini pack? the release's weights + its drafter, ~{catalog()[m]['download_gb']} GB, {free} GB free, "
+        if not yes(f"Download osmos's Inkling 2 Mini pack? the release's weights + its drafter, ~{catalog()[m]['download_gb']} GB, {free} GB free, "
                       "fetched and checked by libosmos's installer"):
             return None
         plan["osmos_pack"] = True
     gb = weights_download_gb(engine) if engine in WEIGHTS_ENGINES and not own and weights_pref() != "stock" else 0
     if gb:
         free = shutil.disk_usage(os.path.expanduser("~")).free // 2**30
-        if not ask_yn(f"Download the {weights_pref()} {ename(engine)} weights? not on this box yet{' (or their MTP head)' * (engine == 'gufo')}; "
+        if not yes(f"Download the {weights_pref()} {ename(engine)} weights? not on this box yet{' (or their MTP head)' * (engine == 'gufo')}; "
                       f"~{gb} GB, {free} GB free, resumable"):
             return None
         plan["weights"], plan["weights_gb"] = engine, gb
     if engine == "osmos" and not osmos_inkling() and weights_pref() == "abliterated" and weights_file(engine) == "stock":
         print("  osmos switches to the abliterated patch on start: libosmos reuses it if on disk, else fetches it (0.6 GB)")
-    if ask_start and not ask_yn(f"Start {ename(engine)}? it runs in the background", True):  # the log path is printed if it does not answer
+    if ask_start and not yes(f"Start {ename(engine)}? it runs in the background", True):  # the log path is printed if it does not answer
         return None
     return plan
 
@@ -1596,9 +1637,10 @@ def not_answering(eng):
     return f"{ename(eng)} is not answering on :{e['port']} - {e.get('start', 'start it first')}"
 
 
-def pick_engine(d, yes, want=None, on_pick=None, esc=None, engine_first=False):
+def pick_engine(d, yes, want=None, on_pick=None, esc=None, engine_first=False, ask=True):
     """Questions only: -> (engine, start plan or None if it is already up). Nothing starts here.
     on_pick(engine) runs right after the choice, before any start/stop/download question (the update check).
+    ask=False (./setup.sh): no restart/stop/download/start question, its "about to" list confirms them all.
     With esc=BACK every menu inside returns (BACK, None) instead of quitting, so ./harness config can go back."""
     running = {x["engine"]: x for x in d["engines"]}
     if want:
@@ -1647,13 +1689,13 @@ def pick_engine(d, yes, want=None, on_pick=None, esc=None, engine_first=False):
         upgrading = on_pick(eng) if on_pick else False
         # the server keeps what it loaded at start: a new default needs a restart (an upgrade restarts it anyway)
         what = "weights" if weights_changed else "model"
-        restart = (weights_changed or engine_model(eng) != before or serves_other(eng, running)) and eng in running and not upgrading and ask_yn(
-            f"Restart {ename(eng)}? it is running different {what} than your new default", True)
+        restart = (weights_changed or engine_model(eng) != before or serves_other(eng, running)) and eng in running and not upgrading and (
+            not ask or ask_yn(f"Restart {ename(eng)}? it runs other {what} than your new default", True))
         if eng in running and not restart:
             return eng, None
         if upgrading:  # every upgrader starts the engine itself: "Start?" would be a question with only one answer
             print(f"  the {ename(eng)} upgrade starts it")
-        plan = plan_start(eng, {k: v for k, v in running.items() if k != eng}, ask_start=not (upgrading or restart))
+        plan = plan_start(eng, {k: v for k, v in running.items() if k != eng}, ask_start=not (upgrading or restart), ask=ask)
         if plan:
             break
         print(f"  {ename(eng)} not started; pick again, or Esc at the first menu to {'go back' if esc is BACK else 'quit'}")
@@ -1703,14 +1745,15 @@ LANGS = {".py": "python", ".ts": "typescript", ".tsx": "typescript", ".js": "typ
 IN_MENU = False  # ./harness config: Esc at a yes/no answers No (back to the menu) instead of quitting it
 
 
-def ask_yn(question, default=False):
-    """Every yes/no in the wizard: gum choose Yes/No when installed (same look as choose()), else a plain prompt."""
+def ask_yn(question, default=False, notes=()):
+    """Every yes/no in the wizard: gum choose Yes/No when installed (same look as choose()), else a plain prompt.
+    question: 'Headline? one line of detail'; notes: at most one more short line, as in choose()."""
     if not sys.stdin.isatty():
         no_terminal(question, "yes" if default else "no")
         return default
     if shutil.which("gum"):
         # gum choose, not gum confirm: confirm exits 1 for both "No" and Esc, so Esc could not cancel
-        print(question_text(question))  # our headline and detail: gum cuts a --header off, and would put it under them
+        print(question_text(question, notes))  # our headline and detail: gum cuts a --header off, and would put it under them
         print(gum_hint("no" if IN_MENU else None))
         # stdout only: gum draws its menu on stderr, so capturing stderr leaves a blank prompt
         r = subprocess.run([*GUM_CHOOSE, "--selected", "Yes" if default else "No", "Yes", "No"],
@@ -1724,7 +1767,7 @@ def ask_yn(question, default=False):
             return False
         if r.returncode in (1, 130):  # Esc / Ctrl-C cancel the wizard: a yes/no is not a menu, there is no level above
             cancel()
-    print(question_text(question))
+    print(question_text(question, notes))
     esc = "Esc = no" if IN_MENU else "Esc cancels"
     prompt = ("[Y/n]" if default else "[y/N]") + " " + paint("2", f"(Enter = {'yes' if default else 'no'}, {esc})") + " "
     print(prompt, end="", flush=True)
@@ -1772,9 +1815,9 @@ def ask_sidecar(reconfigure=False):
     dl = "" if glob.glob(os.path.expanduser("~/.models/ling3.0-tiny/*.gguf")) + glob.glob(os.path.join(REPO, "models/ling3.0-tiny/*.gguf")) else ", first run downloads 4.5 GB"
     saved = sidecar_pref()
     default, fast = (saved == "1") if saved else sidecar_default(), capacity()["fast_gb"]
-    room = f" Your GPU has {fast:g} GB, so the default is No." if not default and not saved else ""
-    set_sidecar(ask_yn(f"Run the ling-tiny sidecar? ~2x faster commits/compaction, holds ~8 GiB GPU memory{dl}.{room} "
-                       "(No = the main model writes them)", default))
+    room = f"; your GPU has {fast:g} GB, so the default is No" if not default and not saved else ""
+    set_sidecar(ask_yn(f"Run the ling-tiny sidecar? ~2x faster commits and compaction, holds ~8 GiB GPU memory{dl}", default,
+                       [f"No = the main model writes them{room}"]))
 
 
 def no_pi():
@@ -2601,10 +2644,10 @@ def speed_line(eng, mod, tuned, weights=None):
     screen and ./harness config. weights: the ones tuned is for (default your answer)."""
     w = weights if weights in WEIGHTS_LABELS else weights_pref()
     abl = eng in WEIGHTS_ASK and catalog_id(mod) in ABLITERATED  # only these have a weights answer worth naming
-    s = (f"{tuned['decode_tps']} t/s decode · {tuned['prefill_tps']} t/s prefill "
+    s = (f"{tps(tuned['decode_tps'])} decode · {tuned['prefill_tps']} t/s prefill "
          f"({w + ', ' if abl else ''}measured {tuned.get('when', 'now')})") if tuned.get("decode_tps") else "not measured yet (./harness tune)"
     if abl:  # the other weights' last result beside this one
-        s += "".join(f"; {x} {v['decode_tps']} t/s ({v.get('when', '?')})" for x, v in speeds(eng, mod).items() if x not in ("?", w))
+        s += "".join(f"; {x} {tps(v['decode_tps'])} ({v.get('when', '?')})" for x, v in speeds(eng, mod).items() if x not in ("?", w))
     return s
 
 
@@ -2698,7 +2741,8 @@ def cmd_setup(a):
     if not d["pi"] and not no_pi():
         print("! pi not found on PATH - install it first")
     up = []  # the update check runs as soon as the engine is chosen, before "Start <engine>?"
-    eng, plan = pick_engine(d, a.yes, on_pick=None if a.yes else lambda e: up.append(update_offer(e)) or up[0])
+    # ask=False: no stop/download/start question one by one, the "about to" list below names them all and Continue? confirms
+    eng, plan = pick_engine(d, a.yes, on_pick=None if a.yes else lambda e: up.append(update_offer(e)) or up[0], ask=False)
     upgrade = bool(up and up[0])
     if not a.yes:
         ask_sidecar(a.reconfigure)
@@ -2709,17 +2753,20 @@ def cmd_setup(a):
         # shortcut: this reads speeds() by model and weights while finish() checks the exact tune key (gufo quant included), so a
         # quant change can probe without being listed; pass that key here if it confuses anyone
         tuned = bool(measured(eng, engine_model(eng))) and not upgrade
+        free = f"{shutil.disk_usage(os.path.expanduser('~')).free // 2**30} GB free"  # every download but halogen's lands under ~
+        stops = [e for e in plan["stop"] if e != eng] if plan else []  # eng itself in there = a restart onto the new answer
         steps = [("skip pi wiring (engine + sidecar only)" if no_pi() else "update pi extensions, providers, skills")] + (
-            [f"stop {', '.join(map(ename, plan['stop']))} and the ling-tiny sidecar"] if plan and plan["stop"] else []) + (
-            ["download halogen (~124 GB, resumable)"] if plan and plan["download"] else []) + (
+            [f"stop {', '.join(map(ename, stops))} and the ling-tiny sidecar"] if stops else []) + (
+            [f"download halogen (~124 GB, {free_gb(os.environ.get('HALOGEN_MODELS') or os.path.expanduser('~/models'))} GB free, resumable)"] if plan and plan["download"] else []) + (
             [f"install Strata with {catalog()[engine_model('strata')]['label']} (its setup downloads ~{catalog()[engine_model('strata')]['download_gb']} GB, resumable)" if engine_model("strata") != DEFAULT_MODEL else
              f"install Strata for the {weights_pref()} weights (" + ("orca-uncensored in place" if weights_pref() == "abliterated" else "shared stock UD-Q4_K_XL in place") + ")"] if plan and plan.get("install") == "strata" else []) + (
-            [f"download {catalog()[plan['g27']]['label'].split(' (')[0]} (~{plan.get('g27_gb', catalog()[plan['g27']]['download_gb'])} GB, resumable)"] if plan and plan.get("g27") else []) + (
-            [f"download osmos's Inkling 2 Mini pack (~{catalog()['inkling2-mini']['download_gb']} GB)"] if plan and plan.get("osmos_pack") else []) + (
-            [f"download the stock {plan['stock']} (~{quant_gb(plan['stock'])} GB, resumable)"] if plan and plan.get("stock") else []) + (
-            [f"download the abliterated {ename(eng)} weights (~{plan.get('weights_gb')} GB, resumable)"] if plan and plan.get("weights") else []) + (
+            [f"download {catalog()[plan['g27']]['label'].split(' (')[0]} (~{plan.get('g27_gb', catalog()[plan['g27']]['download_gb'])} GB, {free}, resumable)"] if plan and plan.get("g27") else []) + (
+            [f"download osmos's Inkling 2 Mini pack (~{catalog()['inkling2-mini']['download_gb']} GB, {free})"] if plan and plan.get("osmos_pack") else []) + (
+            [f"download the stock {plan['stock']} (~{quant_gb(plan['stock'])} GB, {free}, resumable)"] if plan and plan.get("stock") else []) + (
+            [f"download the abliterated {ename(eng)} weights (~{plan.get('weights_gb')} GB, {free}, resumable"
+             + ("; gated: accept its terms on Hugging Face and run `hf auth login` first)" if eng == "strata" else ")")] if plan and plan.get("weights") else []) + (
             [f"upgrade {ename(eng)} (restart, rolls back on failure)"] if upgrade else []) + (
-            [f"start {ename(eng)}"] if plan else [f"use the running {ename(eng)}"]) + (
+            [f"restart {ename(eng)} on {model_name(engine_model(eng))}" if eng in plan["stop"] else f"start {ename(eng)}"] if plan else [f"use the running {ename(eng)}"]) + (
             [] if a.no_tune or tuned else ["measure speed (<2 min)"])
         items = choices_items(eng)
         mine = [i for i in items if i.startswith(("model ", "weights "))]
@@ -2855,12 +2902,12 @@ def osmos_budget_mode():
 
 
 def osmos_budget_row():
-    """The config row: the mode, and the newest remembered budget (server/osmos-budget.py keeps one per config)."""
+    """The config row's (value, what it means): the mode, and the newest remembered budget (server/osmos-budget.py keeps one per config)."""
     if osmos_budget_mode() != "remember":
-        return "osmos memory  size every start  (~3 min; adapts to what else runs)"
+        return "size every start", "~3 min, adapts to what else runs"
     saved = sorted(jget(os.path.join(LOGDIR, "osmos-budget.json"), {}).values(), key=lambda v: v.get("when", ""))
     size = f", {saved[-1]['budget_gib']:.0f} GiB" if saved else ""
-    return f"osmos memory  reuse last sizing{size}  (saves ~3 min per start)"
+    return f"reuse last sizing{size}", "saves ~3 min per start"
 
 
 def model_name(m):
@@ -2871,11 +2918,6 @@ def short_model(m):
     """A menu label: the 27B quants get a short name, so a weights row stays inside an 80-column window."""
     lbl = model_name(m)
     return f"Qwen3.8 27B {'Q8' if m.endswith('-q8') else 'Q4'}" if "27B" in lbl else lbl
-
-
-def abl_model(m):
-    """The nearest model with an abliterated build: the 27B Q8 for a 27B, else Flash-Next."""
-    return "qwen38-27b-q8" if is_27b(m) else DEFAULT_MODEL
 
 
 def quant_of(m):
@@ -2925,40 +2967,51 @@ def cmd_config(a):
         if eng and eng != CUSTOM:  # a row stays short (80 columns); the numbers go under the question
             w, tuned = measured(eng, p.get("model")) or (None, {})
             notes.append(f"{ename(eng)}: {speed_line(eng, p.get('model'), tuned, w)}")
-        if own:
-            notes.append(f"{ename(eng)} runs {engine_title(eng, p.get('model')).split(' · ', 1)[1]} only; pick gufo, Strata or strix-llama.cpp under engine to choose a model")
         if eng == "osmos" and not osmos_inkling() and (weights_file("osmos") != "stock") != (weights_pref() == "abliterated"):  # osmos.json = its last start
-            notes.append(f"! osmos was last started on the other weights; {weights_pref()} applies on its next start")
+            notes.append("! osmos runs the other weights until its next start")
+        elif own:
+            notes.append(f"{ename(eng)} runs {engine_title(eng, p.get('model')).split(' · ', 1)[1]} only; other engines offer other models")
         no_abl = eng in ("gufo", "strata", "llamacpp") and engine_model(eng) not in ABLITERATED or eng == "osmos" and osmos_inkling()
         live = {e["engine"]: e["port"] for e in running_engines()}
         ours = [e for e in live if PROFILES["engines"][e].get("script")]  # vllm, ollama, lmstudio, your own llama-server: not ours to stop
         tiny = sidecar_up()
         rb = next(iter(rollback_pins(eng).values()), None)
         old = prune_plans(ENGINE_REPOS)[1]  # ~0.5 s: docker inspects and the launchers' --print-image
-        items = {
+        # (key, name, value, what it means), grouped under a title row each; Esc or q closes, so there is no done row
+        groups = {"what runs": [
             # gufo, Strata, strix-llama.cpp: the model row below names the model
-            # what runs, then extras, then upkeep: gum draws no separators, so the order is the grouping
-            f"engine        {(f'{ename(eng)} {installed_version(eng)}'.rstrip() if multi else versioned_title(eng, p['model'])) if eng else '-'}": "engine",
-            **({f"model         {model_name(menu_model(eng))}": "model"} if multi else {}),
-            **({f"weights       {'stock' if no_abl else weights_pref()}  ({'no abliterated build; pick: switch model' if no_abl else 'every engine, next start'})": "weights"}
-               if not eng or eng in WEIGHTS_ASK else {}),  # vllm, ollama, lmstudio, a custom endpoint: their weights are not ours
-            f"running       {mem_line(live, tiny, ports=False)}{'  (pick: stop)' if ours or tiny else ''}": "running",
-            f"agent         {'none (engine only)' if no_pi() else 'pi'}  (extensions, providers, MCP)": "agent",
-            f"sidecar       {'on' if sc else 'off'}  (ling-tiny, ~8 GiB)": "sidecar",
-            f"voice         {'on' if voice else 'off'}  (Lemonade STT/TTS)": "voice",
-            f"update check  {'on' if upd == '1' else 'off'}  (never installs)": "update",
-            **({osmos_budget_row(): "osmos-budget"} if eng == "osmos" else {}),
-            **({f"rollback      {ename(eng)} {pin_label(rb[0])} -> {pin_label(rb[1])}  (undo the last upgrade)": "rollback"} if rb else {}),
-            **({f"old versions  {old / 1e9:.1f} GB of engine images and backups  (pick to delete)": "prune"} if old else {}),
-            **({"sudo hints    one-time system tips, shown  (pick: show again)": "hints"} if os.path.exists(hints) else {}),
-            "done": "done"}
-        row = {v: r for r, v in items.items()}
+            ("engine", "engine", (f"{ename(eng)} {installed_version(eng)}".rstrip() if multi else versioned_title(eng, p["model"])) if eng else "-", ""),
+            *([("model", "model", model_name(menu_model(eng)), "")] if multi else []),
+            # vllm, ollama, lmstudio, a custom endpoint: their weights are not ours; a model without an abliterated build has one
+            *([("weights", "weights", weights_pref(), "every engine, next start")] if (not eng or eng in WEIGHTS_ASK) and not no_abl else []),
+            ("running", "running", mem_line(live, tiny, ports=False), "")],
+            "extras": [
+            ("agent", "agent", "none" if no_pi() else "pi", "engine only" if no_pi() else "extensions, providers, MCP"),
+            ("sidecar", "sidecar", "on" if sc else "off", "ling-tiny, ~8 GiB"),
+            ("voice", "voice", "on" if voice else "off", "Lemonade STT/TTS"),
+            ("update", "update check", "on" if upd == "1" else "off", "never installs"),
+            *([("osmos-budget", "osmos memory", *osmos_budget_row())] if eng == "osmos" else [])],
+            "upkeep": [
+            *([("rollback", "rollback", f"{ename(eng)} {pin_label(rb[0])} -> {pin_label(rb[1])}", "undoes the last upgrade")] if rb else []),
+            *([("prune", "old versions", f"{old / 1e9:.1f} GB", "engine images and backups")] if old else []),
+            *([("hints", "sudo hints", "shown", "one-time system tips")] if os.path.exists(hints) else [])]}
+        cells = [c for g in groups.values() for c in g]
+        # what a value means lines up over the rows that have one: running's long memory line goes past it
+        w = [max(len(c[1]) for c in cells), max((len(c[2]) for c in cells if c[3]), default=0)]
+        build = lambda desc: {k: f"{n:<{w[0]}}  " + (f"{v:<{w[1]}}  {d}" if desc and d else v) for k, n, v, d in cells}  # noqa: E731
+        row = build(True)
+        if not fits(list(row.values())):  # an 80-column window: the values stay, what they mean goes
+            row = build(False)
+        titles = [f"── {t}" for t, g in groups.items() if g]
+        options = [o for t, g in groups.items() if g for o in (f"── {t}", *(row[c[0]] for c in g))]
         if last and last[0] != "running" and row.get(last[0], last[1]) != last[1]:  # running: memory moves by itself; its step says what it did
-            print(paint("32", "✓ " + " ".join(row[last[0]].split("  (")[0].split())))  # 'sidecar on': the row's value, not its help
-        k = items[choose("Change which setting?", list(items), False, esc="done", notes=notes)]  # Esc at the top closes quietly, like done
-        last = (k, row[k])
-        if k == "done":
+            print(paint("32", "✓ " + " ".join(next(c for c in cells if c[0] == last[0])[1:3])))  # 'sidecar on': the row's value, not its help
+        pick = choose("Change which setting?", options, False, esc="done", notes=notes[:2], headers=titles,  # Esc at the top closes quietly
+                      start=last and row.get(last[0]))
+        if pick == "done":
             return
+        k = next(key for key, r in row.items() if r == pick)
+        last = (k, row[k])
         if k == "running":
             names = [ename(e) for e in ours] + (["the ling-tiny sidecar"] if tiny else [])
             if not names:
@@ -2983,15 +3036,6 @@ def cmd_config(a):
         elif k == "weights":
             eng = p.get("engine", "halogen")
             changed = ask_weights(eng if eng in WEIGHTS_ASK else "halogen", back=True)
-            if no_abl and changed is True:
-                to = "deepseek" if eng == "osmos" else abl_model(engine_model(eng))  # osmos: its DeepSeek pack has the abliterated patch
-                if ask_yn(f"{short_model(engine_model(eng))} has no abliterated build. Switch {ename(eng)} to {short_model(to)} abliterated?", True):
-                    open(MODEL_FILE, "w").write(to + "\n")
-                    switch_now(eng)
-                else:
-                    print("\n".join(textwrap.wrap(f"  saved; {ename(eng)} stays on {short_model(engine_model(eng))} (stock) until you pick "
-                                                  f"{short_model(to)} under model", term_width(), subsequent_indent="    ")))
-                continue
             if changed is BACK or not changed or eng not in WEIGHTS_ASK:
                 continue
             running = {x["engine"]: x for x in detect()["engines"]}
