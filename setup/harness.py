@@ -243,13 +243,18 @@ def ask_route(esc=None):
     other = "Pick an engine instead"
     cur = (active() or {}).get("engine")
     rows = [(k, b, route_speed(b, r["model"])) for k, r in routes.items() for b in [best_engine(r, hw)] if b]
-    w = [max(len(c) for c in col) for col in zip(*[(routes[k]["label"].split(" (")[0], routes[k].get("short", ""), ename(b["engine"])) for k, b, _ in rows])]
-    # routes are in preference order: the first row is the recommendation (said in the detail: "(recommended)" pushed rows past 80 columns)
-    labels = {f"{routes[k]['label'].split(' (')[0]:<{w[0]}}  {routes[k].get('short', ''):<{w[1]}}  {ename(b['engine']):<{w[2]}}  {s}"
-              + ("  (current)" if b["engine"] == cur and engine_model(cur).startswith(routes[k]["model"] or "") else ""): (k, b)
-              for k, b, s in rows}
-    detail = "the first is recommended; each runs on its fastest engine here; t/s = decode speed" + (
-        ", ~ = published, not yet measured on this box" if any(s.startswith("~") for *_, s in rows) else "")
+    w = [max(len(c) for c in col) for col in zip(*[(routes[k]["label"].split(" (")[0], routes[k].get("short", ""), ename(b["engine"]), s) for k, b, s in rows])]
+    is_cur = lambda k, b: b["engine"] == cur and engine_model(cur).startswith(routes[k]["model"] or "")  # noqa: E731
+    # routes are in preference order: the first row is the recommendation
+    build = lambda rec: {(f"{routes[k]['label'].split(' (')[0]:<{w[0]}}  {routes[k].get('short', ''):<{w[1]}}  {ename(b['engine']):<{w[2]}}  {s:<{w[3]}}  "  # noqa: E731
+                          + ", ".join(t for t, on in (("recommended", rec and i == 0), ("current", is_cur(k, b))) if on)).rstrip(): (k, b)
+                         for i, (k, b, s) in enumerate(rows)}
+    labels, first = build(True), ""
+    if not fits([*labels]):  # an 80-column window: the tag moves to the detail line
+        labels, first = build(False), "the first is recommended; "
+    mine = "stock weights" if weights_pref() == "stock" else "abliterated weights where a model has them"
+    detail = f"{first}each runs on its fastest engine here; t/s = decode speed with your {mine}" + (
+        "; ~ = published, not measured here yet (./harness tune measures the running engine)" if any(s.startswith("~") for *_, s in rows) else "")
     while True:
         pick = choose(f"Which model do you want to run? {detail}", [*labels, other], False, esc)
         if pick is BACK:
@@ -272,9 +277,8 @@ def ask_variant(model, engine, esc=None):
     ids = [m for m in cat if (m == model or m.startswith(model + "-")) and engine in cat[m]["engines"]]
     if len(ids) > 1:
         ids.sort(key=lambda m: m != cur)
-        pick = {cat[m]["label"].split(" (")[0]: m for m in ids}
-        notes = [f"{n}: {cat[m]['label'].partition(' (')[2].rstrip(')')}, ~{cat[m]['download_gb']} GB download" for n, m in pick.items()]
-        choice = choose(f"Which {routes_label(model)} for {ename(engine)}?", list(pick), False, esc, notes)
+        pick, note = model_rows(ids, engine, cur, lambda m: model_name(m).partition(", ")[2] or model_name(m))  # the quant: the family is in the question
+        choice = choose(f"Which {routes_label(model)} for {ename(engine)}?", list(pick), False, esc, note)
         if choice is BACK:
             return BACK
         model = pick[choice]
@@ -286,6 +290,21 @@ def ask_variant(model, engine, esc=None):
     return model
 
 
+def model_rows(ids, engine, cur, name=None):
+    """-> ({row: catalog id}, notes) for a model menu on engine: name, download, RAM (Strata's figure, so Strata only), the
+    catalog's tag for this engine and 'current', in aligned columns. Empty columns are left out."""
+    cat, name = catalog(), name or model_name
+    dl = lambda m: cat[m].get("download_gb") or (quant_gb(DEFAULT_QUANT) if m == DEFAULT_MODEL else None)  # noqa: E731
+    ram = lambda m: (f"~{cat[m]['ram_gb']} GB RAM" if "ram_gb" in cat[m] else  # noqa: E731
+                     f"~{PROFILES['recommend']['strata_min_gb']} GB RAM" if m == DEFAULT_MODEL else "") if engine == "strata" else ""
+    rows = [[name(m), f"~{dl(m)} GB" if dl(m) else "", ram(m), ", ".join(t for t in (cat[m].get("tags", {}).get(engine), "current" * (m == cur)) if t)]
+            for m in ids]
+    w = [max(len(r[i]) for r in rows) for i in range(4)]
+    rows = {"  ".join(f"{c:<{w[i]}}" for i, c in enumerate(r) if w[i]).rstrip(): m for r, m in zip(rows, ids)}
+    note = "GB = download" + ("; RAM = what Strata's docs say to plan for (Flash-Next UD-Q4_K_XL: RAM + VRAM)" if engine == "strata" else "") if any(w[1:3]) else ""
+    return rows, [note] if note else []
+
+
 def routes_label(model):
     return next((r["label"].split(" (")[0] for k, r in PROFILES["routes"].items() if not k.startswith("_") and r.get("model") == model), model)
 
@@ -294,12 +313,27 @@ def route_speed(b, model):
     """Decode speed for a model menu row: this box's ./harness tune result for the saved variant and weights, else the published one with ~."""
     if model and model_pref().startswith(model):  # the saved variant (27B Q8), not the route's first one
         model = model_pref()
-    got = speeds(b["engine"], model)
-    v = got.get(weights_pref()) or got.get("stock") or next(iter(got.values()), None)  # the weights you run first
-    if v:
-        return f"{v['decode_tps']:g} t/s"
+    got = decode_text(b["engine"], model)
+    if got:
+        return got
     m = re.search(r"~?[\d.]+(?:-[\d.]+)? t/s", b["why"])
     return "~" + m.group().lstrip("~") if m else ""
+
+
+def measured(engine, model):
+    """-> (weights, newest ./harness tune result) for engine running model (a catalog or served id), the weights you run
+    first; None when nothing was measured."""
+    if engine == "osmos" and model == "deepseek":  # catalog_id() files osmos's osmos-evo results under the default id
+        model = DEFAULT_MODEL
+    got = speeds(engine, model)
+    w = next((x for x in (weights_pref(), "stock") if x in got), next(iter(got), None))
+    return None if w is None else (w, got[w])
+
+
+def decode_text(engine, model):
+    """'35 t/s' measured here, the weights named only when they are not the ones you run ('60 t/s stock'); '' when unmeasured."""
+    m = measured(engine, model)
+    return f"{m[1]['decode_tps']:g} t/s" + (f" {m[0]}" if m[0] in WEIGHTS_LABELS and m[0] != weights_pref() else "") if m else ""
 
 
 def describe(rec, cap):
@@ -359,14 +393,9 @@ def ask_model(engine, back=False):
     ids = [m for m in cat if engine in cat[m]["engines"]]
     if len(ids) < 2 or not sys.stdin.isatty():
         return False
-    cur = engine_model(engine)
+    cur = menu_model(engine)
     ids.sort(key=lambda m: m != cur)
-    pick, notes = {}, []
-    for m in ids:  # the label's (aside) moves to a note, so the row fits a window and gum keeps the arrow menu
-        name, _, aside = cat[m]["label"].partition(" (")
-        pick[name + (f"  ~{cat[m]['download_gb']} GB download, ~{cat[m]['ram_gb']} GB RAM" if "ram_gb" in cat[m] else "") + ("  (current)" if m == cur else "")] = m
-        if aside:
-            notes.append(f"{name}: {aside.rstrip(')')}")
+    pick, notes = model_rows(ids, engine, cur)  # the label's (aside) is about every engine: the row carries this engine's tag
     choice = choose(f"Which model for {ename(engine)}?", list(pick), False, BACK if back else None, notes)
     if choice is BACK:
         return BACK
@@ -374,6 +403,13 @@ def ask_model(engine, back=False):
     os.makedirs(AGENT, exist_ok=True)
     open(MODEL_FILE, "w").write(m + "\n")
     return m != cur
+
+
+def menu_model(engine):
+    """The catalog id engine runs, for the menus: engine_model, except osmos, whose fallback is its DeepSeek pack (engine_model
+    keeps Flash-Next there, which its tune keys are filed under)."""
+    m = engine_model(engine)
+    return "deepseek" if engine == "osmos" and m == DEFAULT_MODEL else m
 
 
 def served_models(port, engine=None, base=None, key=None):
@@ -521,12 +557,13 @@ def own_pids():
             pass  # exited meanwhile
 
 
-def mem_line(live, sidecar):
-    """'osmos :8091 106 GiB, sidecar 9 GiB  (8 of 121 GiB free' - the caller closes the bracket."""
+def mem_line(live, sidecar, ports=True):
+    """'osmos :8091 106 GiB, sidecar 9 GiB  (8 of 121 GiB free' - the caller closes the bracket. ports=False (./harness
+    config): 'osmos 106 GiB, sidecar 9 GiB · 8 of 121 GiB free'."""
     use, m = mem_usage(live, sidecar)
-    names = {ename(e): f"{ename(e)} :{p}{'' if PROFILES['engines'][e].get('script') else ' (not ours)'}" for e, p in live.items()}
+    names = {ename(e): f"{ename(e)}{f' :{p}' if ports else ''}{'' if PROFILES['engines'][e].get('script') else ' (not ours)'}" for e, p in live.items()}
     parts = [f"{' + '.join(names.get(n, n) for n in label.split(' + '))} {'~' if est else ''}{fmt_share(b, m)}" for label, b, est in use]
-    return f"{', '.join(parts) or 'nothing'}  ({fmt_free(m)}"
+    return f"{', '.join(parts) or 'nothing'}" + (f"  ({fmt_free(m)}" if ports else f" · {fmt_free(m)}")
 
 
 def fmt_share(b, m):
@@ -1107,17 +1144,6 @@ def speed_text(engine, model=None):
                      f"({v.get('when', '?')}{'' if v.get('protocol') == BENCH_ID else ', old probe'})" for w, v in speeds(engine, model).items())
 
 
-def last_speed(engine):
-    t = [v for v in jget(os.path.join(AGENT, "harness-tuned.json"), {}).values() if v.get("engine") == engine and v.get("decode_tps")]
-    t.sort(key=lambda v: v.get("when", ""))
-    if not t:
-        return "not measured"
-    old = "" if t[-1].get("protocol") == BENCH_ID else " (old)"  # engine_menu explains (old)
-    return f"{t[-1]['prefill_tps']}/{t[-1]['decode_tps']} t/s{old}"
-
-
-
-
 def heap_holder(running):
     """Every engine we ship a launcher for that is up: only one stays loaded, so starting another stops these first."""
     return [e for e in running if PROFILES["engines"].get(e, {}).get("script")]
@@ -1132,31 +1158,38 @@ def engine_menu(running, esc=None):
                                                        not (hw["gpu"] == "nvidia" and e == "strata"),
                                                        "script" not in PROFILES["engines"][e], e))
     holder = heap_holder(running)
-    labels, loses, stops, speeds, serves = {}, {}, [], [], []
-    # an engine without a launcher is only looked for: say where, it is yours to start
-    states = {e: "running" if e in running else "not running" if PROFILES["engines"][e].get("script") else f"not found on :{PROFILES['engines'][e]['port']}"
-              for e in order}
-    vers = {e: installed_version(e) for e in order}
-    w, ws, wv = max(len(ename(e)) for e in order), max(map(len, states.values())), max(map(len, vers.values()))
-    for e in order:
+    # an engine without a launcher is yours to start: listed only while it answers, the rest share one row
+    others = [e for e in order if not PROFILES["engines"][e].get("script") and e not in running]
+    shown = [e for e in order if e not in others]
+    vers = {e: installed_version(e) for e in shown}
+    # the model each would run: what it serves, else the saved answer (start-qwen36.sh serves Qwen3.6 unless that answer is flash-next)
+    would = lambda e: (running.get(e, {}).get("models") or [None])[0] or ("qwen36-q4" if e == "llamacpp" and model_pref() != DEFAULT_MODEL else engine_model(e))  # noqa: E731
+    tps = {e: decode_text(e, would(e)) or "not measured" for e in shown}
+    w, wv, wt = max(len(ename(e)) for e in shown), max(map(len, vers.values())), max(map(len, tps.values()))
+
+    def status(e):
         mods = running[e]["models"] if e in running else []
-        state = f"{states[e]:{ws}s}"
-        serves += [f"{ename(e)} serves {mods[0]}"] if mods else []  # a served id is up to ~30 columns: a note, not part of the row
-        loses.setdefault(PROFILES["engines"][e].get("loses", "?"), []).append(ename(e))
-        warn = bool(PROFILES["engines"][e].get("script") and holder and e not in running)
-        stops += [e] * bool(warn)
-        speeds.append(last_speed(e))
-        labels[f"{'*' if e == cur else ' '}{'o' if e in running else '-'} {ename(e):{w}s}  {vers[e]:{wv}s}{'  ' if wv else ''}{state} | {speeds[-1]}{' !' if warn else ''}"] = e
-    # what does not fit a row (gum cuts a long one off) is said once under the question
-    every = [ename(e) for e in order]  # most engines lose the same: name the few that do not
-    notes = serves + [f"recommended here: {ename(rec)}"] + [f"{'all but ' + ', '.join(x for x in every if x not in es) if len(every) > len(es) > len(every) / 2 else ', '.join(es)} "
-                      f"{'loses' if len(es) == 1 else 'lose'}: {v}" for v, es in loses.items()]
-    if any(s != "not measured" for s in speeds):
-        notes.append("t/s = prefill/decode on code, from ./harness tune" + ("; (old) = an older probe, re-run it" if any(s.endswith("(old)") for s in speeds) else ""))
-    if stops:
-        notes.append(f"! = stops {', '.join(map(ename, holder))} first: only one engine stays loaded")
-    choice = choose("Which engine? (* = current, o = running)", list(labels), False, esc, notes)
-    return BACK if choice is BACK else labels[choice]
+        name = engine_title(e, mods[0]).split(" · ", 1)[1].split(" (")[0] if mods else ""
+        name = name if len(name) <= 28 else name[:27] + "…"  # a served id can be ~40 columns: gum cuts a row at the window edge
+        state = (f"{'current' if e == cur else 'running'}{': ' + name if name else ''}" if e in running
+                 else "current, not running" if e == cur else "")
+        return ", ".join(s for s in (state, "recommended" if e == rec else "") if s)
+    labels = {f"{ename(e):{w}s}  {vers[e]:{wv}s}{'  ' if wv else ''}{tps[e]:{wt}s}  {status(e)}".rstrip(): e for e in shown}
+    other = f"Another server on this box ({', '.join(map(ename, others))})"
+    keep = [ename(e) for e in order if PROFILES["engines"][e].get("loses") == "nothing"]
+    lost = sorted({PROFILES["engines"][e].get("loses") for e in order} - {"nothing", None})
+    notes = ["; ".join(([f"only {', '.join(keep)} keep{'s' if len(keep) == 1 else ''} the {', '.join(lost)}"] if keep and lost else [])
+                       + ([f"starting another stops {', '.join(map(ename, holder))}"] if holder else []))]
+    if any(t != "not measured" for t in tps.values()):
+        notes.append("t/s = decode speed of the model each would run, from ./harness tune")
+    while True:
+        choice = choose("Which engine?", [*labels] + ([other] if others else []), False, esc, [n for n in notes if n])
+        if choice is BACK or choice in labels:
+            return BACK if choice is BACK else labels[choice]
+        ports = {f"{ename(e)} on :{PROFILES['engines'][e]['port']}": e for e in others}
+        pick = choose("Which server will you run? the harness connects to it, you start it", list(ports), False, BACK)
+        if pick is not BACK:
+            return ports[pick]
 
 
 def stop_process(port):
@@ -1434,7 +1467,7 @@ def plan_start(engine, running, ask_start=True):
         plan["weights"], plan["weights_gb"] = engine, gb
     if engine == "osmos" and not osmos_inkling() and weights_pref() == "abliterated" and weights_file(engine) == "stock":
         print("  osmos switches to the abliterated patch on start: libosmos reuses it if on disk, else fetches it (0.6 GB)")
-    if ask_start and not ask_yn(f"Start {ename(engine)}? runs {c['script']} in the background, log {engine_log(engine)}", True):
+    if ask_start and not ask_yn(f"Start {ename(engine)}? it runs in the background", True):  # the log path is printed if it does not answer
         return None
     return plan
 
@@ -1520,9 +1553,8 @@ def wait_line(engine, port, secs, pid):
 
 
 def gufo_memory(served):
-    """'82.8 of 124.0 GiB GPU memory in use: model files 33.4, prompt cache 20.5, 2 sessions x 262144 context', from gufo's
-    last load in its log ('' when the log has none). gufo reserves every session's context at load, so a big number at
-    idle is expected, not a second model."""
+    """'81 of 124 GiB GPU memory in use', from gufo's last load in its log ('' when the log has none). gufo reserves every
+    session's context at load, so a big number at idle is expected, not a second model."""
     try:
         lines = open(engine_log("gufo"), errors="replace").read().splitlines()
     except OSError:
@@ -1531,26 +1563,15 @@ def gufo_memory(served):
     done = next((kv(l) for l in reversed(lines) if "event=load_completed" in l), None)
     if not done or "gpu_device_used_mib" not in done or done.get("model") != served:  # a log of another load says nothing
         return ""
-    cache = next((kv(l) for l in reversed(lines) if "[cache]" in l and "event=configured" in l), {})
-    used, total = int(done["gpu_device_used_mib"]) / 1024, int(done["gpu_device_total_mib"]) / 1024
-    try:  # the files the launcher loads (target, draft, projector), next to each other on disk
-        first = subprocess.run(["bash", os.path.join(REPO, PROFILES["engines"]["gufo"]["script"]), "--print-model"],
-                               capture_output=True, text=True, env=dict(os.environ, GUFO_FAMILY=catalog_id(served))).stdout.strip()
-        files = sum(os.path.getsize(os.path.join(os.path.dirname(first), f)) for f in os.listdir(os.path.dirname(first))
-                    if f.endswith(".gguf") and (f.startswith(os.path.basename(first).split("-00001-of-")[0]) or "DFlash" in f or "mtp-" in f or f.startswith("mmproj"))) / 2**30
-    except (OSError, KeyError):
-        files = 0
-    parts = ([f"model files {files:.1f}"] if files else []) + (
-        [f"prompt cache {int(cache['capacity_bytes']) / 2**30:.1f}"] if cache.get("capacity_bytes") else []) + (
-        [f"{done['sessions']} sessions x {done.get('context_tokens', '?')} context"] if done.get("sessions") else [])
-    return f"{used:.1f} of {total:.1f} GiB GPU memory in use" + (f": {', '.join(parts)}" if parts else "")
+    return f"{int(done['gpu_device_used_mib']) / 1024:.0f} of {int(done['gpu_device_total_mib']) / 1024:.0f} GiB GPU memory in use"
 
 
-def choose_engine(running, esc):
+def choose_engine(running, esc, engine_first=False):
     """The model menu (Strix Halo) or the engine menu -> (engine, the route's model or None), or BACK.
-    Esc in the engine menu reached from the model menu goes back to the model menu."""
+    Esc in the engine menu reached from the model menu goes back to the model menu. engine_first: the engine menu only
+    (./harness config's engine row; the model question follows for an engine that loads several)."""
     while True:
-        route = ask_route(esc)
+        route = None if engine_first else ask_route(esc)
         if route is BACK:
             return BACK
         if route and route is not ENGINE_MENU:
@@ -1575,7 +1596,7 @@ def not_answering(eng):
     return f"{ename(eng)} is not answering on :{e['port']} - {e.get('start', 'start it first')}"
 
 
-def pick_engine(d, yes, want=None, on_pick=None, esc=None):
+def pick_engine(d, yes, want=None, on_pick=None, esc=None, engine_first=False):
     """Questions only: -> (engine, start plan or None if it is already up). Nothing starts here.
     on_pick(engine) runs right after the choice, before any start/stop/download question (the update check).
     With esc=BACK every menu inside returns (BACK, None) instead of quitting, so ./harness config can go back."""
@@ -1586,8 +1607,9 @@ def pick_engine(d, yes, want=None, on_pick=None, esc=None):
             sys.exit(f"unknown engine {eng}; known: {', '.join(PROFILES['engines'])}")
         c = PROFILES["engines"][eng]
         if serves_other(eng, running):  # ./harness use gufo after a model change in ./harness config
-            if not (sys.stdin.isatty() and ask_yn(f"Restart {ename(eng)}? it serves {running[eng]['models'][0]}, your saved model is {engine_model(eng)}", True)):
-                print(f"  ! {ename(eng)} keeps serving {running[eng]['models'][0]} until it restarts on {engine_model(eng)}")
+            now, saved = model_name(catalog_id(running[eng]["models"][0])), model_name(engine_model(eng))
+            if not (sys.stdin.isatty() and ask_yn(f"Restart {ename(eng)}? it runs {now}, your saved model is {saved}", True)):
+                print(f"  ! {ename(eng)} keeps running {now} until it restarts on {saved}")
                 return eng, None
             plan = plan_start(eng, {k: v for k, v in running.items() if k != eng}, ask_start=False) or not_started(eng, esc)
             if plan is BACK:
@@ -1609,7 +1631,7 @@ def pick_engine(d, yes, want=None, on_pick=None, esc=None):
                                       f"except {', '.join(yours)}: start those yourself.", term_width())))
     before_pref = model_pref()
     while True:  # Esc in any menu below, or a start that did not happen, comes back to the first menu
-        pick = choose_engine(running, esc)
+        pick = choose_engine(running, esc, engine_first)
         if pick is BACK:
             return BACK, None
         eng, route_model = pick
@@ -1663,8 +1685,8 @@ def bring_up(d, eng, plan, yes, mod="", esc=None):
     return (BACK, None) if m is BACK else (eng, m)
 
 
-def pick_target(d, yes, want=None, esc=None):
-    eng, plan = pick_engine(d, yes, want, esc=esc)
+def pick_target(d, yes, want=None, esc=None, engine_first=False):
+    eng, plan = pick_engine(d, yes, want, esc=esc, engine_first=engine_first)
     if eng is BACK:
         return BACK, None
     return bring_up(d, eng, plan, yes, (want or "").partition("/")[2], esc)
@@ -1742,10 +1764,10 @@ def set_sidecar(on):
     open(os.path.join(AGENT, "harness-sidecar"), "w").write("1\n" if on else "0\n")
 
 
-def ask_sidecar():
-    """Ask on every interactive wizard run whether to run the ling-tiny sidecar, pre-filled with the saved answer (else the
-    GPU-size default); setup.sh reads the saved answer. Without a terminal the saved answer stands."""
-    if not sys.stdin.isatty():
+def ask_sidecar(reconfigure=False):
+    """Ask once whether to run the ling-tiny sidecar (default: the GPU size); setup.sh reads the saved answer. Later runs show
+    it in the summary and ./harness config changes it; --reconfigure asks again, pre-filled with the saved answer."""
+    if not sys.stdin.isatty() or sidecar_pref() and not reconfigure:
         return
     dl = "" if glob.glob(os.path.expanduser("~/.models/ling3.0-tiny/*.gguf")) + glob.glob(os.path.join(REPO, "models/ling3.0-tiny/*.gguf")) else ", first run downloads 4.5 GB"
     saved = sidecar_pref()
@@ -2429,8 +2451,7 @@ def launch_offer(eng, prov, mid):
     if not (sys.stdin.isatty() and shutil.which("pi")):
         return
     cwd = os.getcwd()
-    if cwd == REPO:
-        print("  (you are in the harness checkout; start it on a project with: ./start.sh ~/your-project)")
+    if cwd == REPO:  # the ready screen's next block already says ./start.sh ~/your-project
         return
     if ask_yn(f"Start pi in {cwd} now?", True):
         os.environ["PONYTAIL_HIDE_STATUS"] = "1"  # same as start.sh
@@ -2575,6 +2596,18 @@ def verified(eng):
     return passed
 
 
+def speed_line(eng, mod, tuned, weights=None):
+    """'59.5 t/s decode · 1564 t/s prefill (stock, measured 2026-11-27)' plus the other weights' last decode, for the ready
+    screen and ./harness config. weights: the ones tuned is for (default your answer)."""
+    w = weights if weights in WEIGHTS_LABELS else weights_pref()
+    abl = eng in WEIGHTS_ASK and catalog_id(mod) in ABLITERATED  # only these have a weights answer worth naming
+    s = (f"{tuned['decode_tps']} t/s decode · {tuned['prefill_tps']} t/s prefill "
+         f"({w + ', ' if abl else ''}measured {tuned.get('when', 'now')})") if tuned.get("decode_tps") else "not measured yet (./harness tune)"
+    if abl:  # the other weights' last result beside this one
+        s += "".join(f"; {x} {v['decode_tps']} t/s ({v.get('when', '?')})" for x, v in speeds(eng, mod).items() if x not in ("?", w))
+    return s
+
+
 def finish(eng, mod, no_tune, launch=False):
     tuned = jget(os.path.join(AGENT, "harness-tuned.json"), {}).get(hw_key(eng, mod), {}) if no_tune else {}
     if not no_tune:
@@ -2591,7 +2624,7 @@ def finish(eng, mod, no_tune, launch=False):
     if no_pi():
         e = PROFILES["engines"][eng]
         passed = verified(eng)
-        print(f"\n== {'ready' if passed else 'NOT ready'} (pi not wired) ==\n  engine   {ename(eng)}: http://127.0.0.1:{e['port']}/v1  (OpenAI-compatible, key: any)\n  sidecar  http://127.0.0.1:8090/v1")
+        print("\n" + paint("1;32" if passed else "1;31", f"{'ready' if passed else 'NOT ready'} (pi not wired)") + "\n  engine   {ename(eng)}: http://127.0.0.1:{e['port']}/v1  (OpenAI-compatible, key: any)\n  sidecar  http://127.0.0.1:8090/v1")
         print("  re-enable pi: ./setup.sh --pi   (then ./setup.sh)")
         jput(os.path.join(AGENT, "harness-profile.json"), {"engine": eng, "provider": e["provider"], "model": mod,
                                                            "npu": bool(e["npu"]), "npuUrl": "http://127.0.0.1:8731", "sidecarUrl": "http://127.0.0.1:8090"})  # so start.sh knows the engine
@@ -2599,30 +2632,20 @@ def finish(eng, mod, no_tune, launch=False):
             sys.exit(1)
         return
     prov, mid, ctx = apply(eng, mod, tuned)
-    speed = f"{tuned['prefill_tps']} t/s prefill, {tuned['decode_tps']} t/s decode (short code)" if tuned.get("decode_tps") else "not probed (./harness tune)"
-    if no_tune and tuned.get("decode_tps"):
-        speed += f" (saved {tuned.get('when', '')}; re-measure: ./harness tune)"
-    if eng in WEIGHTS_ASK and catalog_id(mod) in ABLITERATED:  # the other weights' last result beside this one
-        other = {w: v for w, v in speeds(eng, mod).items() if w not in ("?", weights_pref())}
-        speed = f"{weights_pref()}: {speed}" + "".join(f"; {w}: {v['prefill_tps']} t/s prefill, {v['decode_tps']} t/s decode "
-                                                       f"({v.get('when', '?')})" for w, v in other.items())
+    speed = speed_line(eng, mod, tuned)
     passed = verified(eng)
     width = shutil.get_terminal_size().columns if sys.stdout.isatty() else None  # narrow windows wrap; piped output stays one line
-    items = choices_items(eng)
-    head = f"== {'ready' if passed else 'NOT ready'} =="
-    print("\n" + paint("1;32" if passed else "1;31", head))
-    print(summary_row("engine", [versioned_title(eng, mod), f"(pi: {prov}/{mid})"], width))
-    print(summary_row("context", str(ctx), width))
+    print("\n" + paint("1;32" if passed else "1;31", "ready" if passed else "NOT ready"))
+    print(summary_row("engine", versioned_title(eng, mod), width))
+    print(summary_row("context", (f"{ctx >> 20}M" if ctx % 2**20 == 0 else f"{ctx >> 10}K" if ctx % 1024 == 0 else f"{ctx:,}") + " tokens" if ctx else "unknown", width))
     print(summary_row("speed", speed, width))
     mem = gufo_memory(mod) if eng == "gufo" else ""
     if mem:
         print(summary_row("memory", mem, width))
-    print(summary_row("start", "./start.sh ~/your-project", width))
-    print(summary_row("monitor", "./harness monitor (live speed, memory and requests; Ctrl-C to quit)" if eng in ("halogen", "strata")
-                      else "./harness monitor (prefill and decode of each reply, timed by pi; also in pi's footer)", width))
-    print(summary_row("measure", "./harness tune (1 min quick probe) · ./harness bench (comparable bench-v1 runs)", width))
-    print(summary_row("choices", [f"{it} ·" for it in items[:-1]] + [items[-1], "(change: ./harness config)"], width))
-    print(summary_row("check", "./setup.sh --doctor (status: ./harness status)", width))
+    cmd, what = ("./start.sh ~/your-project", "start pi on a project") if passed else ("./setup.sh --doctor", "what failed, in full")
+    print("\n" + paint("1", "next") + f"\n  {cmd}   " + paint("2", what))
+    also = ["./harness monitor", "tune", "bench", "status", "config"] + ["./setup.sh --doctor"] * passed  # failed: the doctor is the next step
+    print(summary_row("also", [f"{c} ·" for c in also[:-1]] + also[-1:], width))
     if not passed:
         sys.exit(1)
     if launch:
@@ -2661,7 +2684,8 @@ def cmd_setup(a):
     d = detect()
     h = d["hardware"]
     verbose = a.verbose or active() is None  # first run shows everything; later runs only what needs you
-    print(f"hardware: {h['ram_gb']} GB RAM, gpu={h['gpu']}, npu={h['npu']}; engines up: {[x['engine'] for x in d['engines']] or 'none'}")
+    gpu = {"amd": "AMD GPU", "nvidia": "NVIDIA GPU", "apple": "Apple GPU"}.get(h["gpu"], "no supported GPU") + (" + NPU" if h["npu"] else "")
+    print(f"hardware: {h['ram_gb']} GB RAM, {gpu}; running: {', '.join(ename(x['engine']) for x in d['engines']) or 'nothing'}")
     cap = capacity()
     if a.yes or not sys.stdin.isatty() or "Strix Halo" not in cap.get("gpu_name", ""):  # Strix Halo: the model menu's first row is the recommendation
         print("\n".join(describe(recommend(h, cap), cap)[1:]))
@@ -2677,13 +2701,15 @@ def cmd_setup(a):
     eng, plan = pick_engine(d, a.yes, on_pick=None if a.yes else lambda e: up.append(update_offer(e)) or up[0])
     upgrade = bool(up and up[0])
     if not a.yes:
-        ask_sidecar()
+        ask_sidecar(a.reconfigure)
     if not sidecar_pref() and not sidecar_default():  # not asked (--yes, no terminal) on a small card: do not reserve 8 GiB of it unasked
         set_sidecar(False)
     voice = not a.yes and ask_once("voice", "Set up voice? local STT/TTS via Lemonade", a.reconfigure)
     if not a.yes and sys.stdin.isatty():
-        steps = [("skip pi wiring (engine + sidecar only)" if no_pi() else f"install/update pi extensions, providers, skills{'' if verbose else f' (details: {SETUP_LOG})'}"),
-                 choices_line(eng)] + (
+        # shortcut: this reads speeds() by model and weights while finish() checks the exact tune key (gufo quant included), so a
+        # quant change can probe without being listed; pass that key here if it confuses anyone
+        tuned = bool(measured(eng, engine_model(eng))) and not upgrade
+        steps = [("skip pi wiring (engine + sidecar only)" if no_pi() else "update pi extensions, providers, skills")] + (
             [f"stop {', '.join(map(ename, plan['stop']))} and the ling-tiny sidecar"] if plan and plan["stop"] else []) + (
             ["download halogen (~124 GB, resumable)"] if plan and plan["download"] else []) + (
             [f"install Strata with {catalog()[engine_model('strata')]['label']} (its setup downloads ~{catalog()[engine_model('strata')]['download_gb']} GB, resumable)" if engine_model("strata") != DEFAULT_MODEL else
@@ -2693,9 +2719,14 @@ def cmd_setup(a):
             [f"download the stock {plan['stock']} (~{quant_gb(plan['stock'])} GB, resumable)"] if plan and plan.get("stock") else []) + (
             [f"download the abliterated {ename(eng)} weights (~{plan.get('weights_gb')} GB, resumable)"] if plan and plan.get("weights") else []) + (
             [f"upgrade {ename(eng)} (restart, rolls back on failure)"] if upgrade else []) + (
-            [f"start {ename(eng)} (asks which model once it answers, if it serves several)"] if plan else [f"use {ename(eng)} (running)"]) + (
-            [] if a.no_tune else ["probe speed (<2 min; skipped if already measured for this model, unless upgraded)"])
-        print("\nabout to:\n" + "".join(textwrap.fill(s, term_width(), initial_indent="  - ", subsequent_indent="    ") + "\n" for s in steps))
+            [f"start {ename(eng)}"] if plan else [f"use the running {ename(eng)}"]) + (
+            [] if a.no_tune or tuned else ["measure speed (<2 min)"])
+        items = choices_items(eng)
+        mine = [i for i in items if i.startswith(("model ", "weights "))]
+        width = term_width() + 2
+        print("\n" + paint("1", "your choices") + "\n" + summary_row("engine", [f"{it} ·" for it in [ename(eng), *mine][:-1]] + [mine[-1]], width)
+              + "\n" + summary_row("extras", " · ".join(i for i in items if i not in mine) + " (change: ./harness config)", width))
+        print("\n" + paint("1", "about to") + "\n" + "".join(textwrap.fill(s, term_width(), initial_indent=f"  {n}. ", subsequent_indent="     ") + "\n" for n, s in enumerate(steps, 1)))
         if not ask_yn("Continue?", True):
             sys.exit("nothing changed")  # main() puts the answers back
     UNDO = None
@@ -2828,8 +2859,8 @@ def osmos_budget_row():
     if osmos_budget_mode() != "remember":
         return "osmos memory  size every start  (~3 min; adapts to what else runs)"
     saved = sorted(jget(os.path.join(LOGDIR, "osmos-budget.json"), {}).values(), key=lambda v: v.get("when", ""))
-    size = f" ({saved[-1]['budget_gib']:g} GiB)" if saved else ""
-    return f"osmos memory  remember last size{size}  (skips ~3 min sizing)"
+    size = f", {saved[-1]['budget_gib']:.0f} GiB" if saved else ""
+    return f"osmos memory  reuse last sizing{size}  (saves ~3 min per start)"
 
 
 def model_name(m):
@@ -2848,8 +2879,8 @@ def abl_model(m):
 
 
 def quant_of(m):
-    """'UD-Q8_K_XL' from the catalog label ('Qwen3.8 27B dense, UD-Q8_K_XL + DFlash2 draft')."""
-    return catalog().get(m, {}).get("label", "").partition(", ")[2].partition(" +")[0]
+    """'UD-Q8_K_XL' from the catalog label ('Qwen3.8 27B dense, UD-Q8_K_XL (+ DFlash2 draft; ...)')."""
+    return model_name(m).partition(", ")[2] if m in catalog() else ""
 
 
 def switch_now(eng):
@@ -2881,17 +2912,20 @@ def cmd_config(a):
     global IN_MENU
     IN_MENU = True
     hints = os.path.join(AGENT, "harness-hints-shown")
+    last = None  # (key, row) picked last round: its row changed = say so above the redrawn menu
     while True:
         p = active() or {}
         upd = update_pref()
         sc = sidecar_pref() != "0"
         voice = bool(jget(EXTRAS, {}).get("voice"))
         eng = p.get("engine")
-        own = eng and eng not in ("gufo", "strata", "llamacpp") and eng != CUSTOM  # serves its own model: the model answer is not its
+        multi = bool(eng) and sum(eng in v["engines"] for v in catalog().values()) > 1  # loads the model answer: a model row
+        own = eng and not multi and eng != CUSTOM  # serves its own model: the model answer is not its
         notes = []
         if eng and eng != CUSTOM:  # a row stays short (80 columns); the numbers go under the question
-            notes.append(f"{ename(eng)} speed (./harness tune): {speed_text(eng, p.get('model')) or 'not measured yet'}")
-        if own and eng != "osmos":  # osmos's model (DeepSeek or Inkling) comes from the model menu
+            w, tuned = measured(eng, p.get("model")) or (None, {})
+            notes.append(f"{ename(eng)}: {speed_line(eng, p.get('model'), tuned, w)}")
+        if own:
             notes.append(f"{ename(eng)} runs {engine_title(eng, p.get('model')).split(' · ', 1)[1]} only; pick gufo, Strata or strix-llama.cpp under engine to choose a model")
         if eng == "osmos" and not osmos_inkling() and (weights_file("osmos") != "stock") != (weights_pref() == "abliterated"):  # osmos.json = its last start
             notes.append(f"! osmos was last started on the other weights; {weights_pref()} applies on its next start")
@@ -2902,22 +2936,27 @@ def cmd_config(a):
         rb = next(iter(rollback_pins(eng).values()), None)
         old = prune_plans(ENGINE_REPOS)[1]  # ~0.5 s: docker inspects and the launchers' --print-image
         items = {
-            f"engine        {versioned_title(eng, p['model']) if eng else '-'}": "engine",
-            f"running       {mem_line(live, tiny)}{', pick to stop' if ours or tiny else ''})": "running",
-            **({f"model         {model_name(engine_model(eng))}": "model"}
-               if eng in ("gufo", "strata", "llamacpp") else {}),  # only these load the model answer
-            **({f"weights       {'stock' if no_abl else weights_pref()}  ({'this model has no abliterated build' if no_abl else 'every engine, next start'})": "weights"}
+            # gufo, Strata, strix-llama.cpp: the model row below names the model
+            # what runs, then extras, then upkeep: gum draws no separators, so the order is the grouping
+            f"engine        {(f'{ename(eng)} {installed_version(eng)}'.rstrip() if multi else versioned_title(eng, p['model'])) if eng else '-'}": "engine",
+            **({f"model         {model_name(menu_model(eng))}": "model"} if multi else {}),
+            **({f"weights       {'stock' if no_abl else weights_pref()}  ({'no abliterated build; pick: switch model' if no_abl else 'every engine, next start'})": "weights"}
                if not eng or eng in WEIGHTS_ASK else {}),  # vllm, ollama, lmstudio, a custom endpoint: their weights are not ours
+            f"running       {mem_line(live, tiny, ports=False)}{'  (pick: stop)' if ours or tiny else ''}": "running",
             f"agent         {'none (engine only)' if no_pi() else 'pi'}  (extensions, providers, MCP)": "agent",
-            f"sidecar       {'on' if sc else 'off'}  (ling-tiny, ~8 GiB GPU memory)": "sidecar",
+            f"sidecar       {'on' if sc else 'off'}  (ling-tiny, ~8 GiB)": "sidecar",
             f"voice         {'on' if voice else 'off'}  (Lemonade STT/TTS)": "voice",
-            f"update check  {'on' if upd == '1' else 'off'}  (newer engine release; never installs)": "update",
-            **({"sudo hints    shown once  (pick to show them again on the next ./setup.sh)": "hints"} if os.path.exists(hints) else {}),
+            f"update check  {'on' if upd == '1' else 'off'}  (never installs)": "update",
             **({osmos_budget_row(): "osmos-budget"} if eng == "osmos" else {}),
             **({f"rollback      {ename(eng)} {pin_label(rb[0])} -> {pin_label(rb[1])}  (undo the last upgrade)": "rollback"} if rb else {}),
             **({f"old versions  {old / 1e9:.1f} GB of engine images and backups  (pick to delete)": "prune"} if old else {}),
+            **({"sudo hints    one-time system tips, shown  (pick: show again)": "hints"} if os.path.exists(hints) else {}),
             "done": "done"}
+        row = {v: r for r, v in items.items()}
+        if last and last[0] != "running" and row.get(last[0], last[1]) != last[1]:  # running: memory moves by itself; its step says what it did
+            print(paint("32", "✓ " + " ".join(row[last[0]].split("  (")[0].split())))  # 'sidecar on': the row's value, not its help
         k = items[choose("Change which setting?", list(items), False, esc="done", notes=notes)]  # Esc at the top closes quietly, like done
+        last = (k, row[k])
         if k == "done":
             return
         if k == "running":
@@ -2930,7 +2969,7 @@ def cmd_config(a):
                 stop_sidecar()
                 print(f"  stopped; {mem_after_stop()}")
         elif k == "engine":
-            eng, mod = pick_target(detect(), False, esc=BACK)
+            eng, mod = pick_target(detect(), False, esc=BACK, engine_first=True)  # the row says engine: the engine menu, not the model one
             if eng is BACK:
                 continue  # Esc in a submenu: back to "Change which setting?", nothing changed
             install_extensions(eng, verbose=False)
@@ -2945,7 +2984,7 @@ def cmd_config(a):
             eng = p.get("engine", "halogen")
             changed = ask_weights(eng if eng in WEIGHTS_ASK else "halogen", back=True)
             if no_abl and changed is True:
-                to = abl_model(engine_model(eng))
+                to = "deepseek" if eng == "osmos" else abl_model(engine_model(eng))  # osmos: its DeepSeek pack has the abliterated patch
                 if ask_yn(f"{short_model(engine_model(eng))} has no abliterated build. Switch {ename(eng)} to {short_model(to)} abliterated?", True):
                     open(MODEL_FILE, "w").write(to + "\n")
                     switch_now(eng)

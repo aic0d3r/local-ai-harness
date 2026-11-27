@@ -14,16 +14,17 @@ The full walkthrough of `./setup.sh`, the `./harness` commands and `./start.sh`.
 2. **Asks which model, then which engine, every run.** On Strix Halo the first menu is the model (each on its fastest
    engine here, the recommended one first; "Pick an engine instead" opens the engine menu). Esc in any menu after the
    first goes back one menu; Esc in the first one cancels, and Ctrl-C always does. The engine menu (current engine
-   first) shows running or not, the served model, the last measured
-   prefill/decode speed, what you lose on that engine (the NPU tools off halogen), and a warning when halogen and gufo
-   would fight over the same GPU memory. Picking an engine that is down offers to start it (halogen, gufo, Strata, osmos, strix-llama.cpp), asks before
+   first) shows the installed version, the measured decode speed of the model each would run, which one is current, running
+   (and its model) or recommended, what you lose off halogen (the NPU tools) and which running engine a start would stop.
+   llama.cpp, LM Studio, Ollama and vLLM get their own row only while they answer; otherwise one "Another server on this
+   box" row lists them. Picking an engine that is down offers to start it (halogen, gufo, Strata, osmos, strix-llama.cpp), asks before
    stopping the one holding the memory, and waits until it answers. On a fresh box with no engine running the menu still
    shows, halogen first on an NPU box, and picking halogen without a checkpoint offers the ~124 GB download
    ([`scripts/download-halogen.sh`](../scripts/download-halogen.sh)). Other engines print how to start them. A start you decline (or one this
    box cannot do) brings the first menu back instead of ending setup. To switch later, run `./setup.sh` again or
    `./harness config`.
 
-   **All questions come first**, then a summary ("about to: ...") and one `Continue? [Y/n]`; after that the run needs
+   **All questions come first**, then a summary (your choices, then the numbered steps it is about to run) and one `Continue? [Y/n]`; after that the run needs
    nothing from you. Before `Continue?` nothing has been installed or started, and **Esc** (or Ctrl-C) at any prompt
    exits cleanly. Prompts use `gum` when it is installed. The first run prints the full install output; later runs print
    one line per step with only warnings and failures in full (everything goes to `~/.pi/agent/setup.log`; `./harness setup --verbose`
@@ -37,7 +38,7 @@ The full walkthrough of `./setup.sh`, the `./harness` commands and `./start.sh`.
    [BENCHMARKS.md](BENCHMARKS.md#engines-on-strix-halo), which use the `halogen-cmp.py` battery and 2k-119k depth prompts.
 5. **Extras, remembered between runs** (`./harness config` changes one; `./harness setup --reconfigure` asks all
    again):
-   - whether to run the **ling-tiny sidecar**, asked on every wizard run with your saved answer preselected (default yes where the GPU has 24 GB or more, no on smaller cards; it holds ~8 GiB of GPU memory, and "no" means the main
+   - whether to run the **ling-tiny sidecar**, asked on the first wizard run, then shown in the summary and changed in `./harness config` (`--reconfigure` asks again) (default yes where the GPU has 24 GB or more, no on smaller cards; it holds ~8 GiB of GPU memory, and "no" means the main
      model writes commits and summaries, with compaction blocking on it; non-interactive: `./setup.sh --no-sidecar` /
      `--sidecar`);
    - the engine update check (any engine with a known release source: halogen, gufo, Strata, osmos, plain llama.cpp, vLLM,

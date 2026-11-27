@@ -157,6 +157,14 @@ h.ask_sidecar()
 assert h.sidecar_pref() == ""
 open(f"{AGENT}/harness-sidecar", "w").write("0\n")
 assert h.sidecar_pref() == "0"
+# on a terminal: asked once; a saved answer is not asked again unless --reconfigure
+real_in, real_yn, asked = h.sys.stdin, h.ask_yn, []
+h.sys.stdin, h.ask_yn = types.SimpleNamespace(isatty=lambda: True), (lambda q, d=False: asked.append(d) or True)
+h.ask_sidecar()
+assert asked == [] and h.sidecar_pref() == "0"
+h.ask_sidecar(True)
+assert asked == [False] and h.sidecar_pref() == "1"  # the saved answer pre-filled
+h.sys.stdin, h.ask_yn = real_in, real_yn
 os.remove(f"{AGENT}/harness-sidecar")
 # wizard summary on a narrow window: rows wrap at words within the width, continuations keep the label column, and choices only break after a ' ·'
 items = ["model qwen3.8-flash-next", "weights stock", "sidecar on", "voice off", "update check on"]
@@ -359,8 +367,21 @@ open(log, "w").write("x [cache] schema=c event=configured sessions=2 capacity_by
                       "x [loader] event=load_completed model=qwen3.8-27b-q8 sessions=2 context_tokens=262144 gpu_device_used_mib=82787 gpu_device_total_mib=126976\n")
 real_log, h.engine_log = h.engine_log, lambda e: log
 m = h.gufo_memory("qwen3.8-27b-q8")
-assert m.startswith("80.8 of 124.0 GiB") and "prompt cache 20.5" in m and "2 sessions x 262144 context" in m, m
+assert m == "81 of 124 GiB GPU memory in use", m  # the total only: a per-part breakdown did not add up
 assert h.gufo_memory("qwen3.8-27b") == ""
+# ready screen: status in plain units, then the next step; a failed check points at the doctor instead of start.sh
+import contextlib, io
+saved = {n: getattr(h, n) for n in ("verified", "apply", "launch_offer")}
+h.launch_offer = lambda *a: None
+for ok, ctx, want in ((True, 262144, "256K tokens"), (False, 1048576, "1M tokens")):
+    h.verified, h.apply, out = (lambda e, ok=ok: ok), (lambda e, m, t, ctx=ctx: ("osmos", "m", ctx)), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.suppress(SystemExit):
+        h.finish("osmos", "osmos-inkling-2-mini", True)
+    s = out.getvalue()
+    assert want in s and ("./start.sh ~/your-project" in s) == ok and "(pi: " not in s and "choices" not in s, s
+    assert s.count("status") == 1, s  # the doctor/status pair is not listed twice
+for n, f in saved.items():
+    setattr(h, n, f)
 h.engine_log = real_log
 os.remove(log)
 os.remove(h.MODEL_FILE)
@@ -390,8 +411,13 @@ h.jput(os.path.join(AGENT, "harness-tuned.json"), {h.hw_key("osmos", "osmos-osmo
                                                   h.hw_key("osmos", "osmos-osmos-evo", "abliterated"): r(34.3, 475),
                                                   "x": {**r(36.0, 405), "engine": "gufo", "model": "qwen3.8-27b", "weights": "stock"},
                                                   "y": {**r(35.0, 400), "engine": "gufo", "model": "qwen3.8-27b", "weights": "abliterated", "when": "2026-11-14"},
-                                                  "z": {**r(16.0, 300), "engine": "gufo", "model": "qwen3.8-27b-q8"}})
+                                                  "z": {**r(16.0, 300), "engine": "gufo", "model": "qwen3.8-27b-q8"},
+                                                  "w": {**r(60.0, 1900), "engine": "halogen", "model": "halogen-qwen3.8-flash-next", "weights": "stock"}})
 assert set(h.speeds("osmos")) == {"stock", "abliterated"}, h.speeds("osmos")
+assert h.route_speed({"engine": "osmos", "why": "36-42 t/s"}, "deepseek") == "33.5 t/s"  # the model menu shows the measured one, not the published ~
+open(h.WEIGHTS, "w").write("abliterated\n")  # a row names the weights only when they are not the ones you run
+assert h.route_speed({"engine": "halogen", "why": ""}, "flash-next") == "60 t/s stock" and h.route_speed({"engine": "gufo", "why": ""}, "qwen38-27b-q8") == "16 t/s"
+os.remove(h.WEIGHTS)
 assert "stock 33.5 t/s" in h.speed_text("osmos") and "abliterated 34.3 t/s" in h.speed_text("osmos")
 assert h.speed_text("gufo", "flash-next") == "" and "36.0" in h.speed_text("gufo", "qwen38-27b")
 # the 27B Q4 has an abliterated build too, so both results are labelled; the Q8 keeps its own apart from the Q4
@@ -468,13 +494,43 @@ h.engine_menu = lambda r, esc=None: h.BACK if esc is h.BACK else "halogen"
 assert h.choose_engine({}, None) == ("gufo", None)
 h.ask_route = lambda esc=None: None
 assert h.choose_engine({}, None) == ("halogen", None) and h.choose_engine({}, h.BACK) is h.BACK  # ./harness config: back to its menu
+# ./harness config's engine row: the engine menu, never the model menu first
+h.ask_route = lambda esc=None: (_ for _ in ()).throw(AssertionError("model menu opened"))
+assert h.choose_engine({}, None, engine_first=True) == ("halogen", None) and h.choose_engine({}, h.BACK, engine_first=True) is h.BACK
 # a start that did not happen (declined, or the box cannot run it) asks again instead of leaving the wizard
 picks, plans = iter([("gufo", None), ("halogen", None)]), iter([None, {"stop": None, "download": False}])
-h.choose_engine = lambda r, esc: next(picks)
+h.choose_engine = lambda r, esc, engine_first=False: next(picks)
 h.offer_recommendation, h.ask_weights = (lambda e: True), (lambda e, back=False: False)
 h.plan_start = lambda e, r, ask_start=True: next(plans)
 real_stdin, h.sys.stdin = h.sys.stdin, types.SimpleNamespace(isatty=lambda: True)
 assert h.pick_engine({"engines": []}, False) == ("halogen", {"stop": None, "download": False})
+# ./harness config: a model row for every engine that loads several models (osmos: Inkling and DeepSeek), none for halogen
+saved2 = {n: getattr(h, n) for n in ("active", "running_engines", "sidecar_up", "rollback_pins", "prune_plans", "choose", "osmos_budget_row", "installed_version")}
+h.running_engines, h.sidecar_up, h.rollback_pins, h.prune_plans = (lambda: []), (lambda: False), (lambda e: {}), (lambda r: ({}, 0))
+h.osmos_budget_row, h.installed_version = (lambda: "osmos memory  x"), (lambda e: "v1")
+rows = {}
+for e in ("osmos", "halogen", "gufo", "strata"):
+    h.active, rows[e] = (lambda e=e: {"engine": e, "model": "m"}), []
+    h.choose = lambda q, o, y, esc=None, notes=(), e=e: rows[e].extend(o) or esc
+    h.cmd_config(None)
+model_row = lambda e: next((o for o in rows[e] if o.startswith("model ")), None)  # noqa: E731
+assert model_row("osmos") and model_row("gufo") and model_row("strata") and model_row("halogen") is None, rows
+assert "DeepSeek" in model_row("osmos") or "Inkling" in model_row("osmos"), model_row("osmos")  # osmos's fallback is DeepSeek, not Flash-Next
+assert next(o for o in rows["gufo"] if o.startswith("engine ")).split()[1:] == ["gufo", "v1"]  # the model row names the model
+assert "Flash-Next" in next(o for o in rows["halogen"] if o.startswith("engine "))
+# what runs, then extras, then upkeep; the running row has no ports (./harness status keeps them)
+keys = [o.split("  ")[0] for o in rows["osmos"]]
+assert keys[:4] == ["engine", "model", "weights", "running"] and keys.index("update check") < keys.index("osmos memory"), keys
+assert ":8091" not in next(o for o in rows["osmos"] if o.startswith("running"))
+# a change is confirmed by one line above the redrawn menu: the row's new value, without its help
+import contextlib, io
+h.active, picks, out = (lambda: {"engine": "halogen", "model": "m"}), [], io.StringIO()
+h.choose = lambda q, o, y, esc=None, notes=(): picks.append(o) or (next(x for x in o if x.startswith("update check")) if len(picks) == 1 else esc)
+with contextlib.redirect_stdout(out):
+    h.cmd_config(None)
+assert re.search(r"✓ update check (on|off)\n", out.getvalue()) and "never installs" not in out.getvalue(), out.getvalue()
+h.IN_MENU = False
+for n, f in saved2.items(): setattr(h, n, f)
 h.sys.stdin = real_stdin
 for n, f in saved.items(): setattr(h, n, f)
 
@@ -490,8 +546,8 @@ assert all(e["engine"] in h.PROFILES["engines"] for r in R.values() if isinstanc
 saved = {n: getattr(h, n) for n in ("capacity", "hardware", "choose")}
 h.capacity, h.hardware = (lambda: {"gpu_name": "Strix Halo"}), (lambda: plain)
 real_stdin, h.sys.stdin = h.sys.stdin, types.SimpleNamespace(isatty=lambda: True)
-routes_seen = []
-first = lambda q, o, y, esc=None, notes=(): routes_seen.extend(o) or next(x for x in o if "27B" in x)
+routes_seen, saved_fits = [], h.fits
+first = lambda q, o, y, esc=None, notes=(): routes_seen.extend(o) or (next(x for x in o if "27B" in x) if q.startswith("Which model") else o[0])
 h.choose = first
 assert h.ask_route() == ("gufo", "qwen38-27b") and h.model_pref() == "qwen38-27b"
 # the 27B route asks its quant (Q4 / Q8 are their own catalog ids), saved answer first
@@ -516,7 +572,23 @@ asked_q = []
 h.choose = lambda q, o, y, esc=None, notes=(): asked_q.append(q) or (h.BACK if q.startswith("Which Qwen3.8-27B") and len(asked_q) == 2 else next(x for x in o if ("Q8" in x if "Which Qwen3.8-27B" in q else "27B" in x)))
 assert h.ask_route() == ("gufo", "qwen38-27b-q8") and [q.split("?")[0] for q in asked_q] == ["Which model do you want to run", "Which Qwen3.8-27B for gufo"] * 2, asked_q
 # gum cuts a label at the window edge and a too-wide one drops the menu to numbers: rows fit 80 columns, detail goes in notes
-assert all(len(o) + 2 <= 80 for o in routes_seen), [o for o in routes_seen if len(o) + 2 > 80]
+# (the first row's "recommended" tag is dropped by ask_route when it does not fit)
+assert routes_seen[0].endswith("  recommended") and not any(o.endswith("recommended") for o in routes_seen[1:5])
+bare = [o.removesuffix("recommended").rstrip() for o in routes_seen]
+assert all(len(o) + 2 <= 80 for o in bare), [o for o in bare if len(o) + 2 > 80]
+# model menus: one row per model in aligned columns, this engine's tag only, 80 columns whichever row is current
+for e in ("strata", "gufo", "osmos", "llamacpp"):
+    ids = [m for m in h.catalog() if e in h.catalog()[m]["engines"]]
+    for c in ids:
+        rows, _ = h.model_rows(ids, e, c)
+        assert all(len(r) + 2 <= 80 for r in rows) and sum(r.endswith("current") for r in rows) == 1, rows
+ink = lambda e: next(r for r in h.model_rows(["inkling2-mini"], e, "")[0])  # noqa: E731
+assert "text, 128K" in ink("strata") and "RAM" in ink("strata") and "vision" in ink("osmos") and "RAM" not in ink("osmos")
+assert h.quant_of("qwen38-27b-q8") == "UD-Q8_K_XL" and h.quant_of("nope") == ""
+h.fits = lambda o: all(len(x) + 2 <= 80 for x in o)  # an 80-column window
+h.choose = lambda q, o, y, esc=None, notes=(): routes_seen.append((q, o)) or h.BACK
+assert h.ask_route(h.BACK) is h.BACK and "the first is recommended" in routes_seen[-1][0] and "recommended" not in routes_seen[-1][1][0]
+h.fits = saved_fits
 h.capacity = lambda: {"gpu_name": "NVIDIA RTX 4090"}
 assert h.ask_route() is None  # other hardware keeps the engine menu
 h.sys.stdin = real_stdin
@@ -581,8 +653,17 @@ seen = []
 h.choose = lambda q, opts, yes, esc=None, notes=(): seen.extend(opts) or opts[0]
 h.engine_menu({})
 assert all(len(o) + 2 <= 80 for o in seen), [o for o in seen if len(o) + 2 > 80]
-names = [o.split()[1] if o[2:3] != " " else o.split()[1] for o in seen]
+names = [o.split()[0] for o in seen]
 assert names.index("strata") < names.index("gufo"), names
+# words, not marks; engines we cannot start share one row until they answer, and picking it asks which
+assert seen[0].endswith("current, not running") and seen[1].startswith("strata") and seen[1].endswith("recommended") and not any(s in o for o in seen for s in (" | ", "*", " !")), seen
+assert seen[-1].startswith("Another server on this box (") and "vllm" not in names, seen
+seen.clear()
+h.choose = lambda q, opts, yes, esc=None, notes=(): seen.append((q, notes)) or next((o for o in opts if o.startswith(("Another", "vllm on"))), opts[0])
+assert h.engine_menu({}) == "vllm" and seen[1][0].startswith("Which server will you run?")
+h.choose = lambda q, opts, yes, esc=None, notes=(): seen.append(opts) or h.BACK
+h.engine_menu({"vllm": {"engine": "vllm", "port": 8000, "models": ["some-model"]}}, h.BACK)
+assert any(o.startswith("vllm") and o.endswith("running: some-model") for o in seen[-1]) and "vllm" not in seen[-1][-1], seen[-1]
 h.hardware, h.choose = real_hw, real_choose
 # Strata keys its repacked dense weights by model name, so a start on the other weights answer must be refused, not run on the wrong pack
 sd = tempfile.mkdtemp()
@@ -1015,6 +1096,7 @@ h.proc_mem = lambda pid: {1: [4 * G, None, None], 2: [1 * G, None, None], 3: [0,
 use, _ = h.mem_usage({"halogen": 8731}, True)
 assert use == [("halogen + sidecar", [5 * G, 85 * G, 1 * G], True)], use  # the kernel's own VRAM lands here too: hence the ~
 assert h.mem_line({"halogen": 8731}, True) == "halogen :8731 + sidecar ~91 GiB  (8 of 121 GiB free", h.mem_line({"halogen": 8731}, True)
+assert h.mem_line({"halogen": 8731}, True, ports=False) == "halogen + sidecar ~91 GiB · 8 of 121 GiB free"  # ./harness config's row
 h.proc_mem = lambda pid: {1: [88 * G, 18 * G, 0], 2: [0, 0, 0]}[pid]  # osmos runs as us: read exactly
 assert h.mem_usage({"osmos": 8091}, False)[0] == [("osmos", [88 * G, 18 * G, 0], False)]
 m = dict(h.mem_pools(), unified=False, vram_total=24 * G, vram_used=20 * G, ram_total=64 * G, ram_free=50 * G)
