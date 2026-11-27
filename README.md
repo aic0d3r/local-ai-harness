@@ -133,6 +133,14 @@ Each lever was measured as the same task with and without it, on an ASUS ROG Flo
   context size and troubleshooting, Windows.
 - **[extensions/README.md](extensions/README.md)** and **[CHANGELOG.md](CHANGELOG.md).**
 
+## Contributing
+
+Only Strix Halo is measured so far. Running `./harness bench` on other hardware (NVIDIA, AMD desktop, Apple) and posting
+the result in [Discussions](https://github.com/aic0d3r/local-ai-harness/discussions) turns a "not measured here" into a
+number. Bug reports and pull requests: [CONTRIBUTING.md](CONTRIBUTING.md).
+
+If the harness saved you time, a star helps others running local models find it.
+
 ## License
 
 [MIT](LICENSE)
