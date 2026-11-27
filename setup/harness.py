@@ -681,7 +681,9 @@ def choose(question, options, yes, esc=None, notes=()):
         print(question_text(question, notes))  # also the fallback: labels too wide for gum wrap here instead of being cut off
         print(gum_hint(esc))
         # stdout only: gum draws its menu on stderr, so capturing stderr leaves the user a blank screen
-        r = subprocess.run([*GUM_CHOOSE, *options], stdout=subprocess.PIPE, text=True)
+        # gum shows 10 rows by default and pages the rest behind a bare "••"; every row fits unless the window is short
+        h = min(len(options), max(5, shutil.get_terminal_size().lines - 4))
+        r = subprocess.run([*GUM_CHOOSE, f"--height={h}", *options], stdout=subprocess.PIPE, text=True)
         out = r.stdout.strip()
         if out:  # gum trims the line it prints: map it back to the exact option (labels can start with a space)
             print(paint(orange(), ">") + f" {out}")  # gum clears its menu: keep the answer on screen, as a yes/no does
@@ -1962,28 +1964,48 @@ def upgrader(eng):
     return p if os.path.exists(p) else None
 
 
-# engines whose upgrader stores pins (scripts/lib-pins.sh): launcher, {pin: the launcher's default variable}
+# engines whose upgrader stores pins (scripts/lib-pins.sh): launcher, {pin: the launcher's default variable}.
+# Strata (Docker): the default is the moving tag its launcher runs; only a rollback pins a digest on top of it.
+# osmos: no launcher pin; upgrade-osmos.sh records the tag it checked out (default "") and the tag before it.
 ROLLBACK_PINS = {
     "halogen": ("server/start-halogen.sh", {"HALOGEN_IMAGE_TAG": "DEFAULT_TAG", "HALOGEN_IMAGE_DIGEST": "DEFAULT_DIGEST"}),
     "gufo": ("server/start-gufo-flashnext.sh", {"GUFO_VERSION": "DEFAULT_VERSION", "GUFO_DIGEST": "DEFAULT_DIGEST"}),
-    "llamacpp": ("server/start-qwen36.sh", {"LLAMACPP_VULKAN_IMAGE": "VULKAN_IMAGE", "LLAMACPP_ROCM_IMAGE": "ROCM_IMAGE"})}
+    "llamacpp": ("server/start-qwen36.sh", {"LLAMACPP_VULKAN_IMAGE": "VULKAN_IMAGE", "LLAMACPP_ROCM_IMAGE": "ROCM_IMAGE"}),
+    "strata": ("server/start-strata.sh", {"STRATA_IMAGE": None}),
+    "osmos": ("server/start-osmos.sh", {"OSMOS_TAG": None})}
+
+
+def launcher_out(f, *a, **env):
+    return subprocess.run(["bash", os.path.join(REPO, f), *a], capture_output=True, text=True, env={**os.environ, **env}).stdout.strip()
 
 
 def rollback_pins(eng):
-    """-> {pin: (now, prev, default)} for eng's upgrade pins that are in force and remember the version they replaced."""
+    """-> {pin: (now, prev, default)} for eng's upgrade pins made on the launcher's current default that remember the
+    version they replaced."""
     if eng not in ROLLBACK_PINS:
         return {}
     f, names = ROLLBACK_PINS[eng]
     try:
-        src = open(os.path.join(REPO, f)).read()
         kv = dict(l.split("=", 1) for l in open(os.path.join(AGENT, "harness-pins")).read().splitlines() if "=" in l)
+        if not any(kv.get(f"PREV_{n}") for n in names):  # the common case: no launcher run for Strata / osmos
+            return {}
+        src = open(os.path.join(REPO, f)).read()
     except OSError:
         return {}
+    if eng == "strata":
+        default = launcher_out(f, "--print-image", STRATA_FLOAT="1")  # empty for a source install: not covered
+    elif eng == "osmos":  # only while the checkout is still the tag the upgrade left
+        default = ""
+        tag = subprocess.run(["git", "-C", launcher_out(f, "--print-dir"), "describe", "--tags", "--exact-match"], capture_output=True, text=True).stdout.strip()
+        if kv.get("OSMOS_TAG") != tag:
+            return {}
     out = {}
     for n, var in names.items():
-        m = re.search(rf"^{var}=(\S+)", src, re.M)
-        if m and kv.get(f"PREV_{n}") and pin_value(n, m.group(1)) != m.group(1):
-            out[n] = (kv[n], kv[f"PREV_{n}"], m.group(1))
+        if var:
+            m = re.search(rf"^{var}=(\S+)", src, re.M)
+            default = m and m.group(1)
+        if (default or eng == "osmos") and kv.get(f"PREV_{n}") and n in kv and kv.get(f"BASE_{n}") == default:
+            out[n] = (kv[n], kv[f"PREV_{n}"], default)
     return out
 
 
@@ -1992,24 +2014,80 @@ def short_pin(v):
     return v.rsplit("@sha256:", 1)[1][:12] if "@sha256:" in v else v
 
 
-def write_rollback(pins):
-    """Put each pin back on its PREV value (the launcher default = no stored pin). One step: PREV is dropped."""
+def pin_label(v):
+    """A menu label: an image ref by its version label when docker has it ('0.2.22'), else short_pin."""
+    lbl = tool("docker", "image", "inspect", "-f", '{{index .Config.Labels "org.opencontainers.image.version"}}', v).stdout.strip() if "/" in v else ""
+    return lbl if lbl and lbl != "<no value>" else short_pin(v)
+
+
+def write_rollback(pins, forget=False):
+    """Put each pin back on its PREV value (the launcher default = no stored pin). One step: PREV is dropped.
+    forget: only drop PREV (keep the version in force; the rollback row goes away)."""
     path = os.path.join(AGENT, "harness-pins")
-    drop = {x for n in pins for x in (n, f"BASE_{n}", f"PREV_{n}")}
+    drop = {x for n in pins for x in ((f"PREV_{n}",) if forget else (n, f"BASE_{n}", f"PREV_{n}"))}
     lines = [l for l in open(path).read().splitlines() if l.split("=", 1)[0] not in drop]
-    for n, (_, prev, default) in pins.items():
+    for n, (_, prev, default) in ({} if forget else pins).items():
         if prev != default:
             lines += [f"BASE_{n}={default}", f"{n}={prev}"]
     open(path + ".tmp", "w").write("".join(l + "\n" for l in lines))
     os.replace(path + ".tmp", path)
 
 
+def halogen_npu():
+    """halogen's NPU model dir (beside the stock checkpoint, as scripts/upgrade-halogen.sh finds it), or ''."""
+    stock = subprocess.run(["bash", os.path.join(REPO, "server/start-halogen.sh"), "--print-stock"], capture_output=True, text=True).stdout.strip()
+    return os.path.join(os.path.dirname(stock), "npu") if stock else ""
+
+
+def pin_images(eng, pins):
+    """-> (image now, image before the upgrade) as docker refs, from the digest pins; (None, None) if there is none."""
+    if eng in ("llamacpp", "strata"):
+        return next(iter(pins.values()))[:2]
+    if eng == "osmos":  # a git checkout: no old build is kept
+        return None, None
+    repo, n = {"halogen": ("ghcr.io/peonist-ai/halogen-flash-server", "HALOGEN_IMAGE_DIGEST"),
+               "gufo": ("ghcr.io/gufo-org/toolboxes/gufo-runtime", "GUFO_DIGEST")}[eng]
+    return tuple(f"{repo}@{d}" for d in pins[n][:2]) if n in pins else (None, None)
+
+
+def forget_rollback(eng, pins):
+    """Keep the version in force: delete the previous version's image (and halogen's NPU backup), drop PREV."""
+    now, prev, _ = next(iter(pins.values()))
+    img_now, img_prev = pin_images(eng, pins)
+    iid = lambda ref: tool("docker", "image", "inspect", "-f", "{{.Id}}", ref).stdout.strip() if ref else ""
+    old = iid(img_prev)
+    if old and old != iid(img_now):  # untag it everywhere, then the id; no -f: docker refuses an image a container uses
+        tags = tool("docker", "image", "inspect", "-f", '{{join .RepoTags " "}}', old).stdout.split()
+        r = tool("docker", "rmi", *tags, old)
+        why = (r.stderr or r.stdout).strip().splitlines() or ["docker refused"]
+        print(f"  deleted image {pin_label(prev)}" if tool("docker", "image", "inspect", old).returncode else
+              f"  ! kept image {pin_label(prev)}: {why[-1]}")
+    if eng == "halogen":
+        npu = halogen_npu()
+        if npu and os.path.isdir(f"{npu}-{prev}-backup"):
+            shutil.rmtree(f"{npu}-{prev}-backup")
+            print(f"  deleted NPU backup {npu}-{prev}-backup")
+    write_rollback(pins, forget=True)
+    print(f"  {ename(eng)} stays on {pin_label(now)}; no rollback until the next upgrade")
+
+
 def rollback_engine(eng):
-    """./harness config: undo eng's last upgrade (no checks: the previous version passed them when it was pinned)."""
+    """./harness config: undo eng's last upgrade (no checks: the previous version passed them when it was pinned),
+    or keep the new version and delete the previous one."""
     pins = rollback_pins(eng)
     now, prev, _ = next(iter(pins.values()))
-    if not ask_yn(f"Roll {ename(eng)} back from {short_pin(now)} to {short_pin(prev)}? restarts it if running", True):
+    ln, lp = pin_label(now), pin_label(prev)
+    opt_back, opt_keep = (f"Roll back to {lp}  (rebuilds and checks it, a few minutes)", f"Keep {ln}  (hide the rollback)") if eng == "osmos" else \
+        (f"Roll back to {lp}  (restarts {ename(eng)} if running)", f"Keep {ln}, delete {lp}  (frees its disk)")
+    pick = choose(f"{ename(eng)} {ln}: roll back, or keep it?", [opt_back, opt_keep], False, esc=BACK)
+    if pick is BACK:
         return
+    if pick == opt_keep:
+        return forget_rollback(eng, pins)
+    if eng == "osmos":  # a source build: upgrade-osmos.sh checks out, rebuilds, checks, and goes back to now if that fails
+        if subprocess.run(["bash", upgrader(eng), prev]).returncode:
+            return print(f"! the rollback to {lp} failed; osmos stays on {ln}")
+        return write_rollback(rollback_pins(eng), forget=True)  # one step: no row offering {ln} again
     running = {x["engine"]: x for x in detect()["engines"]}
     others = {k: v for k, v in running.items() if k != eng}
     plan = plan_start(eng, others, ask_start=False) if eng in running else None
@@ -2017,15 +2095,14 @@ def rollback_engine(eng):
         return
     write_rollback(pins)
     if eng == "halogen":  # the upgrade refreshed the NPU files and kept the old set: give the old image what it was validated on
-        stock = subprocess.run(["bash", os.path.join(REPO, "server/start-halogen.sh"), "--print-stock"], capture_output=True, text=True).stdout.strip()
-        npu = os.path.join(os.path.dirname(stock), "npu") if stock else ""
+        npu = halogen_npu()
         old, keep = f"{npu}-{prev}-backup", f"{npu}-{now}-backup"
         if npu and os.path.isdir(old) and os.path.isdir(npu):
             shutil.rmtree(keep, ignore_errors=True)
             os.rename(npu, keep)
             os.rename(old, npu)
             print(f"  NPU files restored ({now}'s set kept at {keep})")
-    print(f"  {ename(eng)} pinned to {short_pin(prev)}" + ("" if eng in running else "; applies on its next start"))
+    print(f"  {ename(eng)} pinned to {lp}" + ("" if eng in running else "; applies on its next start"))
     if eng in running:
         start_engine(eng, others, plan)
 
@@ -2756,7 +2833,7 @@ def cmd_config(a):
             f"update check  {'on' if upd == '1' else 'off'}  (newer engine release; never installs)": "update",
             **({"sudo hints    shown once  (pick to show them again on the next ./setup.sh)": "hints"} if os.path.exists(hints) else {}),
             **({osmos_budget_row(): "osmos-budget"} if eng == "osmos" else {}),
-            **({f"rollback      {ename(eng)} {short_pin(rb[0])} -> {short_pin(rb[1])}  (undo the last upgrade)": "rollback"} if rb else {}),
+            **({f"rollback      {ename(eng)} {pin_label(rb[0])} -> {pin_label(rb[1])}  (undo the last upgrade)": "rollback"} if rb else {}),
             "done": "done"}
         k = items[choose("Change which setting?", list(items), False, esc="done", notes=notes)]  # Esc at the top closes quietly, like done
         if k == "done":

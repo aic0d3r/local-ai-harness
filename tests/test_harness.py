@@ -837,6 +837,58 @@ subprocess.run(["bash", "-c", f'. "{lib}"; pin_set GUFO_VERSION {dg} 9.1.0'], en
 h.write_rollback(h.rollback_pins("gufo"))  # PREV is the launcher default: the stored pin goes
 assert h.pin_value("GUFO_VERSION", dg) == dg and h.rollback_pins("gufo") == {} and "GUFO" not in open(f"{h.AGENT}/harness-pins").read()
 assert h.short_pin("ghcr.io/x@sha256:30370c206723e1c1") == "30370c206723" and h.short_pin("0.21.0") == "0.21.0"
+# keep the new version: the previous image goes (untagged, then by id), PREV goes, the pin in force stays
+dd = re.search(r"^DEFAULT_DIGEST=(\S+)", open(os.path.join(h.REPO, "server/start-gufo-flashnext.sh")).read(), re.M).group(1)
+for v, d in (("9.1.0", "sha256:aaa"), ("9.2.0", "sha256:bbb")):
+    subprocess.run(["bash", "-c", f'. "{lib}"; pin_set GUFO_VERSION {dg} {v}; pin_set GUFO_DIGEST {dd} {d}'], env=pins_env, check=True)
+real_tool, calls, gone = h.tool, [], set()
+def fake_tool(*a, **k):
+    calls.append(a)
+    if a[:2] == ("docker", "rmi"):
+        gone.add("id-a")
+    if a[:2] == ("docker", "image"):
+        ref = a[-1]
+        iid = "id-a" if ref.endswith("aaa") or ref == "id-a" else "id-b"
+        return subprocess.CompletedProcess(a, 1 if iid in gone else 0, "x:9.1.0" if "RepoTags" in a[-2] else iid, "")
+    return subprocess.CompletedProcess(a, 0, "", "")
+h.tool = fake_tool
+pins = h.rollback_pins("gufo")
+assert h.pin_images("gufo", pins) == ("ghcr.io/gufo-org/toolboxes/gufo-runtime@sha256:bbb", "ghcr.io/gufo-org/toolboxes/gufo-runtime@sha256:aaa")
+h.forget_rollback("gufo", pins)
+h.tool = real_tool
+assert ("docker", "rmi", "x:9.1.0", "id-a") in calls and not any("id-b" in c for c in calls if c[:2] == ("docker", "rmi"))
+assert h.rollback_pins("gufo") == {} and h.pin_value("GUFO_VERSION", dg) == "9.2.0" and "PREV_" not in open(f"{h.AGENT}/harness-pins").read()
+# Strata floats on its tag (pin = the tag itself); a rollback pins the old digest on top of it
+fl, od = "ghcr.io/niko1221/strata:latest-test", "ghcr.io/niko1221/strata@sha256:aaa"
+saved_env = dict(os.environ)  # the Docker route, whatever the card: no source install (an earlier block set STRATA_DIR)
+os.environ.update(STRATA_IMAGE=fl, STRATA_DIR="", HOME=tempfile.mkdtemp())
+subprocess.run(["bash", "-c", f'. "{lib}"; pin_set STRATA_IMAGE {fl} {fl} {od}'], env=pins_env, check=True)
+assert h.rollback_pins("strata") == {"STRATA_IMAGE": (fl, od, fl)}
+assert h.pin_images("strata", h.rollback_pins("strata")) == (fl, od)
+h.write_rollback(h.rollback_pins("strata"))
+assert h.pin_value("STRATA_IMAGE", fl) == od and h.rollback_pins("strata") == {}
+os.environ.clear(); os.environ.update(saved_env)
+# osmos: the tag upgrade-osmos.sh left and the one before; the rollback runs the upgrader on it, then drops PREV (one step)
+od = tempfile.mkdtemp()
+for c in (["init", "-q"], ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "1"], ["tag", "v0.1.0"],
+          ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "2"], ["tag", "v0.2.0"]):
+    subprocess.run(["git", "-C", od, *c], check=True)
+saved_env = dict(os.environ)
+os.environ.update(OSMOS_DIR=od, PI_CODING_AGENT_DIR=h.AGENT)  # the upgrader writes the same pins file the wizard reads
+subprocess.run(["bash", "-c", f'. "{lib}"; pin_set OSMOS_TAG "" v0.2.0 v0.1.0'], env=pins_env, check=True)
+assert h.rollback_pins("osmos") == {"OSMOS_TAG": ("v0.2.0", "v0.1.0", "")} and h.pin_images("osmos", {}) == (None, None)
+up = f"{od}.up.sh"  # a stand-in upgrade-osmos.sh that succeeds: checks out the tag, records it as the real one does
+open(up, "w").write(f'git -C "{od}" checkout -q "$1"; . "{lib}"; pin_set OSMOS_TAG "" "$1" v0.2.0\n')
+real_choose, real_up = h.choose, h.upgrader
+h.choose, h.upgrader = (lambda q, opts, *a, **k: opts[0]), (lambda e: up)
+h.rollback_engine("osmos")
+h.choose, h.upgrader = real_choose, real_up
+pins_txt = open(f"{h.AGENT}/harness-pins").read()
+assert "OSMOS_TAG=v0.1.0\n" in pins_txt and "PREV_OSMOS_TAG" not in pins_txt and h.rollback_pins("osmos") == {}, pins_txt
+subprocess.run(["bash", "-c", f'. "{lib}"; pin_set OSMOS_TAG "" v0.1.0 v0.0.9'], env=pins_env, check=True)
+subprocess.run(["git", "-C", od, "checkout", "-q", "v0.2.0"], check=True)
+assert h.rollback_pins("osmos") == {}  # checked out by hand since: the saved tags no longer describe it
+os.environ.clear(); os.environ.update(saved_env)
 h.AGENT = real_agent
 # declining "Continue?" (or Esc before it) puts every saved answer back; a file the questions created is removed again
 real_agent, h.AGENT = h.AGENT, tempfile.mkdtemp()

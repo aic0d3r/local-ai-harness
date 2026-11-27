@@ -66,6 +66,7 @@ check "osmos answers on the new build" 'curl -sf localhost:$PORT/health >/dev/nu
 check "the local edit is still there, merged with the release's" 'grep -q "^mine$" "$OSMOS_DIR/host.txt" && grep -q "^top-0.2$" "$OSMOS_DIR/host.txt"'
 check "the branch moved to the release (no detached HEAD)" '[ "$(git -C "$OSMOS_DIR" symbolic-ref --short -q HEAD)" = main ] && [ "$(git -C "$OSMOS_DIR" describe --tags)" = v0.2.0 ]'
 check "the upgrade said it kept the local edit" 'echo "$OUT" | grep -q "keeping your local edits: host.txt"'
+check "v0.1.0 kept as the ./harness config rollback" 'grep -qx OSMOS_TAG=v0.2.0 "$PI_CODING_AGENT_DIR/harness-pins" && grep -qx PREV_OSMOS_TAG=v0.1.0 "$PI_CODING_AGENT_DIR/harness-pins"'
 
 echo "== already on it"
 OUT=$(run v0.2.0); check "second run: nothing to do, exit 0" '[ $? = 0 ] && echo "$OUT" | grep -q "nothing to do"'
@@ -83,6 +84,7 @@ OUT=$(run v0.3.0); RC=$?
 check "exit 1, says it rolled back" '[ "$RC" = 1 ] && echo "$OUT" | grep -q "rolling back to v0.2.0"'
 check "0.2.0 is serving again before the script exits" 'echo "$OUT" | grep -q "v0.2.0 is serving again" && curl -sf localhost:$PORT/health >/dev/null'
 check "the checkout and the binary are back on 0.2.0" '[ "$(git -C "$OSMOS_DIR" describe --tags)" = v0.2.0 ] && [ "$(ver)" = "osmos 0.2.0" ]'
+check "a failed upgrade leaves the rollback alone" 'grep -qx OSMOS_TAG=v0.2.0 "$PI_CODING_AGENT_DIR/harness-pins" && grep -qx PREV_OSMOS_TAG=v0.1.0 "$PI_CODING_AGENT_DIR/harness-pins"'
 
 echo "== a pack with a file gone is refused before anything is stopped"
 P="$T/models/osmos-evo"; touch "$P/m-00001-of-00003.gguf" "$P/m-00002-of-00003.gguf"; ln -s "$T/nowhere" "$P/patch.gguf"

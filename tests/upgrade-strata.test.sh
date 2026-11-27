@@ -87,6 +87,8 @@ check "the acceptance battery answered (with the image key sent)" 'echo "$OUT" |
 check "the new digest is what runs" '[ "$(serving_digest)" = "ghcr.io/niko1221/strata@sha256:bbbb" ] && up'
 check "the old container was stopped by id, the new one started once" '[ "$(grep -c "^stop c1" "$S/log")" = 1 ] && [ "$(grep -c "^run " "$S/log")" = 2 ]'
 check "the gufo container on the same port was not stopped" '! grep -q "^stop g1" "$S/log" && gufo_alive'
+PINS=$PI_CODING_AGENT_DIR/harness-pins
+check "floats on the tag, aaaa kept as the ./harness config rollback" 'grep -qx "STRATA_IMAGE=ghcr.io/niko1221/strata:latest-test" "$PINS" && grep -qx "PREV_STRATA_IMAGE=ghcr.io/niko1221/strata@sha256:aaaa" "$PINS"'
 
 echo "== a release that fails the decode check is rolled back to the digest that was running"
 echo "sha256:cccc" > "$S/tagref:latest-test"; echo "sha256:cccc" > "$S/slow"
@@ -107,6 +109,7 @@ echo "== a normal upgrade after that: eeee"
 echo "sha256:eeee" > "$S/tagref:latest-test"
 runp
 check "upgrade to eeee succeeds" '[ "$RC" = 0 ] && [ "$(serving_digest)" = "ghcr.io/niko1221/strata@sha256:eeee" ] && up'
+check "the failed upgrades left the rollback alone; eeee's is bbbb" 'grep -qx "PREV_STRATA_IMAGE=ghcr.io/niko1221/strata@sha256:bbbb" "$PINS" && [ "$(grep -c ^PREV_ "$PINS")" = 1 ]'
 check "the gufo container was never stopped in any scenario" '! grep -q "^stop g1" "$S/log" && gufo_alive'
 
 echo; [ "$fails" = 0 ] && echo "all checks passed" || { echo "$fails check(s) failed"; echo "--- outputs:"; for o in "${OUTS[@]}"; do echo "$o" | grep -v '^      waiting' | tail -12; echo ---; done; exit 1; }

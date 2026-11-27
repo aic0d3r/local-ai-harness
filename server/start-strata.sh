@@ -49,6 +49,9 @@ flavor() {
 IMAGE=${STRATA_IMAGE:-}
 if [ -z "$IMAGE" ] && command -v docker >/dev/null 2>&1; then
   F=$(flavor) && [ -n "$F" ] && IMAGE="ghcr.io/niko1221/strata:${STRATA_TAG:-latest-$F}"
+  # a ./harness config rollback pins the old digest on top of this tag; scripts/upgrade-strata.sh reads the tag (STRATA_FLOAT=1)
+  . "$HERE/../scripts/lib-pins.sh"
+  [ -n "$IMAGE" ] && [ "${STRATA_FLOAT:-0}" != 1 ] && IMAGE=$(pin_value STRATA_IMAGE "$IMAGE")
 fi
 # shortcut: no source install is an error only when neither route can work; say which knob fixes it
 if [ -z "${DIR:-}" ] && [ -z "$IMAGE" ]; then

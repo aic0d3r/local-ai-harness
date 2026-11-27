@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8">
+<title>local-ai-harness: ./harness setup (X post image)</title>
+<!-- Text in the terminal is copied from ./harness setup on Strix Halo (setup/harness.py: ask_route, cmd_setup, cmd_status). -->
+<style>
+:root{
+  --bg:#100d0b; --panel:#191512; --line:#3a2f27; --ink:#f4ede6; --mute:#b3a597;
+  --acc:#ff7a1a; --cool:#6fb6c4;
+  --mono:"Adwaita Mono","DejaVu Sans Mono",monospace;
+}
+*{box-sizing:border-box;margin:0}
+html,body{width:1600px;height:900px;background:var(--bg);color:var(--ink);
+  font-family:"Fira Sans",sans-serif;-webkit-font-smoothing:antialiased}
+body{display:grid;grid-template-rows:auto 1fr;padding:44px 64px 52px;overflow:hidden;position:relative}
+body::before{content:"";position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(50% 80% at 80% 60%,rgba(255,122,26,.13),transparent 70%)}
+.top{display:flex;justify-content:space-between;align-items:baseline;position:relative;
+  font:500 24px var(--mono);color:var(--mute);padding-bottom:22px;border-bottom:1px solid var(--line)}
+.top b{color:var(--ink);font-weight:600}
+.top i{color:var(--acc);font-style:normal}
+.main{display:grid;grid-template-columns:600px 1fr;gap:48px;align-items:center;position:relative;min-height:0}
+.copy{display:flex;flex-direction:column;gap:34px}
+h1{font:800 86px/.95 "Fira Sans Condensed",sans-serif;letter-spacing:-.015em}
+h1 em{font-style:normal;color:var(--acc);display:block}
+.sub{font:400 30px/1.35 "Fira Sans",sans-serif;color:var(--mute)}
+.sub strong{color:var(--ink);font-weight:500}
+.term{border:1.5px solid var(--line);border-radius:18px;background:linear-gradient(180deg,#1b1613,#14100e);
+  box-shadow:0 30px 60px -24px rgba(0,0,0,.85);overflow:hidden;font:500 23px/1.38 var(--mono)}
+.term-h{padding:16px 26px;border-bottom:1px solid var(--line);color:var(--ink)}
+.term-h i{color:var(--acc);font-style:normal}
+.body{padding:16px 26px 20px;white-space:pre}
+.dim{color:var(--mute)}
+.q{font-weight:700}
+.row{display:block;margin:0 -12px;padding:2px 12px;border-radius:8px}
+.on{background:var(--acc);color:#1a0d03;font-weight:700}
+.ok{color:var(--cool)}
+.gap{display:block;height:12px}
+.big{color:var(--acc);font-weight:700}
+</style>
+<body>
+<header class="top">
+  <span><b>local-ai-harness</b> · built on <i>pi</i></span>
+  <span>Linux · Windows (beta) · MIT</span>
+</header>
+<div class="main">
+  <section class="copy">
+    <h1>Local LLM engines,<em>without the pain.</em></h1>
+    <p class="sub"><strong>One interactive CLI</strong> detects your hardware, then installs, tunes, switches and safely upgrades the engine.</p>
+  </section>
+  <section class="term" aria-label="./harness setup picking a model on Strix Halo">
+    <div class="term-h"><i>$</i> ./harness setup</div>
+<div class="body"><span class="dim">hardware: Strix Halo, 125.5 GB GPU-addressable</span>
+<span class="gap"></span><span class="q">Which model do you want to run?</span>
+<span class="dim">  ↑↓ move · Enter picks · Esc cancels</span>
+<span class="row on">Qwen3.8-Flash-Next   halogen          74.1 t/s</span><span class="row">Qwen3.6-35B-A3B      strix-llama.cpp  84.2 t/s</span><span class="row">Inkling 2 Mini       osmos            47.2 t/s</span><span class="row">Qwen3.8-27B          gufo             41.4 t/s</span><span class="row dim">Pick an engine instead</span><span class="gap"></span><span class="q">about to:</span>
+<span class="dim">  - install/update pi extensions, providers, skills
+  - start halogen
+  - probe speed (&lt;2 min)</span>
+<span class="q">Continue?</span> <span class="dim">&gt; Yes</span>
+<span class="gap"></span><span class="ok">speed:</span> stock <span class="big">74.1 t/s</span> decode</div>
+  </section>
+</div>
+</body></html>

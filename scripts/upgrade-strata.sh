@@ -10,14 +10,16 @@ POLL=${STRATA_POLL_S:-15} WAIT=${STRATA_WAIT_S:-1200}
 mkdir -p "$HOME/.cache"; LOG="$HOME/.cache/strata-upgrade.log"  # per-user dir: a fixed /tmp name can be a planted symlink
 
 # Strata in Docker: pull the newest tag of the same image, restart it the same way, roll back to the old digest on failure
-IMAGE=$(bash "$REPO/server/start-strata.sh" --print-image)
+# the moving tag, not a rollback pin on top of it (that pin is what the upgrade moves off)
+IMAGE=$(STRATA_FLOAT=1 bash "$REPO/server/start-strata.sh" --print-image)
 if [ -n "$IMAGE" ]; then
+  . "$REPO/scripts/lib-pins.sh"
   KEY=$(cat "${STRATA_DATA:-${XDG_CACHE_HOME:-$HOME/.cache}/local-ai-harness/strata-data}/harness-key" 2>/dev/null)
   AUTH=(-H "Authorization: Bearer $KEY")
   up(){ curl -sf -m 3 "${AUTH[@]}" "$URL/v1/models" >/dev/null 2>&1; }
   . "$REPO/scripts/lib-docker.sh"  # by port AND image name: gufo shares :8080 and is not ours to stop
   stop_it(){ local ids; ids=$(container_ids "$PORT" strata); [ -z "$ids" ] || docker stop -t 30 $ids >/dev/null 2>&1; }
-  start_it(){ setsid nohup bash "$REPO/server/start-strata.sh" > "$1" 2>&1 < /dev/null & }  # the launcher recomputes the tag
+  start_it(){ STRATA_IMAGE="$IMAGE" setsid nohup bash "$REPO/server/start-strata.sh" > "$1" 2>&1 < /dev/null & }
   # what to roll back to: the image the running container was started on. After an earlier rollback that is the old digest while
   # the tag already points at the failed one; with nothing running, the tag as pulled locally
   CID=$(container_ids "$PORT" strata | head -1)
@@ -49,8 +51,11 @@ if [ -n "$IMAGE" ]; then
   fi
   echo "[3/3] answer + decode check"
   # the image serves only with its key: without it the battery is a 401, and every upgrade "failed" and rolled back
-  STRATA_KEY="$KEY" python3 "$REPO/scripts/engine-acceptance.py" "$URL" 15 \
-    && echo "OK: Strata image updated and answering ($IMAGE)" || rollback "acceptance failed (log: $LOG.server)"
+  STRATA_KEY="$KEY" python3 "$REPO/scripts/engine-acceptance.py" "$URL" 15 || rollback "acceptance failed (log: $LOG.server)"
+  # float on the tag again (drops a rollback pin); the digest that ran before is the ./harness config rollback
+  NEWD=$(docker image inspect -f '{{index .RepoDigests 0}}' "$IMAGE" 2>/dev/null)
+  pin_set STRATA_IMAGE "$IMAGE" "$IMAGE" "$([ "$OLD" != "$NEWD" ] && echo "$OLD")" || echo "      WARN: could not write $PINS"
+  echo "OK: Strata image updated and answering ($IMAGE)"
   exit 0
 fi
 

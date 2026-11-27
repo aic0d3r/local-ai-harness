@@ -97,4 +97,7 @@ echo "      serving $GOT"
 echo "[4/5] answer + decode check (the first request fills the expert cache: slow, so it is not timed)"
 python3 "$REPO/scripts/engine-acceptance.py" "$URL" 10 || rollback "acceptance"
 echo "[5/5] done"
+# the tag it replaced is the ./harness config rollback (only an exact tag: this script checks out tags)
+. "$REPO/scripts/lib-pins.sh"
+pin_set OSMOS_TAG "" "$TAG" "$(git -C "$DIR" describe --tags --exact-match "$OLD" 2>/dev/null)" || echo "      WARN: could not write $PINS"
 echo "OK: osmos $CUR -> $TAG, running (previous commit kept as rollback point: git -C $DIR checkout $OLD)"
