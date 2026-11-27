@@ -750,7 +750,8 @@ def choose(question, options, yes, esc=None, notes=(), headers=(), start=None):
         at = start if start in real else real[0]  # the cursor starts on a row you can pick, not on a title
         while True:
             shown = [paint("2", o) if o in headers else o for o in options]
-            r = subprocess.run([*GUM_CHOOSE, f"--height={h}", *([f"--selected={at}"] if headers or start else []), *shown],
+            sel = at.replace(",", "\\,")  # gum splits --selected on commas: 'restarts, rolls back' matched nothing, the cursor fell to the top
+            r = subprocess.run([*GUM_CHOOSE, f"--height={h}", *([f"--selected={sel}"] if headers or start else []), *shown],
                                stdout=subprocess.PIPE, text=True)
             out = r.stdout.strip()  # gum prints the plain text of a painted row
             if out and out in [t.strip() for t in headers]:  # a title: nothing to pick, the menu stays with the cursor there
