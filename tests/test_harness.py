@@ -822,6 +822,21 @@ assert h.saved_engine() == "halogen"
 # upgrade pins (scripts/lib-pins.sh): used only while the launcher default is the one they were made on
 open(f"{h.AGENT}/harness-pins", "w").write("BASE_GUFO_VERSION=0.32.0\nGUFO_VERSION=0.34.0\n")
 assert h.pin_value("GUFO_VERSION", "0.32.0") == "0.34.0" and h.pin_value("GUFO_VERSION", "0.40.0") == "0.40.0"
+# rollback: scripts/lib-pins.sh pin_set keeps PREV_; the config row undoes one step, back to the launcher default when PREV is it
+pins_env = dict(os.environ, PI_CODING_AGENT_DIR=h.AGENT)
+lib = os.path.join(h.REPO, "scripts", "lib-pins.sh")
+os.remove(f"{h.AGENT}/harness-pins")
+dg = re.search(r"^DEFAULT_VERSION=(\S+)", open(os.path.join(h.REPO, "server/start-gufo-flashnext.sh")).read(), re.M).group(1)
+for v in ("9.1.0", "9.2.0"):
+    subprocess.run(["bash", "-c", f'. "{lib}"; pin_set GUFO_VERSION {dg} {v}'], env=pins_env, check=True)
+assert h.rollback_pins("gufo") == {"GUFO_VERSION": ("9.2.0", "9.1.0", dg)}, open(f"{h.AGENT}/harness-pins").read()
+h.write_rollback(h.rollback_pins("gufo"))
+assert h.pin_value("GUFO_VERSION", dg) == "9.1.0" and h.rollback_pins("gufo") == {}  # one step: no row until the next upgrade
+os.remove(f"{h.AGENT}/harness-pins")
+subprocess.run(["bash", "-c", f'. "{lib}"; pin_set GUFO_VERSION {dg} 9.1.0'], env=pins_env, check=True)
+h.write_rollback(h.rollback_pins("gufo"))  # PREV is the launcher default: the stored pin goes
+assert h.pin_value("GUFO_VERSION", dg) == dg and h.rollback_pins("gufo") == {} and "GUFO" not in open(f"{h.AGENT}/harness-pins").read()
+assert h.short_pin("ghcr.io/x@sha256:30370c206723e1c1") == "30370c206723" and h.short_pin("0.21.0") == "0.21.0"
 h.AGENT = real_agent
 # declining "Continue?" (or Esc before it) puts every saved answer back; a file the questions created is removed again
 real_agent, h.AGENT = h.AGENT, tempfile.mkdtemp()

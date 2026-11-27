@@ -43,7 +43,8 @@ The full walkthrough of `./setup.sh`, the `./harness` commands and `./start.sh`.
    - the engine update check (any engine with a known release source: halogen, gufo, Strata, osmos, plain llama.cpp, vLLM,
      Ollama; strix-llama.cpp runs an image pinned by digest, so it has none).
      On halogen, gufo, Strata and osmos it offers the safe upgrade right away (`scripts/upgrade-<engine>.sh`: update, restart,
-     check, roll back on failure); on the others it prints the upgrade command. `start.sh` repeats the one-line notice,
+     check, roll back on failure); on the others it prints the upgrade command. If an upgrade passes its checks but runs worse, the
+     `rollback` row in `./harness config` puts halogen, gufo or strix-llama.cpp back on the version from before it. `start.sh` repeats the one-line notice,
      and `./harness update-check` runs it on demand;
    - voice.
 

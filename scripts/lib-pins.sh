@@ -13,8 +13,9 @@ pin_value() {
   if [ -n "$v" ] && [ "$(_pin_get "BASE_$1")" = "$2" ]; then echo "$v"; else echo "$2"; fi
 }
 
-# pin_set NAME DEFAULT VALUE
+# pin_set NAME DEFAULT VALUE  (keeps the value it replaces as PREV_NAME: ./harness config offers it as a rollback)
 pin_set() {
-  local t; mkdir -p "$(dirname "$PINS")" && t=$(mktemp "$PINS.XXXXXX") || return 1
-  { grep -v -e "^$1=" -e "^BASE_$1=" "$PINS" 2>/dev/null; echo "BASE_$1=$2"; echo "$1=$3"; } > "$t" && mv "$t" "$PINS"
+  local t p; p=$(pin_value "$1" "$2"); mkdir -p "$(dirname "$PINS")" && t=$(mktemp "$PINS.XXXXXX") || return 1
+  { grep -v -e "^$1=" -e "^BASE_$1=" -e "^PREV_$1=" "$PINS" 2>/dev/null; echo "BASE_$1=$2"; echo "$1=$3"
+    if [ "$p" != "$3" ]; then echo "PREV_$1=$p"; fi; } > "$t" && mv "$t" "$PINS"
 }

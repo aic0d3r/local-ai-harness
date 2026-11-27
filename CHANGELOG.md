@@ -5,6 +5,9 @@
 
 ## 2.3.1 - unreleased
 
+### Added
+- `./harness config` has a `rollback` row after a halogen, gufo or strix-llama.cpp upgrade that passed its checks but runs worse: it restores the version from before the upgrade (halogen also gets its old NPU files back) and restarts the engine if it is running. One step back only; upgrades now store that previous version (`PREV_<pin>` in `harness-pins`), so the row first appears after your next upgrade. Tested in `tests/test_harness.py`.
+
 ### Changed
 - Setup and `./harness config` menus and yes/no prompts use the brand orange (`#ff7a1a`, as in `docs/brand`) for the cursor, the selected row and the `>` before the picked answer, instead of gum's default pink; the answer itself is no longer dimmed. Exact on truecolor terminals, nearest 256-colour elsewhere; `NO_COLOR` still turns colour off. Tested in `tests/test_harness.py`.
 

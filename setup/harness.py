@@ -1962,6 +1962,74 @@ def upgrader(eng):
     return p if os.path.exists(p) else None
 
 
+# engines whose upgrader stores pins (scripts/lib-pins.sh): launcher, {pin: the launcher's default variable}
+ROLLBACK_PINS = {
+    "halogen": ("server/start-halogen.sh", {"HALOGEN_IMAGE_TAG": "DEFAULT_TAG", "HALOGEN_IMAGE_DIGEST": "DEFAULT_DIGEST"}),
+    "gufo": ("server/start-gufo-flashnext.sh", {"GUFO_VERSION": "DEFAULT_VERSION", "GUFO_DIGEST": "DEFAULT_DIGEST"}),
+    "llamacpp": ("server/start-qwen36.sh", {"LLAMACPP_VULKAN_IMAGE": "VULKAN_IMAGE", "LLAMACPP_ROCM_IMAGE": "ROCM_IMAGE"})}
+
+
+def rollback_pins(eng):
+    """-> {pin: (now, prev, default)} for eng's upgrade pins that are in force and remember the version they replaced."""
+    if eng not in ROLLBACK_PINS:
+        return {}
+    f, names = ROLLBACK_PINS[eng]
+    try:
+        src = open(os.path.join(REPO, f)).read()
+        kv = dict(l.split("=", 1) for l in open(os.path.join(AGENT, "harness-pins")).read().splitlines() if "=" in l)
+    except OSError:
+        return {}
+    out = {}
+    for n, var in names.items():
+        m = re.search(rf"^{var}=(\S+)", src, re.M)
+        if m and kv.get(f"PREV_{n}") and pin_value(n, m.group(1)) != m.group(1):
+            out[n] = (kv[n], kv[f"PREV_{n}"], m.group(1))
+    return out
+
+
+def short_pin(v):
+    """'0.21.0' stays; an image ref 'ghcr.io/x@sha256:30370c2067...' -> '30370c206723'."""
+    return v.rsplit("@sha256:", 1)[1][:12] if "@sha256:" in v else v
+
+
+def write_rollback(pins):
+    """Put each pin back on its PREV value (the launcher default = no stored pin). One step: PREV is dropped."""
+    path = os.path.join(AGENT, "harness-pins")
+    drop = {x for n in pins for x in (n, f"BASE_{n}", f"PREV_{n}")}
+    lines = [l for l in open(path).read().splitlines() if l.split("=", 1)[0] not in drop]
+    for n, (_, prev, default) in pins.items():
+        if prev != default:
+            lines += [f"BASE_{n}={default}", f"{n}={prev}"]
+    open(path + ".tmp", "w").write("".join(l + "\n" for l in lines))
+    os.replace(path + ".tmp", path)
+
+
+def rollback_engine(eng):
+    """./harness config: undo eng's last upgrade (no checks: the previous version passed them when it was pinned)."""
+    pins = rollback_pins(eng)
+    now, prev, _ = next(iter(pins.values()))
+    if not ask_yn(f"Roll {ename(eng)} back from {short_pin(now)} to {short_pin(prev)}? restarts it if running", True):
+        return
+    running = {x["engine"]: x for x in detect()["engines"]}
+    others = {k: v for k, v in running.items() if k != eng}
+    plan = plan_start(eng, others, ask_start=False) if eng in running else None
+    if eng in running and (plan is None or not stop_engine(eng, running)):
+        return
+    write_rollback(pins)
+    if eng == "halogen":  # the upgrade refreshed the NPU files and kept the old set: give the old image what it was validated on
+        stock = subprocess.run(["bash", os.path.join(REPO, "server/start-halogen.sh"), "--print-stock"], capture_output=True, text=True).stdout.strip()
+        npu = os.path.join(os.path.dirname(stock), "npu") if stock else ""
+        old, keep = f"{npu}-{prev}-backup", f"{npu}-{now}-backup"
+        if npu and os.path.isdir(old) and os.path.isdir(npu):
+            shutil.rmtree(keep, ignore_errors=True)
+            os.rename(npu, keep)
+            os.rename(old, npu)
+            print(f"  NPU files restored ({now}'s set kept at {keep})")
+    print(f"  {ename(eng)} pinned to {short_pin(prev)}" + ("" if eng in running else "; applies on its next start"))
+    if eng in running:
+        start_engine(eng, others, plan)
+
+
 def update_offer(eng):
     """Ask once whether to check for engine updates, then check eng. -> True if the user wants the safe
     upgrade (engines with an upgrader; run later, after all questions); others get a notice with the command."""
@@ -2674,6 +2742,7 @@ def cmd_config(a):
         live = {e["engine"]: e["port"] for e in running_engines()}
         ours = [e for e in live if PROFILES["engines"][e].get("script")]  # vllm, ollama, lmstudio, your own llama-server: not ours to stop
         tiny = sidecar_up()
+        rb = next(iter(rollback_pins(eng).values()), None)
         items = {
             f"engine        {versioned_title(eng, p['model']) if eng else '-'}": "engine",
             f"running       {mem_line(live, tiny)}{', pick to stop' if ours or tiny else ''})": "running",
@@ -2687,6 +2756,7 @@ def cmd_config(a):
             f"update check  {'on' if upd == '1' else 'off'}  (newer engine release; never installs)": "update",
             **({"sudo hints    shown once  (pick to show them again on the next ./setup.sh)": "hints"} if os.path.exists(hints) else {}),
             **({osmos_budget_row(): "osmos-budget"} if eng == "osmos" else {}),
+            **({f"rollback      {ename(eng)} {short_pin(rb[0])} -> {short_pin(rb[1])}  (undo the last upgrade)": "rollback"} if rb else {}),
             "done": "done"}
         k = items[choose("Change which setting?", list(items), False, esc="done", notes=notes)]  # Esc at the top closes quietly, like done
         if k == "done":
@@ -2763,6 +2833,8 @@ def cmd_config(a):
         elif k == "update":
             os.makedirs(AGENT, exist_ok=True)
             open(UPDATE_PREF, "w").write("0\n" if upd == "1" else "1\n")
+        elif k == "rollback":
+            rollback_engine(eng)
         elif k == "hints" and os.path.exists(hints):
             os.remove(hints)
             print("  sudo hints will show on the next ./setup.sh run")
