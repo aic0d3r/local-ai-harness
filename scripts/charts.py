@@ -21,20 +21,27 @@ def mmss(s):
     return f"{s // 60}m{s % 60:02d}s"
 
 
-def row(ax, rows, title, fmt, best_low=None):
-    """rows: (label, value, color, note?). best_low=None keeps the given order."""
+def row(ax, rows, title, fmt, best_low=None, track=None):
+    """rows: (label, value, color, note?). best_low=None keeps the given order.
+    track: faint full-scale bar behind each; the value then sits inside the bar's tip, the note just outside."""
     if best_low is not None:
         rows = sorted(rows, key=lambda r: r[1], reverse=not best_low)  # best on top
     y = list(range(len(rows)))[::-1]
-    top = max(r[1] for r in rows)
+    top = max([r[1] for r in rows] + [track or 0])
     for yi, (label, v, color, *note) in zip(y, rows):
+        if track:
+            ax.barh(yi, track, height=0.62, color=TEXT, alpha=0.06, linewidth=0)
         hatch = color == "wrong"
         c = CLOUD if hatch else color
         ax.barh(yi, v, height=0.62, color=BG if hatch else c, edgecolor=c, hatch="//" if hatch else None,
                 linewidth=1.5 if hatch else 0)
         hi = c == ACCENT
-        t = ax.text(v + top * 0.012, yi, fmt(v), va="center", fontsize=22, fontweight="bold",
-                    color=ACCENT if hi else TEXT)
+        if track:
+            ax.text(v - top * 0.01, yi, fmt(v), va="center", ha="right", fontsize=22, fontweight="bold", color=BG)
+            t = ax.text(v, yi, "", va="center")  # anchor for the note at the bar's end
+        else:
+            t = ax.text(v + top * 0.012, yi, fmt(v), va="center", fontsize=22, fontweight="bold",
+                        color=ACCENT if hi else TEXT)
         if note:
             ax.annotate("  " + note[0], xycoords=t, xy=(1, 0.5), va="center", fontsize=17,
                         fontweight="bold" if hi else "normal", color=ACCENT if hi else MUTED)
@@ -52,7 +59,7 @@ def row(ax, rows, title, fmt, best_low=None):
         ax.set_title(title, loc="left", color=MUTED, fontsize=19, pad=10)
 
 
-def chart(name, headline, sub, panels, legend, foot, height=9, left=0.2):
+def chart(name, headline, sub, panels, legend, foot, height=9, left=0.2, hspace=0.45):
     """panels: [(rows, title, fmt, best_low)]; legend: [(color, label)]."""
     fig, axes = plt.subplots(len(panels), 1, figsize=(16, height), dpi=100, facecolor=BG, squeeze=False,
                              gridspec_kw={"height_ratios": [len(p[0]) for p in panels]})
@@ -60,12 +67,12 @@ def chart(name, headline, sub, panels, legend, foot, height=9, left=0.2):
     fig.text(0.03, 1 - 1.1 / height, sub, color=MUTED, fontsize=19)
     for ax, p in zip(axes[:, 0], panels):
         row(ax, *p)
-    fig.legend(handles=[Patch(facecolor=BG if c == "wrong" else c, edgecolor=CLOUD if c == "wrong" else c,
+    legend and fig.legend(handles=[Patch(facecolor=BG if c == "wrong" else c, edgecolor=CLOUD if c == "wrong" else c,
                               hatch="//" if c == "wrong" else None, label=l) for c, l in legend],
                loc="lower right", bbox_to_anchor=(0.97, 0.005), ncol=len(legend), frameon=False,
                fontsize=17, labelcolor=TEXT, handlelength=1, handleheight=1)
     fig.text(0.03, 0.22 / height, foot, color=MUTED, fontsize=15)
-    fig.subplots_adjust(left=left, right=0.97, top=1 - 1.8 / height, bottom=0.75 / height, hspace=0.45)
+    fig.subplots_adjust(left=left, right=0.97, top=1 - 1.8 / height, bottom=0.75 / height, hspace=hspace)
     out = DIR / name
     fig.savefig(out, facecolor=BG)
     plt.close(fig)
@@ -124,6 +131,34 @@ def main():
             "Cold read time  ·  lower is better", lambda v: f"{v:g} s", None)],
           [(before, "before"), (after, "after")],
           "Measured Nov 22, 2026; the rest of the tools are called from codemode", height=7.5, left=0.18)
+
+    # docs/BENCHMARKS.md, "Efficiency levers" table: share saved vs the same task without the lever.
+    pct = lambda b, a: round((b - a) / b * 100)
+    best = pct(13980, 822)
+
+    def shade(v):  # MUTED -> ACCENT by share of the best saving; only the best is exact ACCENT (orange label)
+        if v == best:
+            return ACCENT
+        m, a = (bytes.fromhex(c[1:]) for c in (MUTED, ACCENT))
+        return "#" + "".join(f"{round(x + (y - x) * v / best):02x}" for x, y in zip(m, a))
+
+    lv = lambda label, v, note: (label, v, shade(v), note)
+    tokens = [lv("serena: read a function", best, "~3,500 → ~205 tokens"),  # logged in chars, ~4/token
+              lv("screenshot cap", pct(2552, 436), "2,552 → 436 tokens"),  # halogen 0.21.0, 2026-11-25
+              lv("sidecar: commit diff", pct(18500, 7100), "18.5k → 7.1k tokens"),
+              lv("8 tools, not 25: cold prompt", pct(13968, 7952), "13,968 → 7,952 tokens"),
+              lv("semble-first search", pct(4368, 2706), "4,368 → 2,706 output tokens"),
+              lv("serena-first routing", pct(37450, 23260), "~9,400 → ~5,800 tokens read")]
+    time = [lv("sidecar: compaction wait", pct(52, 24), "~52 s → ~24 s"),
+            lv("8 tools, not 25: cold turn", pct(31.4, 17.5), "31.4 s → 17.5 s"),
+            lv("semble-first search", 22, "wall time"),
+            lv("serena-first routing", 16, "wall time")]
+    chart("efficiency-levers.png", f"Every layer keeps tokens off the main model: up to {best}% less",
+          "Same task with and without each lever, on Strix Halo; the faint track is the cost without it",
+          [(tokens, "Tokens per task  ·  % less", lambda v: f"{v}%", None, 100),
+           (time, "Time spent waiting  ·  % less", lambda v: f"{v}%", None, 100)],
+          [], "Oct-Nov 2026 runs; every number with its run in docs/BENCHMARKS.md#efficiency-levers",
+          height=9.5, left=0.24, hspace=0.25)
 
 
 if __name__ == "__main__":

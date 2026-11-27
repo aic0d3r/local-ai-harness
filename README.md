@@ -2,7 +2,7 @@
 
 **Install, update and switch local LLM engines and models.**
 
-Run a coding agent on a local model, on any hardware. Built on [pi](https://github.com/earendil-works/pi), for Linux and
+Run a coding agent on a local model on your own hardware. Built on [pi](https://github.com/earendil-works/pi), for Linux and
 Windows (beta), tuned and measured on AMD Strix Halo.
 
 - **Install:** detects your hardware, recommends an engine and model, then installs, starts and tunes it.
@@ -51,8 +51,8 @@ git clone https://github.com/aic0d3r/local-ai-harness && cd local-ai-harness
 
 Setup and `./harness config` are interactive menus (arrow keys, Esc goes back), so there are no flags to remember.
 Setup asks every question first and installs nothing until you confirm. It installs and starts halogen, gufo, Strata,
-osmos and strix-llama.cpp itself; start any other engine (Ollama, vLLM, LM Studio, llama.cpp) before running it.
-`./setup.sh --doctor` checks the install with a live model ping. Flags and the full walkthrough:
+osmos and strix-llama.cpp itself; start any other engine (Ollama, vLLM, LM Studio, llama.cpp) before running setup.
+`./setup.sh --doctor` checks the whole install, including a live model ping. Flags for scripting and the full walkthrough:
 [docs/SETUP.md](docs/SETUP.md).
 
 ### Windows (beta)
@@ -105,25 +105,22 @@ Speeds: [BENCHMARKS.md](docs/BENCHMARKS.md#engines-on-strix-halo) and [ENGINES.m
 
 Every layer keeps tokens off the main model: faster prefill locally, a smaller bill on cloud.
 
-- **Small, stable prompt:** 8 tools declared instead of 25, nothing rewrites the system prompt mid-session. A cold
-  turn on osmos: 13,968 to 7,952 tokens, 31.4 s to 17.5 s.
-- **Search routing:** semble first for finding code (-22% wall time, -38% output tokens), serena for a known symbol
-  (-16% wall time, -38% tool output).
-- **Symbol tools:** a function body in 822 chars instead of 13,980 for the whole file.
-- **Sidecar for commits and compaction:** commit diffs 18.5k to 7.1k tokens; compaction ~24 s in the background vs ~52 s.
-- **Screenshots:** a phone screenshot from ~1,500 to ~600 tokens.
+![Share saved per efficiency lever. Tokens: serena function read 94% less, screenshot 83%, commit diff 62%, cold prompt 43%, semble and serena routing 38%. Time: compaction wait 54%, cold turn 44%, semble 22%, serena 16%](docs/charts/efficiency-levers.png)
+
+- **Symbol tools (94% fewer tokens):** serena reads one function in ~205 tokens instead of ~3,500 for the whole file.
+- **Screenshot cap (83%):** a phone screenshot costs 436 tokens on halogen instead of 2,552.
+- **Sidecar for commits and compaction:** commit diffs 18.5k to 7.1k tokens (62%); compaction runs in the background,
+  ~24 s instead of a ~52 s wait (54%).
+- **Small, stable prompt:** 8 tools declared instead of 25, and nothing rewrites the system prompt mid-session. A cold
+  turn on osmos: 13,968 to 7,952 tokens (43%), 31.4 s to 17.5 s (44%).
+- **Search routing:** semble first for finding code (38% fewer output tokens, 22% less time), serena for a known
+  symbol (38% fewer tokens read, 16% less time).
 - Also: `rtk` output compression, `tool-trim`, `image-prune`, a warm prompt cache, a prompt-injection gate.
 
-How each was measured: [BENCHMARKS.md](docs/BENCHMARKS.md#efficiency-levers). Extensions:
+Each lever was measured as the same task with and without it, on an ASUS ROG Flow Z13 (Ryzen AI Max+ 395, 128 GB) at
+70 W: the screenshot cap on halogen, the prompt and routing levers on osmos. Every run:
+[BENCHMARKS.md](docs/BENCHMARKS.md#efficiency-levers); the stack: [STRIX-HALO.md](docs/STRIX-HALO.md); extensions:
 [extensions/README.md](extensions/README.md).
-
-## Evidence
-
-![Local Qwen3.8 Flash-Next 125B vs GLM 5.3 cloud tiers on Strix Halo: time to first token and decode tokens per second](docs/charts/local-vs-cloud.png)
-
-ASUS ROG Flow Z13 (Ryzen AI Max+ 395, 128 GB) at 70 W: Flash-Next 125B on the iGPU at 262k context, NPU models
-screening prompts, a ling-tiny sidecar for commits and summaries. The stack: [STRIX-HALO.md](docs/STRIX-HALO.md); every
-number with its logged run: [BENCHMARKS.md](docs/BENCHMARKS.md).
 
 ## Documentation
 
