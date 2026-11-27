@@ -44,7 +44,8 @@ The full walkthrough of `./setup.sh`, the `./harness` commands and `./start.sh`.
      Ollama; strix-llama.cpp runs an image pinned by digest, so it has none).
      On halogen, gufo, Strata and osmos it offers the safe upgrade right away (`scripts/upgrade-<engine>.sh`: update, restart,
      check, roll back on failure); on the others it prints the upgrade command. If an upgrade passes its checks but runs worse, the
-     `rollback` row in `./harness config` puts it back on the version from before it (Strata: Docker only; osmos rebuilds the previous tag and checks it), or keeps the new one and deletes the old image to free the disk. `start.sh` repeats the one-line notice,
+     `rollback` row in `./harness config` puts it back on the version from before it (Strata: Docker only; osmos rebuilds the previous tag and checks it), or keeps the new one and deletes the older versions. A passing upgrade keeps only the new version and the rollback;
+     `./harness prune` deletes older engine versions already on disk (lists them, asks once). `start.sh` repeats the one-line notice,
      and `./harness update-check` runs it on demand;
    - voice.
 

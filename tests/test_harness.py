@@ -837,26 +837,46 @@ subprocess.run(["bash", "-c", f'. "{lib}"; pin_set GUFO_VERSION {dg} 9.1.0'], en
 h.write_rollback(h.rollback_pins("gufo"))  # PREV is the launcher default: the stored pin goes
 assert h.pin_value("GUFO_VERSION", dg) == dg and h.rollback_pins("gufo") == {} and "GUFO" not in open(f"{h.AGENT}/harness-pins").read()
 assert h.short_pin("ghcr.io/x@sha256:30370c206723e1c1") == "30370c206723" and h.short_pin("0.21.0") == "0.21.0"
-# keep the new version: the previous image goes (untagged, then by id), PREV goes, the pin in force stays
+# prune keeps the version in force (bbb) and the rollback (aaa), deletes the rest (ccc: untagged, then by id). Keep (forget
+# the rollback) drops PREV and prunes, so aaa goes too; the pin in force stays
 dd = re.search(r"^DEFAULT_DIGEST=(\S+)", open(os.path.join(h.REPO, "server/start-gufo-flashnext.sh")).read(), re.M).group(1)
 for v, d in (("9.1.0", "sha256:aaa"), ("9.2.0", "sha256:bbb")):
     subprocess.run(["bash", "-c", f'. "{lib}"; pin_set GUFO_VERSION {dg} {v}; pin_set GUFO_DIGEST {dd} {d}'], env=pins_env, check=True)
 real_tool, calls, gone = h.tool, [], set()
 def fake_tool(*a, **k):
     calls.append(a)
+    ok = lambda out, rc=0: subprocess.CompletedProcess(a, rc, out, "")
+    if a[:2] == ("docker", "images"):
+        return ok("\n".join(i for i in ("id-a", "id-b", "id-c", "id-a") if i not in gone))
     if a[:2] == ("docker", "rmi"):
-        gone.add("id-a")
+        gone.add(a[-1]); return ok("")
     if a[:2] == ("docker", "image"):
-        ref = a[-1]
-        iid = "id-a" if ref.endswith("aaa") or ref == "id-a" else "id-b"
-        return subprocess.CompletedProcess(a, 1 if iid in gone else 0, "x:9.1.0" if "RepoTags" in a[-2] else iid, "")
-    return subprocess.CompletedProcess(a, 0, "", "")
+        iid = next(f"id-{x}" for x in "abc" if a[-1].endswith(x * 3) or a[-1] == f"id-{x}")
+        if iid in gone:
+            return ok("", 1)
+        fmt = a[-2]
+        return ok(f"x:{iid}" if "RepoTags" in fmt else f"9.{iid}|1000000000" if "Size" in fmt else iid)
+    return ok("")
 h.tool = fake_tool
 pins = h.rollback_pins("gufo")
 assert h.pin_images("gufo", pins) == ("ghcr.io/gufo-org/toolboxes/gufo-runtime@sha256:bbb", "ghcr.io/gufo-org/toolboxes/gufo-runtime@sha256:aaa")
+assert h.prune_plan("gufo") == ([("id-c", "9.id-c", 10**9)], [])
+assert h.prune_plans(["gufo", "osmos"]) == ({"gufo": ([("id-c", "9.id-c", 10**9)], {})}, 10**9)
+assert h.prune(["gufo"], yes=True) == 10**9 and ("docker", "rmi", "x:id-c", "id-c") in calls and gone == {"id-c"}
 h.forget_rollback("gufo", pins)
 h.tool = real_tool
-assert ("docker", "rmi", "x:9.1.0", "id-a") in calls and not any("id-b" in c for c in calls if c[:2] == ("docker", "rmi"))
+assert gone == {"id-a", "id-c"}, gone  # the rollback went with Keep; the version in force never
+# strix-llama.cpp's ROCm image is in force only while chosen (LLAMACPP_BACKEND=rocm) or a container uses it
+ps_out = ""
+h.tool = lambda *a, **k: subprocess.CompletedProcess(a, 0, ps_out if a[1] == "ps" else "id-" + a[-1][-6:], "")
+vk_only = h.current_images("llamacpp")
+ps_out = "c1"
+with_ct = h.current_images("llamacpp")
+ps_out = ""; os.environ["LLAMACPP_BACKEND"] = "rocm"
+with_env = h.current_images("llamacpp")
+del os.environ["LLAMACPP_BACKEND"]; h.tool = real_tool
+assert len(vk_only) == 1, vk_only
+assert len(with_ct) == 2 and with_ct == with_env and with_ct[0] == vk_only[0], (with_ct, with_env)
 assert h.rollback_pins("gufo") == {} and h.pin_value("GUFO_VERSION", dg) == "9.2.0" and "PREV_" not in open(f"{h.AGENT}/harness-pins").read()
 # Strata floats on its tag (pin = the tag itself); a rollback pins the old digest on top of it
 fl, od = "ghcr.io/niko1221/strata:latest-test", "ghcr.io/niko1221/strata@sha256:aaa"

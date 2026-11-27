@@ -55,6 +55,8 @@ if [ -n "$IMAGE" ]; then
   # float on the tag again (drops a rollback pin); the digest that ran before is the ./harness config rollback
   NEWD=$(docker image inspect -f '{{index .RepoDigests 0}}' "$IMAGE" 2>/dev/null)
   pin_set STRATA_IMAGE "$IMAGE" "$IMAGE" "$([ "$OLD" != "$NEWD" ] && echo "$OLD")" || echo "      WARN: could not write $PINS"
+  # keep only the new image and the rollback: older ones go
+  python3 "$REPO/setup/harness.py" prune strata --yes || echo "      WARN: could not prune old versions (./harness prune)"
   echo "OK: Strata image updated and answering ($IMAGE)"
   exit 0
 fi

@@ -37,7 +37,8 @@ also held (a ~51.6K-token summarize: 1,353 t/s prefill, 106 decode vs 1,325 / 10
 slot sampler reuse (#274) and the upstream sync.
 
 **ROCm** (`LLAMACPP_BACKEND=rocm`, the same build's `server-rocm-b13600` image): slower here. Qwen3.6 decoded 70.0 t/s
-(83.1 on Vulkan) at the same 2,136 t/s prefill and used twice the CPU. Kept as an opt-in for comparison, not a default.
+(83.1 on Vulkan) at the same 2,136 t/s prefill and used twice the CPU. Kept as an opt-in for comparison, not a default. Its image is ~32 GB: `./harness prune` (and the cleanup after an upgrade)
+deletes it unless `LLAMACPP_BACKEND=rocm` is set or a container uses it; opting in again pulls it again.
 
 **Flash-Next** on this image drafts with its MTP head (`mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf`, the one
 `scripts/download-stock.sh` puts beside the shards) and runs halo-box's recipe `-lzm on-direct`, 3 drafts.

@@ -151,12 +151,8 @@ case "$DIGEST" in sha256:*) ;; *) echo "FAIL: no registry digest for $IMG:$TAG -
 # stored per user (harness-pins), not in the tracked launcher: the checkout stays clean so harness updates keep working
 pin_set HALOGEN_IMAGE_TAG "$DEF_TAG" "$TAG" && pin_set HALOGEN_IMAGE_DIGEST "$DEF_DIGEST" "$DIGEST" \
   || { echo "FAIL: could not write $PINS - pin unchanged"; exit 1; }
-# keep one rollback copy (the one just taken for $CUR): each backup is a full ~15 GB NPU set. The *-failed sets a rollback
-# kept for diagnosis go too, once an upgrade passed on top of them (nothing pruned them before)
-if [ "$REFRESHED" = 1 ]; then
-  for old in "$NPU"-*-backup "$NPU"-*-failed "$NPU"-*-backup.part; do
-    [ -d "$old" ] && [ "$old" != "$NPU-$CUR-backup" ] && rm -rf "$old" && echo "      pruned old NPU copy $old"
-  done
-fi
+# keep only $TAG and the rollback ($CUR): older images go, and every NPU set but $CUR's backup (~15 GB each; the *-failed
+# sets a rollback kept for diagnosis too, once an upgrade passed on top of them)
+python3 "$REPO/setup/harness.py" prune halogen --yes || echo "      WARN: could not prune old versions (./harness prune)"
 echo "      $(bash "$START" --print-image)"
 echo "OK: validated and pinned to $TAG in $PINS (a harness update that ships a newer reviewed pin replaces it)."

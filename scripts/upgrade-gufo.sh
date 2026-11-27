@@ -68,4 +68,6 @@ python3 "$REPO/scripts/engine-acceptance.py" "$URL" 15 || rollback "acceptance"
 echo "[4/4] updating pin $CUR -> $TAG"
 pin_set GUFO_VERSION "$DEF_VER" "$TAG" && pin_set GUFO_DIGEST "$DEF_DIGEST" "$DIGEST" \
   || { echo "FAIL: could not write $PINS - pin unchanged"; exit 1; }
+# keep only $TAG and the rollback ($CUR): older images go (~7 GB each)
+python3 "$REPO/setup/harness.py" prune gufo --yes || echo "      WARN: could not prune old versions (./harness prune)"
 echo "OK: validated and pinned to $TAG in $PINS (running now). A harness update that ships a newer reviewed pin replaces it."

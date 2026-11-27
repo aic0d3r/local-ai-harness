@@ -2043,32 +2043,112 @@ def pin_images(eng, pins):
     """-> (image now, image before the upgrade) as docker refs, from the digest pins; (None, None) if there is none."""
     if eng in ("llamacpp", "strata"):
         return next(iter(pins.values()))[:2]
-    if eng == "osmos":  # a git checkout: no old build is kept
+    if eng not in ("halogen", "gufo"):  # osmos: a git checkout, no old build is kept
         return None, None
-    repo, n = {"halogen": ("ghcr.io/peonist-ai/halogen-flash-server", "HALOGEN_IMAGE_DIGEST"),
-               "gufo": ("ghcr.io/gufo-org/toolboxes/gufo-runtime", "GUFO_DIGEST")}[eng]
-    return tuple(f"{repo}@{d}" for d in pins[n][:2]) if n in pins else (None, None)
+    n = {"halogen": "HALOGEN_IMAGE_DIGEST", "gufo": "GUFO_DIGEST"}[eng]
+    return tuple(f"{ENGINE_REPOS[eng]}@{d}" for d in pins[n][:2]) if n in pins else (None, None)
+
+
+# the image repos the harness pulls per engine: the only images ./harness prune ever deletes
+ENGINE_REPOS = {"halogen": "ghcr.io/peonist-ai/halogen-flash-server", "gufo": "ghcr.io/gufo-org/toolboxes/gufo-runtime",
+                "strata": "ghcr.io/niko1221/strata", "llamacpp": "ghcr.io/halo-box/strix-llama.cpp"}
+
+
+def image_id(ref):
+    return tool("docker", "image", "inspect", "-f", "{{.Id}}", ref).stdout.strip() if ref else ""
+
+
+def current_images(eng):
+    """The image refs eng's launcher runs now. strix-llama.cpp: Vulkan (also the sidecar's), and ROCm only while it is in
+    use (LLAMACPP_BACKEND=rocm, or a container from it): an opt-in backend, slower here (docs/LLAMACPP.md), ~32 GB."""
+    f = ROLLBACK_PINS[eng][0]
+    if eng == "gufo":  # no --print-image: the launcher's own pin_value on its default digest
+        d = re.search(r"^DEFAULT_DIGEST=(\S+)", open(os.path.join(REPO, f)).read(), re.M)
+        return [f"{ENGINE_REPOS[eng]}@{pin_value('GUFO_DIGEST', d.group(1))}"] if d else []
+    if eng == "llamacpp":
+        vk, rc = (launcher_out(f, "--print-image", LLAMACPP_BACKEND=b) for b in ("vulkan", "rocm"))
+        rid = image_id(rc)
+        used = os.environ.get("LLAMACPP_BACKEND") == "rocm" or rid and tool("docker", "ps", "-aq", "--filter", f"ancestor={rid}").stdout.strip()
+        return [vk, rc] if used else [vk]
+    return [launcher_out(f, "--print-image")]
+
+
+def prune_plan(eng):
+    """-> ([(image id, label, bytes)], [halogen NPU backup dirs]) that are neither the version in force nor the rollback.
+    Nothing when the version in force cannot be found locally: never guess what is safe to delete."""
+    if eng not in ENGINE_REPOS:
+        return [], []
+    pins = rollback_pins(eng)
+    now = {image_id(r) for r in current_images(eng)} - {""}
+    if not now:
+        return [], []
+    # the rollback: halogen/gufo by their digest pin, strix-llama.cpp (each backend) and Strata by the stored image ref
+    back = [pin_images(eng, pins)[1]] if eng in ("halogen", "gufo") else [p[1] for p in pins.values()]
+    keep = now | {image_id(r) for r in back}
+    rocm = image_id(launcher_out(ROLLBACK_PINS[eng][0], "--print-image", LLAMACPP_BACKEND="rocm")) if eng == "llamacpp" else ""
+    imgs = []
+    for i in dict.fromkeys(tool("docker", "images", "--no-trunc", "-q", ENGINE_REPOS[eng]).stdout.split()):
+        if i not in keep:
+            info = tool("docker", "image", "inspect", "-f", '{{index .Config.Labels "org.opencontainers.image.version"}}|{{.Size}}', i).stdout.strip()
+            ver, _, size = info.rpartition("|")
+            lbl = ver if ver and ver != "<no value>" else i.split(":")[-1][:12]
+            imgs.append((i, f"{lbl} (ROCm, unused)" if i == rocm else lbl, int(size or 0)))
+    dirs = []
+    if eng == "halogen" and (npu := halogen_npu()):
+        prev = pins.get("HALOGEN_IMAGE_TAG", (None, None))[1]
+        dirs = [d for d in glob.glob(f"{glob.escape(npu)}-*") if os.path.isdir(d) and d != f"{npu}-{prev}-backup"
+                and re.search(r"-(backup|failed|backup\.part)$", d)]
+    return imgs, dirs
+
+
+def prune_plans(engs):
+    """-> {engine: (images, {dir: bytes})} for the engines with something old (prune_plan), and the total bytes."""
+    plans = {}
+    for e in engs:
+        imgs, dirs = prune_plan(e)
+        if imgs or dirs:
+            plans[e] = (imgs, {d: int((tool("du", "-sb", d).stdout.split() or [0])[0]) for d in dirs})
+    return plans, sum(s for imgs, dirs in plans.values() for s in [*(x[2] for x in imgs), *dirs.values()])
+
+
+def prune(engs, yes=False):
+    """Delete the engines' old images and NPU backups: lists them, asks once (yes: no question, after a passing upgrade;
+    without a terminal only lists). -> bytes freed."""
+    plans, total = prune_plans(engs)
+    if not plans:
+        return 0 if yes else print("  nothing old to delete") or 0
+    print(f"  old engine versions, {total / 1e9:.1f} GB:")
+    for e, (imgs, dirs) in plans.items():
+        print(f"    {ename(e)}: " + ", ".join([lbl for _, lbl, _ in imgs] + [os.path.basename(d) for d in dirs]))
+    if not yes and not sys.stdin.isatty():
+        return print("  ./harness prune --yes deletes them") or 0
+    if not yes and not ask_yn("Delete them? keeps each engine's version in force and its rollback", True):
+        return 0
+    freed = 0
+    for i, lbl, size in (x for imgs, _ in plans.values() for x in imgs):  # untag it everywhere, then the id; no -f: docker refuses an image a container uses
+        tags = tool("docker", "image", "inspect", "-f", '{{join .RepoTags " "}}', i).stdout.split()
+        r = tool("docker", "rmi", *tags, i)
+        if tool("docker", "image", "inspect", i).returncode:
+            freed += size
+        else:
+            print(f"  ! kept image {lbl}: {((r.stderr or r.stdout).strip().splitlines() or ['docker refused'])[-1]}")
+    for d, size in (x for _, dirs in plans.values() for x in dirs.items()):
+        shutil.rmtree(d, ignore_errors=True)
+        freed += 0 if os.path.exists(d) else size
+    print(f"  freed {freed / 1e9:.1f} GB")
+    return freed
+
+
+def cmd_prune(a):
+    """./harness prune [engine] [--yes]: delete old engine versions (every engine with images by default)."""
+    prune([a.engine] if a.engine else list(ENGINE_REPOS), a.yes)
 
 
 def forget_rollback(eng, pins):
-    """Keep the version in force: delete the previous version's image (and halogen's NPU backup), drop PREV."""
-    now, prev, _ = next(iter(pins.values()))
-    img_now, img_prev = pin_images(eng, pins)
-    iid = lambda ref: tool("docker", "image", "inspect", "-f", "{{.Id}}", ref).stdout.strip() if ref else ""
-    old = iid(img_prev)
-    if old and old != iid(img_now):  # untag it everywhere, then the id; no -f: docker refuses an image a container uses
-        tags = tool("docker", "image", "inspect", "-f", '{{join .RepoTags " "}}', old).stdout.split()
-        r = tool("docker", "rmi", *tags, old)
-        why = (r.stderr or r.stdout).strip().splitlines() or ["docker refused"]
-        print(f"  deleted image {pin_label(prev)}" if tool("docker", "image", "inspect", old).returncode else
-              f"  ! kept image {pin_label(prev)}: {why[-1]}")
-    if eng == "halogen":
-        npu = halogen_npu()
-        if npu and os.path.isdir(f"{npu}-{prev}-backup"):
-            shutil.rmtree(f"{npu}-{prev}-backup")
-            print(f"  deleted NPU backup {npu}-{prev}-backup")
+    """Keep the version in force: drop PREV, then delete every older version (its image, halogen's NPU backups)."""
     write_rollback(pins, forget=True)
-    print(f"  {ename(eng)} stays on {pin_label(now)}; no rollback until the next upgrade")
+    prune([eng], yes=True)
+    print(f"  {ename(eng)} stays on {pin_label(next(iter(pins.values()))[0])}; no rollback until the next upgrade")
 
 
 def rollback_engine(eng):
@@ -2077,8 +2157,8 @@ def rollback_engine(eng):
     pins = rollback_pins(eng)
     now, prev, _ = next(iter(pins.values()))
     ln, lp = pin_label(now), pin_label(prev)
-    opt_back, opt_keep = (f"Roll back to {lp}  (rebuilds and checks it, a few minutes)", f"Keep {ln}  (hide the rollback)") if eng == "osmos" else \
-        (f"Roll back to {lp}  (restarts {ename(eng)} if running)", f"Keep {ln}, delete {lp}  (frees its disk)")
+    opt_back, opt_keep = (f"Roll back to {lp}  (rebuilds and checks it, a few minutes)", f"Keep {ln}  (nothing to delete: osmos builds in place)") if eng == "osmos" else \
+        (f"Roll back to {lp}  (restarts {ename(eng)} if running)", f"Keep {ln}, delete older versions  (frees their disk)")
     pick = choose(f"{ename(eng)} {ln}: roll back, or keep it?", [opt_back, opt_keep], False, esc=BACK)
     if pick is BACK:
         return
@@ -2820,6 +2900,7 @@ def cmd_config(a):
         ours = [e for e in live if PROFILES["engines"][e].get("script")]  # vllm, ollama, lmstudio, your own llama-server: not ours to stop
         tiny = sidecar_up()
         rb = next(iter(rollback_pins(eng).values()), None)
+        old = prune_plans(ENGINE_REPOS)[1]  # ~0.5 s: docker inspects and the launchers' --print-image
         items = {
             f"engine        {versioned_title(eng, p['model']) if eng else '-'}": "engine",
             f"running       {mem_line(live, tiny)}{', pick to stop' if ours or tiny else ''})": "running",
@@ -2834,6 +2915,7 @@ def cmd_config(a):
             **({"sudo hints    shown once  (pick to show them again on the next ./setup.sh)": "hints"} if os.path.exists(hints) else {}),
             **({osmos_budget_row(): "osmos-budget"} if eng == "osmos" else {}),
             **({f"rollback      {ename(eng)} {pin_label(rb[0])} -> {pin_label(rb[1])}  (undo the last upgrade)": "rollback"} if rb else {}),
+            **({f"old versions  {old / 1e9:.1f} GB of engine images and backups  (pick to delete)": "prune"} if old else {}),
             "done": "done"}
         k = items[choose("Change which setting?", list(items), False, esc="done", notes=notes)]  # Esc at the top closes quietly, like done
         if k == "done":
@@ -2912,6 +2994,8 @@ def cmd_config(a):
             open(UPDATE_PREF, "w").write("0\n" if upd == "1" else "1\n")
         elif k == "rollback":
             rollback_engine(eng)
+        elif k == "prune":
+            prune(list(ENGINE_REPOS))
         elif k == "hints" and os.path.exists(hints):
             os.remove(hints)
             print("  sudo hints will show on the next ./setup.sh run")
@@ -2921,7 +3005,7 @@ def main():
     import argparse
     ap = argparse.ArgumentParser(prog="harness")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for n, f in (("detect", cmd_detect), ("setup", cmd_setup), ("use", cmd_use), ("tune", cmd_tune), ("bench", cmd_bench), ("status", cmd_status), ("config", cmd_config), ("update-check", cmd_update_check), ("up", cmd_up), ("recommend", cmd_recommend), ("quant-info", cmd_quant_info), ("ctx-info", cmd_ctx_info), ("model-info", cmd_model_info), ("monitor", cmd_monitor), ("verify", cmd_verify), ("refresh", cmd_refresh), ("report", cmd_report), ("endpoint", cmd_endpoint)):
+    for n, f in (("detect", cmd_detect), ("setup", cmd_setup), ("use", cmd_use), ("tune", cmd_tune), ("bench", cmd_bench), ("status", cmd_status), ("config", cmd_config), ("update-check", cmd_update_check), ("up", cmd_up), ("recommend", cmd_recommend), ("quant-info", cmd_quant_info), ("ctx-info", cmd_ctx_info), ("model-info", cmd_model_info), ("monitor", cmd_monitor), ("verify", cmd_verify), ("refresh", cmd_refresh), ("report", cmd_report), ("endpoint", cmd_endpoint), ("prune", cmd_prune)):
         p = sub.add_parser(n)
         p.set_defaults(fn=f)
         if n in ("setup", "use"):
@@ -2948,6 +3032,9 @@ def main():
             p.add_argument("--ctx", type=int, help="context window in tokens (default: what the server reports, else asked)")
         if n == "report":
             p.add_argument("--no-doctor", action="store_true", help="skip the doctor run (a few seconds, includes a live reply from the engine)")
+        if n == "prune":
+            p.add_argument("engine", nargs="?", choices=list(ENGINE_REPOS), help="default: every engine with images")
+            p.add_argument("--yes", action="store_true", help="no question (the upgrade scripts run it after a passing upgrade)")
         if n == "verify":
             p.add_argument("engine", nargs="?", help="default: the active engine")
             p.add_argument("model", nargs="?", help="default: the active model")
