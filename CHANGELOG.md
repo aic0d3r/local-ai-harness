@@ -5,6 +5,9 @@
 
 ## Unreleased
 
+### Added
+- `prompt-lint` extension and `/trim`: flags instruction fluff that piles up in AGENTS.md, APPEND_SYSTEM.md and skill descriptions. It finds references to MCP servers or tools that are missing or disabled, backticked paths that no longer exist, rules repeated near word-for-word across loaded files, and instruction files over 10% of the cold prompt. `/trim` shows a deletion-only diff and applies it only after a yes, keeping `.bak` copies. Lines with MUST, NEVER or "hard rule" are never proposed. A footer line appears at the first prompt only when there are findings `/trim` hasn't shown yet; the prompt itself is never touched. No model call. Off: `PROMPT_LINT_DISABLED=1`.
+
 ### Changed
 - `./setup.sh --voice` puts Whisper on Vulkan (GPU): it installs `whispercpp:vulkan` and sets `whispercpp.backend=vulkan` instead of leaving Lemonade on `auto`. The NPU backend is Windows-only, and the CPU is slow for Large-v3-Turbo.
 - `./setup.sh --doctor` prints the Lemonade version and says when GitHub has a newer release, with the update command for pacman or snap. Lemonade stays the native package; the OS still owns its updates.

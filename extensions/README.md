@@ -162,6 +162,27 @@ Copilot and Gemini - not for pi - so this is the pi wiring for the same check.
   `IMPECCABLE_BIN` to point it somewhere else. One-shot disable:
   `IMPECCABLE_HOOK_DISABLED=1`.
 
+## prompt-lint/ (instruction hygiene, no model)
+
+`/trim` checks the always-loaded instruction text for fluff that piles up over time:
+
+- **stale:** `mcp__<server>__<tool>` references to servers that are missing or `enabled: false` in
+  `mcp.json` (global, then project `.pi/mcp.json`), tools a connected server doesn't have, and
+  backticked `~/` or absolute paths that don't exist. Bare names in prose ("playwright is off") are not
+  checked: too easy to misread.
+- **duplicate:** two blocks (list item, paragraph, table row) with at least 8 words and ≥80% word overlap,
+  across loaded AGENTS.md files, APPEND_SYSTEM.md and skill descriptions. It keeps the copy you can't edit
+  (a skill) or the first one.
+- **budget:** AGENTS.md files + APPEND_SYSTEM over 10% of the cold prompt (system prompt + declared tools,
+  chars/4). The report also lists tokens per file and the longest skill descriptions.
+
+Sources also include the repo's `config/AGENTS.md` and `config/APPEND_SYSTEM.md` when pi runs inside the
+harness repo; these are checked for duplicates only against each other. The fix is a deletion-only
+diff, applied after a yes, with `.bak` copies; a file edited since the check is skipped. Blocks with
+MUST, NEVER or "hard rule" are reported, never deleted. Skills and tool declarations are report-only.
+At the first prompt of a session, a footer line appears only for findings `/trim` hasn't shown yet. The
+prompt itself is never changed, so the prompt cache stays warm. Off: `PROMPT_LINT_DISABLED=1`.
+
 ## syntax-guard.ts (deterministic syntax gate, no model)
 
 After every `edit`/`write`, runs a single-file syntax check and appends the error to

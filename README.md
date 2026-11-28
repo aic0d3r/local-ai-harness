@@ -115,7 +115,7 @@ Every layer keeps tokens off the main model: faster prefill locally, a smaller b
   turn on osmos: 13,968 to 7,952 tokens (43%), 31.4 s to 17.5 s (44%).
 - **Search routing:** semble first for finding code (38% fewer output tokens, 22% less time), serena for a known
   symbol (38% fewer tokens read, 16% less time).
-- Also: `rtk` output compression, `tool-trim`, `image-prune`, a warm prompt cache, a prompt-injection gate.
+- Also: `rtk` output compression, `tool-trim`, `image-prune`, `/trim` (flags stale or duplicate AGENTS.md rules), a warm prompt cache, a prompt-injection gate.
 
 Each lever was measured as the same task with and without it, on an ASUS ROG Flow Z13 (Ryzen AI Max+ 395, 128 GB) at
 70 W: the screenshot cap on halogen, the prompt and routing levers on osmos. Every run:
