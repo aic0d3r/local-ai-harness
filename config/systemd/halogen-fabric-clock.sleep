@@ -1,0 +1,12 @@
+#!/bin/sh
+# systemd-sleep hook for halogen-fabric-clock. A held fabric clock keeps the chip out of its deepest sleep state
+# ("Last suspend didn't reach deepest state", fans keep running), so give it back before sleep and hold it again on
+# resume, only if it was held going in (by the unit or by a running halogen container).
+# Install (as root): install -m 755 halogen-fabric-clock.sleep /usr/lib/systemd/system-sleep/halogen-fabric-clock
+F=/run/halogen-fabric-clock.was-held
+C=/usr/local/sbin/halogen-fabric-clock
+case "$1" in
+  pre)  rm -f "$F"; "$C" status >/dev/null 2>&1 && touch "$F" && "$C" release ;;
+  post) [ -f "$F" ] && rm -f "$F" && "$C" hold ;;
+esac
+exit 0

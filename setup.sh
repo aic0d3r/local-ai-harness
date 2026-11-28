@@ -99,8 +99,8 @@ hal_up(){  curl -sf -m 3 "localhost:$HAL_PORT/health"  >/dev/null 2>&1; }
 eng_up(){ curl -sf -m 3 ${STRATA_KEY:+-H "Authorization: Bearer $STRATA_KEY"} "$ENG_URL/v1/models" >/dev/null 2>&1; }
 lem_up(){  curl -sf -m 3 "localhost:13305/api/v1/models" >/dev/null 2>&1 || curl -sf -m 3 "localhost:13305/health" >/dev/null 2>&1; }
 # fabric clock held? GPU+NPU together on Strix Halo are only safe with it held
-# (halogen NPU docs). The container holds it while it runs via /sys, but any NPU
-# program outside the container (voice STT, fine-tune jobs) needs the host unit.
+# (halogen NPU docs). The container holds it while it runs via /sys; nothing else
+# here uses the NPU (Lemonade's whisper NPU backend is Windows-only).
 fclk_held(){
   local d perf
   for d in /sys/class/drm/card*/device; do
@@ -136,12 +136,12 @@ host_checks(){
   else [ -n "$o9" ] && [ "$o9" -lt 200 ] \
     && warn "order-9 pages = $o9 (<200): full-ctx halogen (262k) will wedge; 65k/2-slot is fine. reboot before full-ctx." \
     || ok "order-9 pages: ${o9:-n/a}"; fi
-  # GPU+NPU together are only safe with the fabric clock held; the container holds it while it runs.
-  # an install for a GPU-only engine (osmos/gufo/Strata, no voice) runs nothing on the NPU: no hint there
-  if [ "$NO_HALOGEN" = 1 ] && [ "$VOICE" = 0 ] && [ "$DOCTOR" = 0 ]; then :
-  elif fclk_held; then ok "gpu fabric clock held (GPU+NPU concurrency safe)"; hint_fixed fclk
-  else hint fclk "gpu fabric clock NOT held - NPU beside GPU can hang or corrupt (halogen NPU docs). one-time install (sudo):" \
-    "  sudo install -m 755 $REPO/config/systemd/halogen-fabric-clock /usr/local/sbin/ && sudo install -m 644 $REPO/config/systemd/halogen-fabric-clock.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now halogen-fabric-clock.service"; fi
+  # GPU+NPU together are only safe with the fabric clock held; the halogen container holds it while it runs and gives
+  # it back on stop, and nothing else here uses the NPU. No host unit suggested: it costs idle power and, without its
+  # sleep hook, deep sleep (config/systemd/halogen-fabric-clock.service, for your own host-side NPU programs).
+  if fclk_held; then ok "gpu fabric clock held (GPU+NPU concurrency safe)"
+  elif [ "$DOCTOR" = 1 ]; then ok "gpu fabric clock free: fine, halogen holds it while it runs"; fi
+  hint_fixed fclk
   # list-timers exits 0 even with "0 timers listed"; is-enabled actually checks
   if systemctl is-enabled --quiet vm-compact.timer 2>/dev/null; then
     ok "vm-compact.timer enabled (15-min allocator hygiene)"; hint_fixed vmcompact
@@ -196,6 +196,17 @@ if [ "$DOCTOR" = 1 ]; then
   # voice stack (opt-in --voice): Lemonade on :13305 serves Whisper STT + Kokoro TTS
   if [ "$VOICE" = 1 ] || lem_up; then
     lem_up                          && ok "lemonade up (:13305, voice)" || fail "lemonade down - sudo pacman -S lemonade-server, then: systemctl --user start lemond"
+    # the OS package manager owns Lemonade's version; --doctor only says when GitHub has a newer release
+    if [ "$DOCTOR" = 1 ] && lem_up; then
+      lv=$(curl -sf -m 3 localhost:13305/api/v1/health | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version",""))' 2>/dev/null)
+      gv=$(curl -sf -m 5 https://api.github.com/repos/lemonade-sdk/lemonade/releases/latest | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"].lstrip("v"))' 2>/dev/null)
+      if [ -n "$lv" ] && [ -n "$gv" ] && [ "$lv" != "$gv" ] && [ "$(printf '%s\n%s\n' "$lv" "$gv" | sort -V | tail -1)" = "$gv" ]; then
+        if pacman -Qq lemonade-server >/dev/null 2>&1; then up="sudo pacman -Syu lemonade-server"
+        elif snap list lemonade-server >/dev/null 2>&1; then up="sudo snap refresh lemonade-server"
+        else up="see lemonade-server.ai"; fi
+        warn "lemonade $lv, $gv is out (your package manager may not have it yet): $up"
+      elif [ -n "$lv" ]; then ok "lemonade $lv${gv:+ (latest)}"; fi
+    fi
     command -v arecord >/dev/null   && ok "mic capture (arecord)"       || fail "arecord missing (alsa-utils)"
   fi
   # non-halogen engine detection: the harness contract (NPU guard/triage/dedup,
@@ -462,6 +473,12 @@ if [ "$VOICE" = 1 ]; then
     lem_up || systemctl --user start lemond.service 2>/dev/null
     sleep 2
     lem_up && ok "lemond up (:13305, whisper STT + kokoro TTS, single voice server)" || warn "lemond not answering yet (check: journalctl --user -u lemond)"
+    # whisper on Vulkan: short bursts on the iGPU beside the LLM engine; the NPU backend is Windows-only, CPU is slow
+    if lem_up; then
+      lemonade backends info whispercpp:vulkan 2>/dev/null | grep -Eq '^ *Status +installed' \
+        || lemonade backends install whispercpp:vulkan >/dev/null 2>&1 || warn "whisper vulkan backend install failed - run: lemonade backends install whispercpp:vulkan"
+      lemonade config set whispercpp.backend=vulkan >/dev/null 2>&1 && ok "whisper on vulkan (GPU)" || warn "could not set whisper to vulkan - run: lemonade config set whispercpp.backend=vulkan"
+    fi
     lemonade list --downloaded 2>/dev/null | grep -q "Whisper-Large-v3-Turbo" \
       && ok "audio models present (Whisper-Large-v3-Turbo + kokoro-v1)" \
       || warn "load the audio models once: lemonade load Whisper-Large-v3-Turbo && lemonade load kokoro-v1"

@@ -13,7 +13,7 @@ One box, two model servers (three with voice), three pieces of silicon:
   longer launched). Detailed in [The NPU](#the-npu).
 - **ling3.0-tiny** (`:8090`, iGPU, llama.cpp): the sidecar for commit messages, compaction summaries and repo maps.
 - **semble** (child process, CPU): semantic code search over `uvx`; no model server.
-- **Lemonade** (`:13305`, CPU, opt-in `--voice`): whisper STT and kokoro TTS.
+- **Lemonade** (`:13305`, opt-in `--voice`, native OS package): whisper STT on Vulkan (GPU) and kokoro TTS on the CPU.
 
 Flow: every prompt is screened by the NPU guard before the main model sees it. The main model generates on the iGPU with
 its prompt cache warm. Side jobs that need a judgement in milliseconds (is this an injection, which of these three is
@@ -97,9 +97,12 @@ HALOGEN_NPU_MODELS=decider-0.8b,qwen3guard-gen-0.6b ./start-halogen.sh
 
 > [!WARNING]
 > **GPU + NPU at the same time is only safe with the GPU fabric clock held** (halogen NPU docs). Without it, concurrent
-> GPU and NPU work can hang the device or corrupt output. `./setup.sh --doctor` probes it and prints the one-time
-> host-side install for the `halogen-fabric-clock` unit when it is not held. The container holds the clock while it runs;
-> the gap is any NPU call made with no container up.
+> GPU and NPU work can hang the device or corrupt output. The halogen container holds the clock while it runs and gives
+> it back when it stops, and nothing else in the harness uses the NPU (voice runs on the CPU/GPU: Lemonade's whisper
+> NPU backend is Windows-only), so there is nothing to install. Only if you run your own NPU program on the host:
+> `config/systemd/halogen-fabric-clock.service` holds the clock from boot (install steps in its header). It costs idle
+> power, and a held clock keeps the chip out of its deepest sleep state ("Last suspend didn't reach deepest state",
+> fans keep running), so always install its sleep hook with it: it gives the clock back before suspend.
 
 ## Upgrading halogen
 

@@ -3,6 +3,16 @@
 <!-- One block per section per release, in the order Added, Changed, Fixed. Add new entries to the
      existing block instead of opening a second one, so a release never has two "### Fixed" lists. -->
 
+## Unreleased
+
+### Changed
+- `./setup.sh --voice` puts Whisper on Vulkan (GPU): it installs `whispercpp:vulkan` and sets `whispercpp.backend=vulkan` instead of leaving Lemonade on `auto`. The NPU backend is Windows-only, and the CPU is slow for Large-v3-Turbo.
+- `./setup.sh --doctor` prints the Lemonade version and says when GitHub has a newer release, with the update command for pacman or snap. Lemonade stays the native package; the OS still owns its updates.
+
+### Fixed
+- `scripts/uninstall.sh` now stops and disables `lemond.service`, the unit the package ships. Before, it only handled the old `lemonade-server.service`.
+- The `halogen-fabric-clock` unit kept the chip out of its deepest sleep state ("Last suspend didn't reach deepest state", fans running in suspend): it re-held the clock at boot and after every resume. It now holds at boot only, and a new sleep hook (`config/systemd/halogen-fabric-clock.sleep`) gives the clock back before suspend and holds it again on resume, only if it was held going in. That also covers suspending while halogen runs. Setup and `--doctor` no longer suggest the unit at all: the halogen container holds the clock itself while it runs, and nothing else in the harness uses the NPU (voice never did: Lemonade's whisper NPU backend is Windows-only). Installed it from an earlier hint? Remove it: `sudo systemctl disable halogen-fabric-clock.service && sudo halogen-fabric-clock release`.
+
 ## 2.4.0 - 2026-11-28
 
 UX polish: setup and `./harness config` menus redesigned with aligned columns, status words and per-row speeds; shorter engine upgrade offers with before/after speed; one-step rollback and cleanup of old engine versions.

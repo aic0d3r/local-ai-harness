@@ -81,7 +81,8 @@ the dashboards are yours to build; these two scripts exist because they cost no 
 | halogen tries to download something | your launch has `HALOGEN_DOWNLOAD` set — remove it; everything loads from local files |
 | sessions 2.5x slower | prompt cache is OFF — never set `HALOGEN_PROMPT_CACHE=0` |
 | `triage` / `dedup_scan` return an error | halogen down, or the model missing from `HALOGEN_NPU_MODELS` — check the `npu` field of `curl -s localhost:8731/health` |
-| hangs or garbage when GPU and NPU work at once | GPU fabric clock not held — `./setup.sh --doctor` prints the one-time unit install |
+| hangs or garbage when GPU and NPU work at once | GPU fabric clock not held. halogen holds it while it runs; only your own host-side NPU programs need `config/systemd/halogen-fabric-clock.service` + its sleep hook (see [STRIX-HALO.md](STRIX-HALO.md)) |
+| fans keep running in suspend, `Last suspend didn't reach deepest state` | a held fabric clock blocks deep sleep: the old `halogen-fabric-clock` unit. Not needed for the harness: `sudo systemctl disable halogen-fabric-clock.service && sudo halogen-fabric-clock release` |
 | semantic search unavailable | `uvx` missing (install uv) or `mcp.json` lacks the semble entry — rerun `./setup.sh` and check `pi mcp list` |
 | web search unavailable | `uvx` missing or `mcp.json` lacks the ddg entry — rerun `./setup.sh`; DDG rate-limits searches to 30/min by default |
 | stale task on resume | checkpoint from a previous task — run `/progress-reset` in pi (checkpoints live in `~/.pi/agent/progress/`, one file per project folder) |

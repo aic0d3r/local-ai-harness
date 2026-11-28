@@ -1,19 +1,24 @@
-# Holds the AMD GPU's fabric clock at its top level at boot and after every resume, for halogen-flash-server with
-# the NPU (HALOGEN_NPU_MODELS): on Strix Halo the GPU and the NPU at once are safe only with that clock held.
+# Holds the AMD GPU's fabric clock at its top level from boot, for your own NPU programs on the host: on Strix Halo the
+# GPU and the NPU at once are safe only with that clock held. The harness does not need it: the halogen container holds
+# the clock while it runs and gives it back when it stops, and nothing else here uses the NPU.
+# Cost: the clock stays at its top level while the machine is awake (more idle power). A held clock also blocks the
+# deepest sleep state (fans keep running in suspend), so always install the sleep hook with it: it releases the clock
+# before suspend and holds it again on resume.
 # Install (as root), from this directory:
 #   install -m 755 halogen-fabric-clock /usr/local/sbin/
+#   install -m 755 halogen-fabric-clock.sleep /usr/lib/systemd/system-sleep/halogen-fabric-clock
 #   install -m 644 halogen-fabric-clock.service /etc/systemd/system/
-#   systemctl daemon-reload && systemctl enable --now halogen-fabric-clock.service
-# Check: halogen-fabric-clock status. Undo: systemctl disable halogen-fabric-clock.service, then
-#   halogen-fabric-clock release (or reboot). The unit runs once at boot and once after each resume (a resume can hand
-#   the clock back to the driver); it holds nothing open, so it shows inactive between runs.
+#   systemctl daemon-reload && systemctl reenable halogen-fabric-clock.service && systemctl start halogen-fabric-clock.service
+# Check: halogen-fabric-clock status. Undo: systemctl disable halogen-fabric-clock.service,
+#   rm /usr/lib/systemd/system-sleep/halogen-fabric-clock, then halogen-fabric-clock release (or reboot).
+# The unit runs once at boot; it holds nothing open, so it shows inactive afterwards.
 [Unit]
 Description=Hold the AMD GPU fabric clock at its top level (GPU and NPU together)
-After=systemd-modules-load.service suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
+After=systemd-modules-load.service
 
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/halogen-fabric-clock hold
 
 [Install]
-WantedBy=multi-user.target suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
+WantedBy=multi-user.target

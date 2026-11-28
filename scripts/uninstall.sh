@@ -53,6 +53,9 @@ if [ -n "$SANDBOX" ]; then
 else
   systemctl --user disable --now ling-tiny.service >/dev/null 2>&1 && echo "      ling-tiny stopped/disabled"
   rm -f "$HOME/.config/systemd/user/ling-tiny.service"
+  # lemond.service ships with the package (current name); lemonade-server.service is what older installs wrote
+  systemctl --user is-enabled --quiet lemond.service 2>/dev/null || systemctl --user is-active --quiet lemond.service 2>/dev/null \
+    && systemctl --user disable --now lemond.service >/dev/null 2>&1 && echo "      lemond stopped/disabled (re-enable: systemctl --user enable --now lemond)"
   if [ -f "$HOME/.config/systemd/user/lemonade-server.service" ]; then
     systemctl --user disable --now lemonade-server.service >/dev/null 2>&1 && echo "      lemonade-server stopped/disabled"
     rm -f "$HOME/.config/systemd/user/lemonade-server.service"
