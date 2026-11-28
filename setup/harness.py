@@ -1007,7 +1007,7 @@ def stream_once(port, model_id, prompt, max_tokens, timeout=None):
             ctok = d["usage"].get("completion_tokens", 0) or ctok
         for c in d.get("choices", []):
             delta = c.get("delta", {})
-            if delta.get("content") or delta.get("reasoning_content"):
+            if delta.get("content") or delta.get("reasoning_content") or delta.get("reasoning"):  # vLLM 0.34+ streams `reasoning`
                 first = first or time.time()
                 n += 1
     end = time.time()
