@@ -18,6 +18,8 @@ subagent/
 ├── README.md            # This file
 ├── index.ts             # The extension (entry point)
 ├── agents.ts            # Agent discovery logic
+├── confine.ts           # Limits what project-local agents may set (model, skills)
+├── result.ts            # Exit codes and the {previous} placeholder
 ├── agents/              # Sample agent definitions
 │   ├── scout.md         # Fast recon, returns compressed context
 │   ├── planner.md       # Creates implementation plans
@@ -38,6 +40,8 @@ From the repository root, symlink the files:
 mkdir -p ~/.pi/agent/extensions/subagent
 ln -sf "$(pwd)/extensions/subagent/index.ts" ~/.pi/agent/extensions/subagent/index.ts
 ln -sf "$(pwd)/extensions/subagent/agents.ts" ~/.pi/agent/extensions/subagent/agents.ts
+ln -sf "$(pwd)/extensions/subagent/confine.ts" ~/.pi/agent/extensions/subagent/confine.ts
+ln -sf "$(pwd)/extensions/subagent/result.ts" ~/.pi/agent/extensions/subagent/result.ts
 
 # Symlink agents
 mkdir -p ~/.pi/agent/agents

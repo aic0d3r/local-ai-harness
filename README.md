@@ -7,8 +7,8 @@ Run a coding agent on a local LLM on your own hardware: no API key, your code st
 (Ryzen AI Max+ 395).
 
 - **Install:** detects your hardware, recommends an engine and model, then installs, starts and tunes it.
-- **Update:** checks for new engine releases; halogen, Strata, gufo and osmos upgrade from the menu and roll back if
-  the new version fails its checks.
+- **Update:** checks for new engine releases; halogen, Strata, gufo, osmos and strix-llama.cpp upgrade from the menu and
+  roll back if the new version fails its checks.
 - **Switch:** halogen, gufo, Strata, osmos, CIRU, strix-llama.cpp, plain llama.cpp, vLLM, Ollama, LM Studio or a cloud model;
   stock or abliterated weights for Qwen3.8 Flash-Next, Qwen3.8-27B and DeepSeek-V4.1-Flash. One menu, limits re-sized
   on every switch.

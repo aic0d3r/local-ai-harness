@@ -3,6 +3,14 @@
 <!-- One block per section per release, in the order Added, Changed, Fixed. Add new entries to the
      existing block instead of opening a second one, so a release never has two "### Fixed" lists. -->
 
+## 2.5.1 - 2026-11-28
+
+The "Stop LLM servers" shortcut stops Strata in Docker and strix-llama.cpp; doc corrections.
+
+### Fixed
+- `scripts/stop-all.sh` (the "Stop LLM servers" shortcut) left the Strata Docker container and the strix-llama.cpp container running: it only stopped a Strata source install. It now stops both, matched by port and image name like halogen and gufo.
+- Docs: CIRU holds ~82 GiB of GPU memory at its defaults (measured; the docs said ~86, the launcher ~75). strix-llama.cpp has an update source and a safe upgrader (`scripts/upgrade-llamacpp.sh`), which SETUP.md denied and the README left out. The uninstall notes now name CIRU's venv and weights, which `--uninstall` leaves on disk. The subagent extension's manual install links `confine.ts` and `result.ts`, without which it fails to load.
+
 ## 2.5.0 - 2026-11-28
 
 CIRU engine: Inkling 2 Mini at about twice osmos's speed (`./harness tune`: 95.4 t/s decode, 2,204 t/s prefill); prompt-lint and `/trim`; vLLM 0.34+ reasoning counted in tune/bench.

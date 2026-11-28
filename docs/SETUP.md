@@ -41,9 +41,9 @@ The full walkthrough of `./setup.sh`, the `./harness` commands and `./start.sh`.
    - whether to run the **ling-tiny sidecar**, asked on the first wizard run and shown in the summary after that (default yes where the GPU has 24 GB or more, no on smaller cards; it holds ~8 GiB of GPU memory, and "no" means the main
      model writes commits and summaries, with compaction blocking on it; non-interactive: `./setup.sh --no-sidecar` /
      `--sidecar`);
-   - the engine update check (any engine with a known release source: halogen, gufo, Strata, osmos, CIRU, plain llama.cpp, vLLM,
-     Ollama; strix-llama.cpp runs an image pinned by digest, so it has none).
-     On halogen, gufo, Strata and osmos it offers the safe upgrade right away (`scripts/upgrade-<engine>.sh`: update, restart,
+   - the engine update check (any engine with a known release source: halogen, gufo, Strata, osmos, CIRU, strix-llama.cpp,
+     plain llama.cpp, vLLM, Ollama).
+     On halogen, gufo, Strata, osmos and strix-llama.cpp it offers the safe upgrade right away (`scripts/upgrade-<engine>.sh`: update, restart,
      check, roll back on failure); on the others it prints the upgrade command. If an upgrade passes its checks but runs worse, the
      `rollback` row in `./harness config` puts it back on the previous version (Strata: Docker only; osmos rebuilds the previous tag and checks it) or keeps the new one and deletes the older versions. A passing upgrade keeps only the new version and the rollback;
      `./harness prune` deletes older engine versions already on disk (lists them, asks once). `start.sh` repeats the one-line notice,
@@ -135,4 +135,5 @@ directory, whole) and say "continue". `progress-tracker` also writes a checkpoin
 Removes everything the installer provisioned (extensions, templates, theme, any skills older releases copied, pi defaults, the providers and the
 wizard's profile files where they still match what setup set, and the systemd units) after backing all of it up to
 `~/pi-harness-uninstall-backup-*.tar.gz`. The repo ships no skills itself; the pi packages bring their own. **Deliberately left alone:** your own model entries, `mcp.json`, the sidecar
-GGUF (the reclaim command is printed), the halogen container and your checkpoint files.
+GGUF (the reclaim command is printed), the halogen container, your checkpoint files, and CIRU's venv and weights
+(`~/.venvs/inkling-halo`, ~20 GB, and the `Inkling-2-Mini-CIRU-Halo-Agent-gfx1151` weights folder, ~23 GB, in `~/models` by default; delete them by hand).

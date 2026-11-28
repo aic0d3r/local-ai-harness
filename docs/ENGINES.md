@@ -260,7 +260,7 @@ it means Inkling whatever the saved model is. `server/start-ciru.sh --install` (
 runtime at its pinned tag (`CIRU_TAG`, default v1.7.0), creates `~/.venvs/inkling-halo` (~20 GB, `uv`), downloads
 the weights and drafter (~23 GB, resumable) and runs CIRU's installer, which checks every checksum. No sudo. It serves
 `ciru-inkling-2-mini` on :18753 at 1M context with a 48 GiB KV pool (`CIRU_CTX`, `CIRU_KV_MIB`), tools and vision on.
-It uses ~86 GiB of memory, so it will not fit beside another big engine. Thinking levels map onto Inkling's
+It holds ~82 GiB of GPU memory at those defaults (measured), so it will not fit beside another big engine. Thinking levels map onto Inkling's
 `reasoning_effort`, as on osmos (`off` sends `none`, which shortens the thinking but does not turn it off).
 
 Measured here 2026-11-28, `bench-v1`, same day and power profile, greedy (osmos v0.19.0 after `scripts/upgrade-osmos.sh`):

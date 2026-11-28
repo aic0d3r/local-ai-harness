@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CIRU (ciru-ai/Inkling-2-Mini-CIRU-Halo-Agent-gfx1151): Inkling 2 Mini on vLLM 0.34 ROCm with CIRU's native gfx1151
-# HIP kernels and Inco AI's DFlash 2 drafter, on :18753. Strix Halo (gfx1151) only. ~75 GiB of the GPU heap at 1M
+# HIP kernels and Inco AI's DFlash 2 drafter, on :18753. Strix Halo (gfx1151) only. ~82 GiB of the GPU heap at 1M
 # context: one big engine at a time, stop halogen/gufo/osmos first (the wizard does).
 #   server/start-ciru.sh             serve (execs CIRU's serve.sh)
 #   server/start-ciru.sh --check     exit 1 and list what is missing (runtime, weights, drafter)
