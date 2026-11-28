@@ -7,7 +7,7 @@ For a pull request:
 
 - Keep it small and say what you measured. Claims in the README and docs link to a logged run in
   [docs/BENCHMARKS.md](docs/BENCHMARKS.md); new claims should too.
-- Add a line to `CHANGELOG.md` under the top version section, in its existing Added/Changed/Fixed block.
+- Add a line to `CHANGELOG.md` under the top section (`Unreleased`), in its existing Added/Changed/Fixed block.
 - Run the tests before you push:
 
   ```bash

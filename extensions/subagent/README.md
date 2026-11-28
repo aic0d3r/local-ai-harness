@@ -126,7 +126,7 @@ Use a chain: first have scout find the read tool, then have planner suggest impr
 
 ## Agent Definitions
 
-Agents are markdown files with YAML frontmatter:
+Agents are Markdown files with YAML frontmatter:
 
 ```markdown
 ---
@@ -186,5 +186,5 @@ Project agents override user agents with the same name when `agentScope: "both"`
 
 - Output truncated to last 10 items in collapsed view (expand to see all)
 - Parallel model-visible output is capped at 50 KB per task; full results remain in tool details
-- Agents discovered fresh on each invocation (allows editing mid-session)
+- Agents are discovered fresh on each invocation (allows editing mid-session)
 - Parallel mode limited to 8 tasks, 4 concurrent

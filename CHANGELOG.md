@@ -3,10 +3,12 @@
 <!-- One block per section per release, in the order Added, Changed, Fixed. Add new entries to the
      existing block instead of opening a second one, so a release never has two "### Fixed" lists. -->
 
-## Unreleased
+## 2.5.0 - 2026-11-28
+
+CIRU engine: Inkling 2 Mini at about twice osmos's speed (`./harness tune`: 95.4 t/s decode, 2,204 t/s prefill); prompt-lint and `/trim`; vLLM 0.34+ reasoning counted in tune/bench.
 
 ### Added
-- CIRU is a new engine for Inkling 2 Mini on Strix Halo (vLLM ROCm with CIRU's gfx1151 kernels and the DFlash 2 drafter), and the Inkling route now picks it first. Measured here with `bench-v1` in one session, it is about twice as fast as osmos v0.19.0: 95.6 vs 46.8 t/s decode on short code, 2,168 vs 1,107 t/s prefill at 8K, and 64.8 vs 44.9 t/s decode at 32K. 1M context, vision and tools are on. `server/start-ciru.sh --install` sets it up without sudo (a ~20 GB venv plus ~23 GB of weights; the wizard asks first). `scripts/stop-all.sh` stops it, and the update check follows its GitHub releases. There is no upgrader script: `CIRU_TAG=vX.Y.Z server/start-ciru.sh --install`. See docs/ENGINES.md#ciru-inkling-2-mini.
+- CIRU is a new engine for Inkling 2 Mini on Strix Halo (vLLM ROCm with CIRU's gfx1151 kernels and the DFlash 2 drafter), and the Inkling route now picks it first. Measured here with `bench-v1` in one session, it is about twice as fast as osmos v0.19.0: 95.6 vs 46.8 t/s decode on short code, 2,168 vs 1,107 t/s prefill at 8K, and 64.8 vs 44.9 t/s decode at 32K; `./harness tune` reads 95.4 t/s decode and 2,204 t/s prefill. It serves the release's NVFP4 weights with CIRU's fitted final-layer banks in place of the MXFP8 ones (CIRU reports 99.35% top-1 agreement with the unmodified release; not measured here). 1M context, vision and tools are on. `server/start-ciru.sh --install` sets it up without sudo (a ~20 GB venv plus ~23 GB of weights; the wizard asks first). `scripts/stop-all.sh` stops it, and the update check follows its GitHub releases. There is no upgrader script: `CIRU_TAG=vX.Y.Z server/start-ciru.sh --install`. See docs/ENGINES.md#ciru-inkling-2-mini.
 - `prompt-lint` extension and `/trim`: flags instruction fluff that piles up in AGENTS.md, APPEND_SYSTEM.md and skill descriptions. It finds references to MCP servers or tools that are missing or disabled, backticked paths that no longer exist, rules repeated near word-for-word across loaded files, and instruction files over 10% of the cold prompt. `/trim` shows a deletion-only diff and applies it only after a yes, keeping `.bak` copies. Lines with MUST, NEVER or "hard rule" are never proposed. A footer line appears at the first prompt only when there are findings `/trim` hasn't shown yet; the prompt itself is never touched. No model call. Off: `PROMPT_LINT_DISABLED=1`.
 
 ### Changed

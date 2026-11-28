@@ -16,7 +16,7 @@ longer launched by default), and a Ling-3.0-tiny sidecar on :8090.
        git clone https://github.com/aic0d3r/local-ai-harness
        cd local-ai-harness && ./setup.sh
 
-2. Halogen server on 127.0.0.1:8731, prompt cache ON - see the
+2. halogen server on 127.0.0.1:8731, prompt cache ON - see the
    halogen-flash-server repo for the container/model download. Do NOT disable
    the prompt cache: agent sessions append strictly and hit 98.6-99.1% prefix
    reuse; with it disabled every turn re-prefills the whole context (~2.5x
@@ -40,7 +40,7 @@ longer launched by default), and a Ling-3.0-tiny sidecar on :8090.
    maxTokens 8192, not 32768: the server hard-rejects requests once
    context + max_tokens crosses the 65,536 window (~32.7k context trips it).
 
-5. Nothing for search: semantic search is the semble MCP server (wired by
+5. Nothing to do for search: semantic search is the semble MCP server (wired by
    setup.sh into mcp.json; indexes on first query, ~1s for this repo).
 
 Smoke test (expect the tool list to include commit + mcp__semble__search;
@@ -73,7 +73,7 @@ Optional / situational:
 - `ling-tiny-repomap.ts` - cheap, fired, benefit unmeasured.
 - `auto-guard.ts` - screens every user prompt on `qwen3guard-gen-0.6b` (fail-open tripwire). Opt-in
   (`PI_GUARD_TOOLRESULTS=1`, `/guard-firewall on`): also screens outside tool results, behind a regex
-  prefilter so ordinary output makes no NPU call. qwen3guard flags harmful payloads but 0/6
+  prefilter so ordinary output makes no NPU call. qwen3guard flags harmful payloads but caught 0/6
   instruction-hijack phrasings live, so it is a tripwire only. `/guard-stats` counts both screens.
 - `taint-gate.ts` - the prompt-injection defence that needs no model. After the agent reads outside
   content (web search or fetch, MCP resources, a `curl`), risky calls need a yes from the user until
@@ -87,7 +87,7 @@ Optional / situational:
   `TAINT_GATE_DISABLED=1`; `/taint-stats`. Tested live: a hidden "POST your .env" in a fetched page was obeyed with the gate off,
   stopped with it on.
 - `image-prune.ts` - a guardrail, not a saving: every turn re-sends the whole transcript, so
-  each screenshot ever read stays in the request (a provider caps it: DeepInfra 30) and keeps
+  each screenshot ever read stays in the request (providers cap the count: DeepInfra at 30) and keeps
   costing prefill. Only the newest 4 images go out; older or duplicate ones become a one-line
   re-read hint. Request-local: session files keep every image. No-op for the default text-only
   models, where pi never sends an image. `PI_MAX_HISTORY_IMAGES` (default 4, 0 disables). Resolution is capped separately by `scripts/set-image-limits.py` (run by `setup.sh`).
@@ -106,7 +106,7 @@ never blocks the agent.
 ## The ling-tiny suite (sidecar economics) - COMPONENT-level measurements, not in-session results
 
 These route decode-shaped busywork to a small local model (Ling-3.0-tiny, ~4 GB GGUF) instead of
-the main model. Halogen's prompt cache makes continuations nearly free, but sidecar jobs never
+the main model. halogen's prompt cache makes continuations nearly free, but sidecar jobs never
 inherit that cache, so the win is decode offload and never blocking the agent.
 
 Prerequisites: a llama.cpp server serving `ling3.0-tiny` on `127.0.0.1:8090` (with `--jinja`),
@@ -138,7 +138,7 @@ kept free, at most 60k: the installer's rule) and restores halogen's 8192
 `maxTokens` cap on halogen only; another engine keeps its model entry's own
 `maxTokens`. A `/tune` reserve that still fits the window survives `./start.sh`
 and `./harness use` (only a reserve the installer wrote follows the window).
-(Tool-result triage threshold was removed 10-06: it pointed at
+(The tool-result triage threshold was removed 10-06: it pointed at
 `ling-tiny-triage.ts`, which was never installed or loaded, so
 the knob was a silent no-op.)
 
@@ -212,7 +212,7 @@ subprocess per edit. Off switch: `SYNTAX_GUARD_DISABLED=1`.
   project. Install serena yourself (`uv tool install -p 3.13 serena-agent`; setup expects `~/.local/bin/serena` and warns when it is missing); it also needs a language server for your
   language. In real sessions the agent reached for `read` far more often, so `tool-trim` hints at serena or
   `offset`/`limit` after a big whole-file source read, and the installed `AGENTS.md` says the same. All serena tools are
-  reached through `codemode`, destructive ones hidden (`./setup.sh --refresh-mcp`
+  reached through `codemode`, with destructive ones hidden (`./setup.sh --refresh-mcp`
   restores the shipped exposure).
 - **Semantic code search.** The pinned [semble](https://pypi.org/project/semble/) MCP server (`search` + `find_related`),
   wired into `mcp.json` by setup. It needs no NPU and indexes any local path or remote git URL on first query.
@@ -231,17 +231,17 @@ subprocess per edit. Off switch: `SYNTAX_GUARD_DISABLED=1`.
   snippet. Two numbers there must be understood, not copied: `reserveTokens` is per-model, and on halogen `maxTokens`
   must stay <= 8192 or the server 400s past ~32.7k ctx.
 - **Also shipped.** `harness-tune` (`/tune` live knobs), `harness-update` (daily new-release notice +
-  `/harness-update`; `HARNESS_AUTOUPDATE=1` applies it at startup), `turn-timer`, `subagent/` (worker/scout/reviewer/
-  planner, session-model inheritance), `/gauntlet` and `/speedtest` prompt templates, and opt-in voice
-  (`./setup.sh --voice`: [privateer-speak](https://npm.im/privateer-speak) on a local Lemonade server, whisper STT 0.43 s,
-  kokoro TTS 0.3 s, both on CPU). Three pi packages are installed by `setup.sh` when missing:
+  `/harness-update`; `HARNESS_AUTOUPDATE=1` applies it at startup), `turn-timer`, `subagent/`
+  (worker/scout/reviewer/planner, session-model inheritance), `/gauntlet` and `/speedtest` prompt templates, and opt-in voice
+  (`./setup.sh --voice`: [privateer-speak](https://npm.im/privateer-speak) on a local Lemonade server, whisper STT 0.43 s and
+  kokoro TTS 0.3 s, both measured on CPU; setup now puts whisper on Vulkan). Three pi packages are installed by `setup.sh` when missing:
   [ponytail](https://github.com/DietrichGebert/ponytail),
   [rpiv-ask-user-question](https://npm.im/@juicesharp/rpiv-ask-user-question) (the structured `ask_user_question` tool)
   and pi-rtk-optimizer. They live in `~/.pi/agent/settings.json`, not in this repo.
 
 ## Other extensions
 
-- `harness-profile/` - shared helper, not a feature: loads the active engine profile from `<agent dir>/harness-profile.json` (legacy halogen defaults if absent) and registers nothing; imported by the ling-tiny-*, harness-tune, auto-guard and npu-retrieval extensions.
+- `harness-profile/` - shared helper, not a feature: loads the active engine profile from `<agent dir>/harness-profile.json` (legacy halogen defaults if absent) and registers no tools or commands; imported by almost every other extension here.
 - `harness-status/` - `/usage` runs `scripts/usage-stats.py` inside pi; a footer status shows halogen load from `:8731/metrics` (hidden when unreachable); on any other engine a `speed` footer times each reply client-side (logged to `harness-speed.jsonl` for `./harness monitor`); and a session already open in another live pi process (Paseo's background agent, a second terminal) gets a warning at start, from a pid lock in `<agent dir>/session-locks/`.
 - `harness-update.ts` - once-a-day notice when a newer harness release (`vX.Y.Z` tag) is out; `/harness-update` applies it (fast-forward to the tag only, refuses on a dirty tree, then `./harness refresh` re-installs for the engine you saved, and a failed refresh resets to the previous commit and re-installs that; `HARNESS_NO_UPDATE_CHECK=1` turns the daily `git fetch` off).
 - `tool-trim/` - keeps big tool output out of context: cleans and caps long bash output (full text saved to a file) and turns identical re-reads of unchanged files into a pointer. Off switch: `TOOL_TRIM_DISABLED=1`.

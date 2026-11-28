@@ -31,7 +31,7 @@ directory` line, does it need fixing?
 
 ## Ground truth (verified before rating any answer)
 
-- The failing script is `/tmp/timeshift-taVoJWRL/<nanoseconds>` - a temp dir created by
+- The failing script is `/tmp/timeshift-taVoJWRL/<nanoseconds>`, a temp dir created by
   **timeshift 26.09 itself**, wrapping privileged commands. Its exit-code plumbing is
   `exitCode=$?; echo ${exitCode} > status`.
 - The error is that relative redirect failing with ENOENT (the write target vanished), and
@@ -39,13 +39,13 @@ directory` line, does it need fixing?
   answers: the temp dir deleted before an async write (journal shows a pkexec notify-send in
   flight), and/or the script's working directory (the snapshot mount) unmounted before the
   last line. Both are ENOENT races in the same plumbing.
-- `status` does not exist in `/usr/bin/timeshift-autosnap` (AUR 0.10.0-1) - a separate
+- `status` does not exist in `/usr/bin/timeshift-autosnap` (AUR 0.10.0-1), a separate
   script. The autosnap leftover `/tmp/timeshift-autosnap.*` is a real but unrelated flaw
   (mktemp -u never cleaned).
 - Impact: none. Snapshot created and tagged, old snapshot pruned, hook exited 0, upgrade
   completed (pacman.log).
-- Upstream: linuxmint/timeshift#496 (open) - "Fixed error in status file writing via
-  notify-send after TEMP_DIR deletion" - confirms the deleted-temp-dir + notify-send race as
+- Upstream: linuxmint/timeshift#496 (open), "Fixed error in status file writing via
+  notify-send after TEMP_DIR deletion", confirms the deleted-temp-dir + notify-send race as
   the official diagnosis.
 
 ## Results
@@ -61,9 +61,9 @@ directory` line, does it need fixing?
 | 7 | pi harness (cloud) | GLM 5.3, the full 753B (max) | 8m30s | correct | correct + deepest forensics of all runs (function names init_tmp/exit_app/dir_delete, exact 1s race window from journal timestamps, confirmed against source, upstream master status) | journal timestamps verified; duplicate pacman-hook finding verified on box; $0.425; missed the existing PR |
 | 8 | pi harness (local) | Flash-Next 125B (max effort) | 8m31s | correct | correct, same redirect race, source-level | upstream 26.09.0 tarball downloaded and grepped (Main.vala:1459, TeeJee.Process.vala:243), local cwd-deletion repro, upstream PR #496 found; 12,433 reasoning tokens, 723,487 cache reads (97.9% hit) |
 
-Runs 1 and 8 - the same local model at medium and at max - are the only ones that found
+Runs 1 and 8 (the same local model at medium and at max) are the only ones that found
 the already-open upstream PR (linuxmint/timeshift#496). The other six
-missed it or suggested reporting upstream - noted per run below. The user also had GLM 5.3
+missed it or suggested reporting upstream (noted per run in the table). The user also had GLM 5.3
 flashx rate both pi-harness answers; it picked Qwen's.
 
 ![Wall-clock per run, eight runs on one real bug: only the two local Flash-Next runs found the upstream PR](charts/wallclock-by-run.png)
@@ -77,7 +77,7 @@ flashx rate both pi-harness answers; it picked Qwen's.
    1m8s in opencode (wrong mechanism) and 9m09s in the pi harness (correct mechanism,
    live reproduction, 93% cache hit, $0.022). Depth came from the tool loop, not the weights.
 3. **The premium tier matched the local box in the same harness.** flashx at 2m41s vs
-   Flash-Next at 2m55s, both correct, both deep - each with a unique find (mount-unmount
+   Flash-Next at 2m55s, both correct, both deep, each with a unique find (mount-unmount
    precision vs the journalctl race trace and the existing PR). A dead heat on quality at
    local speed, with the 125B staying on the desk.
 4. **Depth scaled with the harness on both tiers.** The flagship 753B went from 6m15s
@@ -95,7 +95,7 @@ flashx rate both pi-harness answers; it picked Qwen's.
    time: the two fast opencode runs, 1m8s (wrong mechanism) and 1m30s (shallow, no repro, no
    PR) at flashx's ~151 t/s decode, and the opencode 753B at 6m15s against the local max
    rerun's 8m31s (no PR found). In the same harness (pi) the gaps were 14 seconds (flashx
-   over the local medium run) and one second (the 753B over the local max rerun). Decode rate predicted nothing (#5); neither did the cloud.
+   over the local medium run) and one second (the 753B over the local max rerun). Neither decode rate (#5) nor running in the cloud predicted wall time.
 
 ## Caveats
 
@@ -103,7 +103,7 @@ flashx rate both pi-harness answers; it picked Qwen's.
 - Effort levels: runs 1 and 8 are the local model at pi's medium and max thinking (the
   template's xhigh); the GLM tiers ran at max. The flashx comparison is medium-vs-max, the
   753B comparison max-vs-max.
-- Sizes: Flash-Next is 180B total footprint per unsloth's model card - "125B with 6B
+- Sizes: Flash-Next has a 180B total footprint per unsloth's model card: "125B with 6B
   activated, plus 51B n-gram embedding and 4B MTP". glm-5.3-flash and flashx are
   320B-total / 18B-active MoEs (z.ai); full glm-5.3 is 753B. The local model is the
   smaller one. Discount accordingly, both directions.
@@ -128,25 +128,25 @@ Related: [halogen-flash-server](https://github.com/peonist-ai/halogen-flash-serv
 
 ## Parameter size sources (grounding for the size claims)
 
-- Flash-Next: 125B params + 51B n-gram table + 4B MTP (180B total) - unsloth model card and
+- Flash-Next: 125B params + 51B n-gram table + 4B MTP (180B total): unsloth model card and
   halogen docs/QUANT.md.
-- glm-5.3-flash / flashx: 320B total, 18B active per token - z.ai blog "GLM-5.3-Flash"
+- glm-5.3-flash / flashx: 320B total, 18B active per token: z.ai blog "GLM-5.3-Flash"
   (Aug 26, 2026) and multiple independent writeups ("320B-A18B").
-- glm-5.3 full: 753B MoE - NVIDIA build.nvidia.com model card and HF zai-org/GLM-5.3.
+- glm-5.3 full: 753B MoE: NVIDIA build.nvidia.com model card and HF zai-org/GLM-5.3.
 
 ## Session audits
 
-- Session audit (requested): run 7's pi session was searched for PR discovery - zero
+- Session audit (requested): run 7's pi session was searched for PR discovery: zero
   references to the PR, "pull request", or "#496". The three "496" digit matches were a
   source line number (4496), a cost substring, and the reasoning token count. Run 7's
   "missed the existing upstream PR" stands.
 
-- Session audit 2 (requested): flashx's pi session searched - zero references to #496 or
+- Session audit 2 (requested): flashx's pi session was searched: zero references to #496 or
   "pull request". It DID read timeshift's source on GitHub (build_script() in
-  linuxmint/timeshift) and searched the issue tracker, coming up empty - likely because #496
+  linuxmint/timeshift) and searched the issue tracker, coming up empty, likely because #496
   is a PR, not an issue. "PR missed" for flashx confirmed.
 
-- Session audit 3: all pi sessions now searched. flash-pi (01a11923): zero PR
+- Session audit 3: all pi sessions were searched. flash-pi (01a11923): zero PR
   references, single "496" digit match inside a token count. Full audit summary:
   halogen found and cited #496 in its answer; flash, flashx and glm-5.3 all missed it.
 

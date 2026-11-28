@@ -1,6 +1,6 @@
 # Windows VM test for `setup.ps1`
 
-Tests the pi side on a clean Windows 11 (no GPU, so no engine): `setup.ps1`, `setup\adopt.py`, the extensions and their
+Tests the pi side on a clean Windows 11 VM (no GPU, so no engine): `setup.ps1`, `setup\adopt.py`, the extensions and their
 guards. Engine start failures (DLL shadowing, Smart App Control with a real engine) need bare-metal Windows.
 
 ## One-time setup (host)
@@ -62,9 +62,8 @@ vm-run.sh -p 'bash:curl -s http://192.168.122.1:8080/v1/models;;;rm -rf /c/Windo
 ## Pitfalls found the hard way
 
 - Do not download installers into the folder pi runs in (`C:\Users\test`). Windows resolves a bare `git` against the current directory first, so a `git.exe` Git installer there is what `pi.exec("git")` launches, and `pi -p` then never exits. Download to `$env:TEMP`.
-
 - Windows PowerShell 5.1 strips double quotes from arguments to native commands, and pi there is a `.cmd` shim that treats an
   unquoted `|` as a pipe: keep prompts free of both (`vm-run.sh -p` already uses a here-string).
-- A libvirt NAT network is "Public" to Windows; firewall rules scoped to Private (the OpenSSH default) silently drop.
+- A libvirt NAT network is "Public" to Windows; firewall rules scoped to Private (the OpenSSH default) silently drop its traffic.
 - uv's installer refuses the default Restricted execution policy: run it as `powershell -ExecutionPolicy ByPass -c "irm ... | iex"`.
 - pi's own installer needs Node.js 22.19+ and a terminal; over SSH install Node first (MSI, `/qn`).

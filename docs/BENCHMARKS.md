@@ -6,15 +6,15 @@ Rig: ASUS ROG Flow Z13 (Ryzen AI Max+ 395, Radeon 8060S, 128 GB unified, Linux),
 
 **NPU microbench (0.17.1, four models resident):**
 
-- Single-query embed: 70ms (ships as `dedup_scan`); rerank: 130ms (idle since v1.1 - it belonged to the retired NPU search); guard: 70-130ms (ships as `auto-guard`)
-- (on 0.16.2 every NPU call carried ~4s of fixed overhead - 0.16.3's batching fix removed it. If you're on an older release, your NPU numbers are 30x worse than they should be.)
-- Decider (binary): 118ms, 78% accuracy (18 realistic prompts) - ships as the `triage` tool
+- Single-query embed: 70ms (ships as `dedup_scan`); rerank: 130ms (idle since v1.1: it belonged to the retired NPU search); guard: 70-130ms (ships as `auto-guard`)
+- (On 0.16.2 every NPU call carried ~4s of fixed overhead; 0.16.3's batching fix removed it. If you're on an older release, your NPU numbers are 30x worse than they should be.)
+- Decider (binary): 118ms, 78% accuracy (18 realistic prompts); ships as the `triage` tool
 - Decider (3-option, free-form output): 925ms, 40% accuracy (too biased toward "keep"). The shipped `triage` constrains the answer with a `json_schema` enum + logprobs instead; multi-option accuracy has not been re-measured since, so treat its output as a hint.
 - Moderation: 42% recall / 0% fp on a 30-prompt canary (ships as `auto-guard`)
 - Text gen (qwen3.5-2b): 16.6 tok/s decode (removed - slower than the sidecar)
 - LLM decode while NPU works: unchanged (separate silicon)
 
-**Capability eval (20 intent queries, 2 repos, 383k tokens indexed, src-only) - the old NPU retrieval pipeline, superseded by semble:**
+**Capability eval (20 intent queries, 2 repos, 383k tokens indexed, src-only), the old NPU retrieval pipeline, superseded by semble:**
 
 - NPU semantic (src-only index): 15/20 top-3 correct file
 - Ripgrep keyword baseline: 9/20 top-3
@@ -28,7 +28,7 @@ Rig: ASUS ROG Flow Z13 (Ryzen AI Max+ 395, Radeon 8060S, 128 GB unified, Linux),
 - Baseline arm: 24.8 / 16.6 / 14.8 min + 1 failed (25% failure rate)
 - Saving: 5.1 min per task, with the caveat that the slowest NPU run barely used the tool
 
-**The invalid experiment I almost published:** my first "controlled experiment" showed a 2x speedup - but the NPU arm never had a working index (path bug), and the task was a public httpx fix the model had memorized (92s, zero search calls). Per-call telemetry caught it, and every tool call now logs its index and query.
+**The invalid experiment I almost published:** my first "controlled experiment" showed a 2x speedup, but the NPU arm never had a working index (path bug), and the task was a public httpx fix the model had memorized (92s, zero search calls). Per-call telemetry caught it, and every tool call now logs its index and query.
 
 ## Engines on Strix Halo
 
@@ -47,7 +47,7 @@ UD-IQ4_XS, 256k ctx):
 | NPU tools (guard, triage, dedup) | yes | no | no |
 | license | closed | open | **MIT** |
 
-Halogen stays the default on Strix Halo (fastest, NPU tools). Strata and gufo are the open alternatives; on this chip
+halogen stays the default on Strix Halo (fastest, NPU tools). Strata and gufo are the open alternatives; on this chip
 Strata is not the upgrade, because its pitch is NVIDIA/AMD desktop GPUs. To run gufo, stop halogen first (they share one
 memory heap), then `server/start-gufo-flashnext.sh` (UD-Q4_K_XL + MTP, `:8080`) and `./setup.sh --gufo` to wire pi to
 it. Full numbers: [ENGINES.md](ENGINES.md#what-breaks-on-another-engine).
@@ -82,8 +82,8 @@ Strata loads the MTP block but proposes no drafts on this file, so its decode ge
 0` for every request, including the engine's own warm-up, at temperature 0 / 0.7 / 1.0, with `--mtp 1` and `--mtp 2`,
 with `--spec 4`, with `STRATA_SPEC_COUPLED=1` and with `--mtp-hnorm stream` (the file carries the whole block:
 `blk.40.nextn.{eh_proj,enorm,hnorm,shared_head_norm}.weight`). Strata's own notes on this exact box (Ryzen AI Max+ 395,
-UD-Q4_K_XL) report 52.8-59.9% draft acceptance and 41-45 t/s output, so the acceptance is a defect/mismatch here, not
-the hardware. Its MoE prompt chunk is what the parallel count decides: `--parallel 4` caps it at 1024, one slot gets 4096
+UD-Q4_K_XL) report 52.8-59.9% draft acceptance and 41-45 t/s output, so the zero acceptance is a defect or mismatch here,
+not the hardware. The parallel count decides its MoE prompt chunk: `--parallel 4` caps it at 1024, one slot gets 4096
 (8192 with 131k ctx is refused: "bad --chunk / --max-context"), and the chunk is worth +44% prefill here.
 
 llama.cpp drafts with the model's own MTP head (the top row); a separate draft model would need a smaller sibling of the
@@ -98,7 +98,7 @@ The harness is tuned to spend as few tokens, and as little main-model time, as p
 |---|---|---|
 | **rtk** (`pi-rtk-optimizer`) | rewrites bash commands through the `rtk` binary so test, build and git output arrives compressed | per-command savings in `rtk gain`; no aggregate benchmark in this repo yet |
 | **`tool-trim`** | strips ANSI/progress noise, caps huge output (full text saved to a file), identical re-reads of unchanged files become a pointer; a whole-file read of a big source file gets a one-line hint to use serena or `offset`/`limit` | token savings shown by `/usage` |
-| **`image-prune`** | a screenshot the agent read stays in every later request until a provider refuses it (30 on DeepInfra) and it keeps costing prefill; only the newest 4 images go out, older or duplicate ones become a re-read hint. Session files keep every image. `setup.sh` also caps image resolution on every image-capable model at 450×1000 (`scripts/set-image-limits.py`, `PI_IMAGE_MAX=WxH` or `off`): a 1080×2400 phone screenshot drops from 2,552 to 436 prompt tokens on halogen 0.21.0 (-83%, measured 2026-11-25: same image full vs capped, `max_tokens` 1, text-only baseline subtracted), ~1,500 to ~600 on Claude | logged to `harness-events.jsonl` (`c: "image-prune"`) |
+| **`image-prune`** | a screenshot the agent read stays in every later request until a provider refuses it (30 on DeepInfra) and keeps costing prefill; only the newest 4 images go out, older or duplicate ones become a re-read hint. Session files keep every image. `setup.sh` also caps image resolution on every image-capable model at 450×1000 (`scripts/set-image-limits.py`, `PI_IMAGE_MAX=WxH` or `off`): a 1080×2400 phone screenshot drops from 2,552 to 436 prompt tokens on halogen 0.21.0 (-83%, measured 2026-11-25: same image full vs capped, `max_tokens` 1, text-only baseline subtracted), ~1,500 to ~600 on Claude | logged to `harness-events.jsonl` (`c: "image-prune"`) |
 | **serena** (LSP symbol tools) | reads one function or an outline instead of the whole file; precise symbol edits and renames | 822 chars for a function body vs 13,980 to read the file; 390 for an outline; callers cost more than grep ([details](#serena-context-returned-per-navigation-task-2026-10-16)) |
 | **semble search** | finds code by meaning instead of reading files to explore | 17/18 vs 13/18 top-3 hits, 2-3x faster queries, ~40x faster indexing than the NPU pipeline it replaced |
 | **Sidecar + NPU** | commits, compaction and repo maps run off the main model; screening and routing on the NPU | compaction ~24 s non-blocking vs ~52 s blocking; large commit diffs 18.5k to 7.1k tokens (2.5x faster) |
@@ -197,8 +197,8 @@ Limits: one run per question per arm, one model (osmos); not repeated on halogen
 
 ## Install & ops
 
-**Install - fully automated, one prompt total.** Clone github.com/aic0d3r/local-ai-harness (tagged releases, MIT, changelog in the repo) and run `./setup.sh --halogen auto` (Strix Halo; for other hardware or cloud models see [Engines](ENGINES.md)). It installs pi via npm if missing, pulls the pinned halogen image, and if you don't have the model files it downloads them for you: ~124 GB resumable (that's the one prompt you'll see - it checks your free space first), then the pinned strix-llama.cpp image for the sidecar, the tiny GGUF sha256-verified against Hugging Face, the extension suite, prompt templates, theme, and the systemd keep-alive unit - and your own model entries and pi settings are never touched. `./setup.sh --doctor` verifies every piece with live probes; `./setup.sh --uninstall` backs everything up and returns pi to stock in one command.
+**Install: fully automated, one prompt total.** Clone github.com/aic0d3r/local-ai-harness (tagged releases, MIT, changelog in the repo) and run `./setup.sh --halogen auto` (Strix Halo; for other hardware or cloud models see [Engines](ENGINES.md)). It installs pi via npm if missing, pulls the pinned halogen image, and if you don't have the model files it downloads them for you: ~124 GB resumable (that's the one prompt you'll see; it checks your free space first), then the pinned strix-llama.cpp image for the sidecar, the tiny GGUF sha256-verified against Hugging Face, the extension suite, prompt templates, theme, and the systemd keep-alive unit. Your own model entries and pi settings are never touched. `./setup.sh --doctor` verifies every piece with live probes; `./setup.sh --uninstall` backs everything up and returns pi to stock in one command.
 
-**Docker is the one prerequisite** we won't auto-install (system package, needs sudo). First boot pins the 47.7 GiB lookup table from disk, so a few minutes of startup is normal. The launcher pre-flights allocator fragmentation before committing to 262k context and fails in seconds with the exact fix instead of wedging for half an hour, and a 15-min systemd compaction timer keeps the allocator healthy between sessions.
+**Docker is the one prerequisite** we won't auto-install (system package, needs sudo). First boot pins the 47.7 GiB lookup table from disk, so a few minutes of startup is normal. The launcher pre-flights allocator fragmentation before committing to 262k context and, if recovery fails, falls back to 65k/2-slot in seconds and prints the exact fix instead of wedging for half an hour, and a 15-min systemd compaction timer keeps the allocator healthy between sessions.
 
-Container image is version-pinned; `scripts/session-audit.sh` runs post-session forensics (cache hit, compaction events, sidecar rejections, NPU index anomalies) and checks the serving version against the pin.
+The container image is version-pinned; `scripts/session-audit.sh` runs post-session forensics (cache hit, compaction events, sidecar rejections, NPU index anomalies) and checks the serving version against the pin.

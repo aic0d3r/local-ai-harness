@@ -4,14 +4,14 @@ The alternative engine for Strix Halo (menus call it strix-llama.cpp, engine id 
 own upstream llama-server and the harness detects it as plain llama.cpp): [halo-box/strix-llama.cpp](https://github.com/halo-box/strix-llama.cpp), the
 Strix Halo Vulkan/ROCm fork, instead of the halogen container.
 Full control over flags, drafter and GGUF quant, **256k ctx** max, and the way to go for the
-**27B** runs. You lose every NPU feature — see [Engines](ENGINES.md).
+**27B** runs. You lose every NPU feature: see [Engines](ENGINES.md).
 
 Use `./setup.sh --no-halogen` for the pi wiring on this path, or wire it by hand as below.
 
 ## 1. Engine
 
 [halo-box/strix-llama.cpp](https://github.com/halo-box/strix-llama.cpp) publishes both routes: release zips
-(`llama-b<build>-ubuntu-vulkan-x64.zip`, `-ubuntu-rocm-gfx1151-x64.zip`, ROCm 10.1 bundled) and container images --
+(`llama-b<build>-ubuntu-vulkan-x64.zip`, `-ubuntu-rocm-gfx1151-x64.zip`, ROCm 10.1 bundled) and container images:
 `ghcr.io/halo-box/strix-llama.cpp:server-vulkan` (1.3 GB, Mesa RADV bundled, entrypoint `/app/llama-server`) and
 `:server-rocm`. `server/start-qwen36.sh` runs the Vulkan image (pinned by digest: `server-vulkan-b13600`, Halobox v1.1.0 +
 11 commits) for Qwen3.6-35B-A3B, so nothing is built here. Updates follow releases only: images are tagged by build
@@ -46,31 +46,31 @@ deletes it unless `LLAMACPP_BACKEND=rocm` is set or a container uses it; opting 
 MTP head + `-lzm on-direct` used much more memory on some builds).
 
 **Inkling 2 Mini is not served here**: on this image it decoded 20 t/s and prefilled 324 t/s (IQ4_NL, Vulkan), its graph
-split 194 ways, and the ROCm image kept ~16 CPU cores busy. It runs on osmos instead ([Engines](ENGINES.md#osmos-deepseek-v41-flash-from-the-ssd-1m-context-strix-halo)).
+split 194 ways, and the ROCm image kept ~16 CPU cores busy. It runs on [CIRU](ENGINES.md#ciru-inkling-2-mini) or [osmos](ENGINES.md#osmos-deepseek-v41-flash-from-the-ssd-1m-context-strix-halo) instead.
 
 Build from source if you want to change the build itself (halo-box's zips and the image above ship their own Mesa; the
 container measured faster than the local `qwen4exp` build did here).
 
 ## 2. Models
 
-- **27B target** — [unsloth/Qwen3.8-27B-GGUF](https://huggingface.co/unsloth/Qwen3.8-27B-GGUF)
+- **27B target**: [unsloth/Qwen3.8-27B-GGUF](https://huggingface.co/unsloth/Qwen3.8-27B-GGUF)
   UD-Q4_K_XL (Dynamic v3, the pick; the Q4-Q8 PPL plateau is flat). For exact reproduction of
   published-era numbers: UD-Q5_K_XL @ revision `408fcc1807ab` (v2), set `TARGET_GGUF`.
-- **27B vision** — `mmproj-F16.gguf` (same repo), passed as `-mm ... --mmproj-offload` so pi
+- **27B vision**: `mmproj-F16.gguf` (same repo), passed as `-mm ... --mmproj-offload` so pi
   sessions always have the projector on GPU. A/B (2026-09-07): projector GPU vs CPU placement
-  is byte-identical on decode — vision is free.
-- **pi image input** — the model entry in `models.json` must declare
+  is byte-identical on decode: vision is free.
+- **pi image input**: the model entry in `models.json` must declare
   `"input": ["text", "image"]` or pi refuses to send images.
-- **27B drafter** — [incoai/Qwen3.8-27B-DFlash2-GGUF](https://huggingface.co/incoai/Qwen3.8-27B-DFlash2-GGUF)
-  Q4_K_M · **Flash-Next drafter** —
+- **27B drafter**: [incoai/Qwen3.8-27B-DFlash2-GGUF](https://huggingface.co/incoai/Qwen3.8-27B-DFlash2-GGUF)
+  Q4_K_M · **Flash-Next drafter**:
   [EasiiX MTP Q8_0](https://huggingface.co/EasiiX/Qwen3.8-Flash-Next-MTP-Strix-Halo-GGUF)
-- **Flash-Next (llama.cpp variant)** —
+- **Flash-Next (llama.cpp variant)**:
   [unsloth UD-IQ4_XS](https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF) (3 shards) +
   `mmproj-F16.gguf`
-- **Aux sidecar** — [inclusionAI/Ling-3.0-tiny](https://huggingface.co/inclusionAI/Ling-3.0-tiny)
+- **Aux sidecar**: [inclusionAI/Ling-3.0-tiny](https://huggingface.co/inclusionAI/Ling-3.0-tiny)
   Q4_K_M (runs happily on any halo-box release zip or the container image). This is the server every ling-tiny
   extension talks to on `:8090`; it is a GPU model, not an NPU one.
-- **Template (27B)** — vendored in `config/template/` (`sharp-v22.3.2.jinja`). Upstream:
+- **Template (27B)**: vendored in `config/template/` (`sharp-v22.3.2.jinja`). Upstream:
   [peculiar-ragdoll/Qwen-Sharp-Chat-Templates](https://huggingface.co/peculiar-ragdoll/Qwen-Sharp-Chat-Templates)
 
 ## 3. Servers
@@ -83,9 +83,9 @@ ENGINE_DIR=/path/to/halo-box/build/bin MODEL_DIR=... server/start-qwen38.sh     
 server/start-ling-tiny.sh   # sidecar (second terminal): pinned strix-llama.cpp image; ENGINE_DIR=... runs a native build
 ```
 
-**GPU memory** — the ~91 GB model lives in the GTT heap, so size it: boot args
+**GPU memory**: the ~91 GB model lives in the GTT heap, so size it: boot args
 `amdgpu.gttsize=126976 ttm.pages_limit=32505856 ttm.page_pool_size=32505856` (on systemd-boot
-put them on the single `LINUX_OPTIONS` line — a stray newline there makes the loader silently
+put them on the single `LINUX_OPTIONS` line: a stray newline there makes the loader silently
 drop the whole line). **Never force `--fit off`**: full offload onto an undersized heap
 deadlocks the iGPU and hard-locks the host.
 
@@ -98,11 +98,11 @@ cp -r extensions/* ~/.pi/agent/extensions/              # dirs too: the .ts file
 ```
 
 Two numbers in the snippet you must understand, not copy: `reserveTokens` ships **60000**
-for the 262144 window both launchers serve (what the halogen launcher sets at 262k); on a smaller `CTX` use a quarter of it
+for the 262144 window both launchers serve (what the halogen launcher sets at 262k); on a smaller `CTX` use a quarter of the window
 (16384 for 65536). `./harness up` and the halogen launcher resync it to the served window on their own.
 `thinkingBudgets` (per-request budgets pi sends) are what actually govern
 pi sessions; the server's `--reasoning-budget` flag is only a default for clients that do not
-send one. On this path the NPU extensions are inert — there is no halogen to serve them.
+send one. On this path the NPU extensions are inert: there is no halogen to serve them.
 
 ## 5. Verify you are actually local
 

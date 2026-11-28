@@ -5,23 +5,23 @@ Any OpenAI-compatible server (or cloud provider) works with pi. Only Strix Halo 
 strix-llama.cpp (`./setup.sh`, `./harness use`); for a plain llama.cpp `llama-server`, vLLM, Ollama and LM Studio it
 detects what is running and wires pi to it, and you start them yourself. strix-llama.cpp (engine id `llamacpp`) is
 [halo-box's Strix Halo fork](https://github.com/halo-box/strix-llama.cpp) in Docker and only recommended on Strix Halo;
-a llama-server on :8080 counts as it only when its `llamacpp-8080` container serves it, otherwise it is plain llama.cpp
-(engine id `llama-server`). The NPU tools (guard, triage, dedup) ride on halogen's NPU sidecars and no other engine exposes them, so
-on every other engine they are off; pi keeps working and the degradation is graceful but real (all measured on gufo /
+a llama-server on :8080 counts as strix-llama.cpp only when its `llamacpp-8080` container serves it, otherwise it is plain llama.cpp
+(engine id `llama-server`). The NPU tools (guard, triage, dedup) ride on halogen's NPU sidecars, which no other engine exposes, so
+they are off on every other engine; pi keeps working and the degradation is graceful but real (all measured on gufo /
 llama.cpp).
 
 ## Engines the harness installs and starts
 
 | stack | what | when |
 |---|---|---|
-| **halogen** (recommended) | NPU+GPU engine, Qwen3.8 Flash-Next (125B) from a local checkpoint, no network needed to run | just works, **262k ctx** x 4 slots |
-| **strix-llama.cpp (halo-box fork, Vulkan)** | Docker image via server/start-qwen36.sh (nothing to build), release zips or source; full control, MTP/DFlash2 spec decode, vision, local GGUFs, no network needed to run, **262k ctx** max | Qwen3.6-35B-A3B (85 t/s with MTP), tuning — see [the llama.cpp path](LLAMACPP.md) |
+| **halogen** (recommended) | NPU+GPU engine, Qwen3.8-Flash-Next (125B) from a local checkpoint, no network needed to run | just works, **262k ctx** x 4 slots |
+| **strix-llama.cpp (halo-box fork, Vulkan)** | Docker image via `server/start-qwen36.sh` (nothing to build), release zips or source; full control, MTP/DFlash2 spec decode, vision, local GGUFs, no network needed to run, **262k ctx** max | Qwen3.6-35B-A3B (85 t/s with MTP), tuning: see [the llama.cpp path](LLAMACPP.md) |
 | **gufo** | open engine, Flash-Next and Qwen3.8-27B (DFlash2 draft), vision | open-source Flash-Next, the **27B** |
 | **Strata** | Docker image or source, ISTA packs; NVIDIA and AMD desktop GPUs too | open source, smaller boxes, Inkling 2 Mini at 128K |
 | **osmos** (libosmos) | streams experts from the SSD | DeepSeek-V4.1-Flash (~768B) or Inkling 2 Mini at **1M ctx** on one box |
 | **CIRU** | vLLM 0.34 ROCm + CIRU's native gfx1151 HIP kernels + Inco AI's DFlash 2 drafter; Strix Halo only, Inkling 2 Mini only | the fastest **Inkling 2 Mini**, 1M ctx, vision ([below](#ciru-inkling-2-mini)) |
 
-**Which engine for which model (Strix Halo).** Setup asks the model first and takes the first usable engine of its route
+**Which engine for which model (Strix Halo).** Setup asks for the model first and takes the first usable engine of its route
 (`routes` in `config/profiles.json`, each with the numbers behind the order and whether they were measured here or only reported):
 Flash-Next: halogen (NPU + 110 GB RAM) > gufo > Strata; Qwen3.6-35B-A3B: strix-llama.cpp > Strata; Qwen3.8-27B: gufo (DFlash2 draft); DeepSeek-V4.1-Flash: osmos;
 Inkling 2 Mini: CIRU > osmos > Strata (all measured here).
@@ -117,7 +117,7 @@ Live agent session (2026-10-14, `scripts/halogen-top.sh --strata`, 100k+ context
 noisy and low (110-800), not a slowdown. Strata's `/metrics` prompt counter includes cache-reused
 tokens; the script subtracts them.
 
-Halogen is still ahead on this chip (65 t/s decode battery median on 0.18.5, 131k cold in 86 s, 119k in 78 s,
+halogen is still ahead on this chip (65 t/s decode battery median on 0.18.5, 131k cold in 86 s, 119k in 78 s,
 about 1,520 t/s), so here Strata is the open-source/GGUF alternative, not the upgrade. Its pitch is
 NVIDIA/AMD desktop GPUs. Needle test on the tuned config: 5/5 at 28-30k tokens.
 
@@ -159,7 +159,7 @@ cd Strata && ROCM_PATH=/nonexistent ./setup.sh --yes --family unsloth --model UD
 ## osmos: DeepSeek-V4.1-Flash from the SSD, 1M context (Strix Halo)
 
 [libosmos](https://github.com/mrsirg97-rgb/libosmos) streams DeepSeek-V4.1-Flash (~768B) experts from the SSD on a
-Ryzen AI MAX+ 395. Its installer builds the engine and lays a pack down (`osmos_install.py osmos-evo --serve`), and
+Ryzen AI Max+ 395. Its installer builds the engine and lays a pack down (`osmos_install.py osmos-evo --serve`), and
 `osmos-api` serves `:8091`. This repo wires pi to it like any other engine:
 
 ```bash
@@ -170,7 +170,7 @@ python3 tools/install/osmos_install.py osmos-evo --models /path/to/models --serv
 
 `osmos-evo` is the release's default pack since 0.7.6 (evo-A plus the evo-A2 delta: gate and up of layers 10-19 at
 IQ2_XXS). An install that already has evo-A fetches only the 23.4 GB patch and derives the new shards from it, which
-cost ~71 GB more on ext4. Shards 1 and 4 are the evo-A base, shared with this pack; evo-A's own shards 2 and 3 (~92 GB)
+take ~71 GB more on ext4. Shards 1 and 4 are the evo-A base, shared with this pack; evo-A's own shards 2 and 3 (~92 GB)
 are what `osmos-evo` made redundant, and removing them frees that much (the pack sources stay in `.hf`, so
 `osmos_install.py osmos-evo-a` can rebuild it). The id osmos-api serves is `osmos-osmos-evo`; `osmos-osmos-evo-a`
 still answers as an alias. Current libosmos names the pack `osmos-evo-1017` (`packs.json`: `osmos-evo` and `osmos-evo-a` are
@@ -188,16 +188,16 @@ code decodes median ~30 t/s; 4 cold 8K prompts 446-453 t/s. Earlier (0.7.x, `qui
 36.5 t/s decode. Short prompts read far lower than 8K because prefill streams experts per 4,096-token chunk (see the
 `fill_gib` paragraph below). The first prompts after a start read 2-4x the steady SSD traffic while the expert cache fills. The pack costs about 5%
 of decode against evo-A, as its release notes say. It appears in pi and Paseo as **osmos deepseek** (a model
-profile can name itself: `models.osmos-deepseek`; the id osmos-api serves is `osmos-osmos-evo`). Two things the
+profile can name itself: `models.osmos-deepseek`; the id osmos-api serves is `osmos-osmos-evo`). What the
 harness handles for it:
 
 - **Sampled, not greedy**: since libosmos 0.14.0 osmos takes `temperature`, `top_p` and `seed` (before, anything but
   greedy was a 400). DeepSeek packs stay greedy unless a request asks, and drafting gains less when sampling (0.14.0 notes), yet
-  `config/profiles.json` (`models.osmos-deepseek`) sends `temperature 1.0`, `top_p 0.95`: DeepSeek's agentic setting (model
-  card); greedy (`temperature 0`) looped on repeated tool calls in long agent turns, at some cost in drafted decode speed.
+  `config/profiles.json` (`models.osmos-deepseek`) sends `temperature 1.0`, `top_p 0.95`, DeepSeek's agentic setting (model
+  card), at some cost in drafted decode speed: greedy (`temperature 0`) looped on repeated tool calls in long agent turns.
 - **Thinking is real, with three levels**: DeepSeek maps seven effort names onto three real ones ([its docs](https://api-docs.deepseek.com/guides/thinking_mode/)): `low`, `high`, `max`. The profile keeps exactly those and marks `minimal`/`medium`/`xhigh` unsupported (`null`), so pi and Paseo offer `off, low, high, max` instead of advertising levels the model collapses anyway. `off` sends `reasoning_effort: none` and the reply carries no reasoning at all.
 - **It does not report its context window** (`/v1/models` has no `context_length`, `/props` is 404). The engine
-  profile carries `ctx`, mirroring `max_context` in the pack's `osmos.json` - change both together.
+  profile carries `ctx`, mirroring `max_context` in the pack's `osmos.json`: change both together.
 - **Stock or abliterated from `./harness config` -> weights**, like halogen and gufo: huihui-ai's UD-IQ1_M patch
   (0.6 GB) as an overlay, so the 141 GB pack is never rewritten. `server/start-osmos.sh` applies it by calling
   libosmos's own installer (`--abliterated`), which fetches only the patch and sets `overlay` in `osmos.json`;
@@ -205,8 +205,8 @@ harness handles for it:
 
 osmos serves DeepSeek-V4.1-Flash, or **Inkling 2 Mini** when that is the saved model (the model menu's Inkling row):
 `server/start-osmos.sh` then runs libosmos's `inkling-2-mini` pack (`--print-pack` says which; `OSMOS_PACK` overrides).
-That pack is Thinking Machines' release itself - its NVFP4 / MXFP8 experts and BF16 dense weights, 19.6 GB, all in GPU
-memory - with its own 0.4 GB drafter and a 1M context, served as `osmos-inkling-2-mini`. The first start asks, then has
+That pack is Thinking Machines' release itself (its NVFP4 / MXFP8 experts and BF16 dense weights, 19.6 GB, all in GPU
+memory) with its own 0.4 GB drafter and a 1M context, served as `osmos-inkling-2-mini`. The first start asks, then has
 libosmos's installer fetch and check it (`start-osmos.sh --install`, ~20 GB). Stock only: there is no abliterated build, so
 the weights question is skipped. Measured here 2026-11-23 (`./harness tune`, bench-v1): 47.3 t/s decode, 1,038 t/s prefill at 8K, 1M
 context. libosmos's README (0.15.0): 45.7 / 42.2 t/s drafted decode on code / prose, 28.8 plain, 1,018 t/s prefill at ~3K,
@@ -215,13 +215,14 @@ Sampled at temperature 1.0 (the release's setting: greedy looped on one tool cal
 `models.inkling2` sends that and the reasoning effort by name (`none` ... `max`). strix-llama.cpp ran the same model at
 20 t/s / 324 t/s prefill with a 194-way graph split ([LLAMACPP.md](LLAMACPP.md)). AMD's Loom (`hrx-loom`, tech preview)
 publishes faster numbers (44 t/s plain, 58.5 drafted on code, ~1,600-1,850 prefill) measured with a CPU-spinning
-completion wait; not wired here yet. Strata runs the same model too, slower here: [Other models on Strata and gufo](#other-models-on-strata-and-gufo).
+completion wait; not wired here yet. CIRU runs the same model faster here ([CIRU: Inkling 2 Mini](#ciru-inkling-2-mini)), Strata
+slower ([Other models on Strata and gufo](#other-models-on-strata-and-gufo)).
 The Qwen models run on halogen, gufo, Strata or strix-llama.cpp.
 
 It has no NPU tools (guard, triage, dedup need halogen), and it will not fit beside another big engine: its expert budget
 is ~95-100 GiB on a 128 GB box (99.69 GiB here on 0.15.1 with `fill_gib` 4), plus ~18 GiB of GPU buffers. That budget is sized from the memory free when osmos starts, so close browsers and
 other big apps first: experts that do not fit are read from the SSD for every token (measured on 0.15.1: about 1.5% decode
-per GiB of budget, table below; an older build lost 34 -> 24 t/s to a budget 6 GiB smaller). The setup says so before each start. A remembered budget is sized again only when 4 GiB more
+per GiB of budget, table below; an older build lost 34 -> 24 t/s to a budget 6 GiB smaller). Setup says so before each start. A remembered budget is sized again only when 4 GiB more
 is free than at its sizing (`server/osmos-budget.py`).
 
 **RAM kept free (`fill_gib`).** osmos keeps 8 GiB of RAM free beside its budget by default. The harness starts it with
@@ -259,7 +260,7 @@ it means Inkling whatever the saved model is. `server/start-ciru.sh --install` (
 runtime at its pinned tag (`CIRU_TAG`, default v1.7.0), creates `~/.venvs/inkling-halo` (~20 GB, `uv`), downloads
 the weights and drafter (~23 GB, resumable) and runs CIRU's installer, which checks every checksum. No sudo. It serves
 `ciru-inkling-2-mini` on :18753 at 1M context with a 48 GiB KV pool (`CIRU_CTX`, `CIRU_KV_MIB`), tools and vision on.
-It uses ~86 GiB of memory, so only one engine can be loaded at a time. Thinking levels map onto Inkling's
+It uses ~86 GiB of memory, so it will not fit beside another big engine. Thinking levels map onto Inkling's
 `reasoning_effort`, as on osmos (`off` sends `none`, which shortens the thinking but does not turn it off).
 
 Measured here 2026-11-28, `bench-v1`, same day and power profile, greedy (osmos v0.19.0 after `scripts/upgrade-osmos.sh`):
@@ -270,6 +271,16 @@ Measured here 2026-11-28, `bench-v1`, same day and power profile, greedy (osmos 
 | decode, prose | **58.0** | 39.3 | 35.1 |
 | prefill 2K / 8K / 32K | **2,197 / 2,168 / 1,904** | 1,105 / 1,107 / 996 | 1,024 / 1,067 / 978 |
 | decode at 2K / 8K / 32K | **81.2 / 75.5 / 64.8** | 48.8 / 49.1 / 44.9 | 45.8 / 44.6 / 44.1 |
+
+`./harness tune` on CIRU the same day: 95.4 t/s decode, 2,204 t/s prefill at 8K.
+
+**Quant and quality.** CIRU serves the release's own quant: NVFP4 experts in layers 0-19, BF16 dense weights, and
+MXFP8 experts in the final layers 20-23. Its one change to the weights replaces those MXFP8 final-layer experts with
+fitted codebook banks ("Coda C1 v3", 16-weight groups, ~4.5 bits/weight: 575 vs 1,051 MB a layer); the runtime also
+repacks the attention projections and output head to 6-bit (W6) for its kernels. CIRU's own measurement against the
+unmodified release (v1.7.0 notes, 1,225 held-out tokens): top-20 logit KL 0.0018, top-1 agreement 99.35%. Not measured
+here. DFlash 2's drafting is lossless (the target verifies every token). `--original-weights` in CIRU's `serve.sh` runs
+the release weights without the fitted banks; the harness does not expose it.
 
 The gap narrows with depth (osmos keeps its decode flat), but CIRU is still ahead at 32K. Its decode varies more from run
 to run (13 t/s spread on short code) because DFlash 2's acceptance depends on the text. Cold start takes ~100 s.
@@ -310,7 +321,7 @@ yourself and point pi at it as any OpenAI-compatible server; the harness will no
 
 ## Other models on Strata and gufo
 
-Halogen always serves its own Flash-Next checkpoint. gufo and Strata can load more, chosen by one saved answer
+halogen always serves its own Flash-Next checkpoint. gufo and Strata can load more, chosen by one saved answer
 (`./harness config` -> model, or the wizard's "Which model?" after you pick the engine; the recommendation can set it
 for you). The list is `config/profiles.json` (`catalog`):
 
@@ -322,7 +333,8 @@ for you). The list is `config/profiles.json` (`catalog`):
 | `qwen36-q6` / `-q8` | Strata | Qwen3.6-35B-A3B, larger quants (also run on llama.cpp with `QWEN36_ALT_MODEL`) | 44 / 52 GB RAM, 34 / 39 GB download |
 | `qwen38-27b` | gufo | Qwen3.8 27B dense, UD-Q4_K_XL + DFlash2 draft, vision; abliterated = huihui-ai's UD-Q4_K_XL | 20 GB download |
 | `qwen38-27b-q8` | gufo | same, UD-Q8_K_XL target (gufo's other qualified 27B file; its benchmarks: ~16 t/s mixed decode with DFlash2 vs ~27 for Q4) | 34 GB download, shares the draft and projector; abliterated = huihui-ai's UD-Q8_K_XL (same size) |
-| `inkling2-mini` | osmos, Strata | Inkling 2 Mini (26B looped MoE): osmos's pack of the release weights (1M ctx, the route's first engine) or Strata's SQ-20 native pack with its DSpark drafter (0.2.20+, 128K ctx, text only, no thinking: `models.inkling2-strata`) | 20 GB download; Strata: 32 GB RAM |
+| `inkling2-mini` | CIRU, osmos, Strata | Inkling 2 Mini (26B looped MoE): CIRU's build with the DFlash 2 drafter (1M ctx, the route's first engine), osmos's pack of the release weights (1M ctx) or Strata's SQ-20 native pack with its DSpark drafter (0.2.20+, 128K ctx, text only, no thinking: `models.inkling2-strata`) | 20 GB download; Strata: 32 GB RAM |
+
 Strata installs the non-default rows through its own `setup.sh --family F --model SIZE` (`scripts/install-strata.sh`,
 which downloads their files); gufo's 27B comes from `scripts/download-qwen38-27b.sh` at the revisions gufo's docs pin
 (`unsloth/Qwen3.8-27B-GGUF@4ca72078`, `z-lab/Qwen3.8-27B-DFlash2-GGUF@2d9571f8`; the sha256s match gufo's
@@ -331,8 +343,8 @@ which downloads their files); gufo's 27B comes from `scripts/download-qwen38-27b
 **Inkling 2 Mini on Strata (measured here 2026-11-24, `bench-v1`, Strata 0.2.20 image, engine 0.1.66 hip, SQ-20, 128K ctx,
 power profile `custom`, nothing else running).** `./harness tune`: 36.4 t/s short-code decode, 863 t/s prefill at 8K. Full bench:
 38.8 t/s code and 28.8 prose decode; 831 / 827 / 694 t/s prefill and 32.1 / 26.6 / 18.0 t/s code decode at 2K / 8K / 32K depth.
-osmos on the same box and protocol (2026-11-23): 47.3 t/s, 1,038 t/s at 8K, 1M context, so it stays the route's first engine.
-SQ-20 is Strata's own pick for 32+ GiB unified memory (`inkling_fit.py`); it downloads it on the first start (19.4 GB) and
+osmos on the same box and protocol (2026-11-23): 47.3 t/s, 1,038 t/s at 8K, 1M context, so it stays ahead of Strata on the route (CIRU is first).
+SQ-20 is Strata's own pick for 32+ GiB unified memory (`inkling_fit.py`); Strata downloads it on the first start (19.4 GB) and
 serves it as `inkling-2-mini-sq-20`. Strata's build does not think: whatever `reasoning_effort` is sent it answers without
 `reasoning_content` (its `inkling_family.py`: `HAS_THINKING = False`), so `models.inkling2-strata`, matched on Strata's
 `inkling-2-mini-*` id, registers a non-reasoning model at the release's temperature 1.0 while osmos's
@@ -345,19 +357,19 @@ for gufo are untested.
 The stock/abliterated answer applies to `flash-next` and both 27B quants; the rest (Strata's packs, Qwen3.6) have no
 abliterated build here, and the weights menu says so.
 
-**Recommendation off Strix Halo.** gufo targets Strix Halo (gfx1151) only, so every other AMD or NVIDIA box is
-recommended Strata, on the biggest ISTA pack whose RAM need fits (Strata's rule: experts + ~10 GB), Qwen3.6 Q4 from
+**Recommendation off Strix Halo.** gufo targets Strix Halo (gfx1151) only, so every other AMD or NVIDIA box gets
+Strata, on the biggest ISTA pack whose RAM need fits (Strata's rule: experts + ~10 GB), Qwen3.6 Q4 from
 32 GB, nothing below that. An abliterated answer keeps `flash-next`. The engine launchers are bash, so they run on Linux only.
 Windows has a beta pi-side installer (`setup.ps1`, see the Windows paragraph above). On a Mac, run Strata natively and point pi
 at it with `./setup.sh --strata <url>`; nothing else here is set up for macOS.
 
 > [!WARNING]
-> **None of the non-default rows has run here.** The sizes are Strata's MODELS.md / DETAILS.md and the Hugging Face
+> **Not all of the non-default rows have run here.** The sizes are Strata's MODELS.md / DETAILS.md and the Hugging Face
 > repos; the run-script names are derived from Strata's `setup.py` (`run-<tag>.sh`); the 27B launch line is the one
 > on gufo's docs page (the pinned 0.31.0 lists `--speculative dflash2` and `--dflash-model` in `serve llm --help`).
 > The tests cover the wizard, the launchers' file handling and the recommendation table, not a model start.
 
-**DeepSeek V4.1-Flash is not offered.** Strata runs it (ISTA 1.75-2.25 bpw sets, 239-274 GB, 12 GB card + 46-64 GB
+**DeepSeek-V4.1-Flash is not offered on Strata.** Strata runs it (ISTA 1.75-2.25 bpw sets, 239-274 GB, 12 GB card + 46-64 GB
 RAM), but only at 8K context and ~5-16 t/s, which does not fit a pi agent session, and Strata does not run it on Strix
 Halo Linux yet. Use it in Strata's own app or terminal (`strata launch --family deepseek41`) if you want it. gufo's
 DeepSeek V4 Flash is the older 0731 release and is not wired in either.
@@ -383,8 +395,8 @@ risk. `install-strata.sh` refuses a Strata checkout older than 0.2.11.
 - **gufo:** its model page lists `UD-Q4_K_XL/*` (four shards) with the shared Q8 MTP head and `mmproj-BF16.gguf`,
   pinned to `d96201194f10`, and says it keeps the tensor types and shapes of the earlier `38bb39ee9782` with
   unchanged AR pp2048/tg128 speed. At the `v0.30.0` tag that page still named `38bb39ee`; at `v0.31.0` (the version
-  `start-gufo-flashnext.sh` pinned then) it names 3.1. 0.31.0 also fixes opening tensorless split shards (#1021), which
-  the 10 MB metadata-only first shard of the new layout is (our inference, the changelog does not say so).
+  `start-gufo-flashnext.sh` pinned then) it names 3.1. 0.31.0 also fixes opening tensorless split shards (#1021), and
+  the new layout's 10 MB first shard is metadata only (our inference; the changelog does not say so).
 - **Strata:** 0.2.11+ lists size and SHA-256 pins for exactly these four shards (`UNSLOTH_Q4_V31_SHARDS`) and
   accepts the layout from `--gguf-dir`; we checked all four against the Hub. Its own download of UD-Q4_K_XL still
   fetches the 09-30 files, which is why this harness passes `--gguf-dir`. The two layouts cannot be mixed. Its
@@ -406,14 +418,14 @@ serves the stock Unsloth UD-Q4_K_XL that gufo and Strata share, and the ablitera
 `--lora HUIHUI-V2-Qwen3.8-Flash-Next-LoRA-F32.gguf`
 ([nazeshinjite/Qwen3.8-Flash-Next-Abliterated-LoRA](https://huggingface.co/nazeshinjite/Qwen3.8-Flash-Next-Abliterated-LoRA)
 @ `dee8e017`, sha256 `349022ca...`; `scripts/download-abliterated.sh llamacpp` puts it beside the stock folder). This is
-a different edit than the orca builds above: huihui's v2, one refusal direction removed from 96 dense writers, routed experts
+a different edit from the orca builds above: huihui's v2, one refusal direction removed from 96 dense writers, routed experts
 untouched; its card reports it on par with huihui's full v2 GGUF. gufo (issue gufo-org/gufo#1247), Strata and halogen
 cannot load adapters. No MTP draft and no vision projector on this route yet.
 **Measured here (2026-11-17, halo-box image `27ffff9f`, 65536 ctx, shards on a USB exFAT drive):** loads in ~2.5 min,
 `/lora-adapters` lists it at scale 1.0. Six prompts stock refuses (phishing, hotwiring, lockpicking, keylogger, fake
 ID, harassment), greedy, thinking off: **6/6 refused at LoRA scale 0, 0/6 at scale 1** on the same loaded model;
 `bench/refusal-canary.py` 0/19. Speed, 8K prefill + 400-token decode: **912 t/s / 24.8 t/s with the LoRA, 1,146 /
-25.9 without** - the runtime LoRA costs ~20% prefill and ~4% decode. Far behind gufo (40 t/s) and halogen (65 t/s)
+25.9 without**: the runtime LoRA costs ~20% prefill and ~4% decode. Far behind gufo (40 t/s) and halogen (65 t/s)
 without an MTP draft, so this route is for "abliterated without a second model", not for speed. The 96 targets are
 Q8_0 in Unsloth's file, so merging the LoRA offline would remove that prefill cost.
 
@@ -446,10 +458,10 @@ off by default and only a tripwire.
 
 **Checking an engine for over-refusal:** `./setup.sh --doctor --refusals` (or
 `python3 bench/refusal-canary.py` directly) asks the running model 19 one-line prompts whose
-vocabulary, subject matter or tone can trip a cautious chat build — *kill / execute / inject /
+vocabulary, subject matter or tone can trip a cautious chat build (*kill / execute / inject /
 hack / starve*, SQLi and reverse-shell payloads, medical wording, blunt copy with swearing, an odd
-role — and prints the refusal rate per category. `--judge` adds an NPU decider pass for refusals no
-regex sees (needs halogen up). `--self-test` checks its own classifier without a server; exit 1 on any
+role) and prints the refusal rate per category. `--judge` adds an NPU decider pass for refusals no
+regex sees (needs halogen up). `--self-test` checks its own classifier without a server; it exits 1 on any
 refusal. **It is a floor check, not proof of what abliteration buys:** on 2026-11-08 the *stock* halogen
 weights also scored 0/19, same as every abliterated run below, so this set cannot tell the two apart. A set of
 asks that stock Qwen really declines is still to be written.
@@ -498,10 +510,10 @@ its output.
 | feature | on gufo 0.12.0 / plain llama.cpp |
 |---|---|
 | chat, tools, streaming, reasoning control, structured output | works |
-| semantic search (semble MCP) | works — no NPU involved |
-| `taint-gate` (confirm risky actions after outside content), `--doctor --refusals` | works — no NPU involved |
-| prompt-injection screening (`auto-guard`) | dead — no `/v1/moderations` |
-| `triage` / `dedup_scan` | dead — no decider or embedder |
+| semantic search (semble MCP) | works: no NPU involved |
+| `taint-gate` (confirm risky actions after outside content), `--doctor --refusals` | works: no NPU involved |
+| prompt-injection screening (`auto-guard`) | dead: no `/v1/moderations` |
+| `triage` / `dedup_scan` | dead: no decider or embedder |
 | image input | works on gufo 0.32.0: it auto-loads the adjacent `mmproj-BF16.gguf`, no flag needed (verified 2026-11-08: `vision_prepared` in the container log, screenshot described correctly). Was dead on 0.12. |
 | `/health` verification (cache, vision) | degrades to "unknown" |
 | decode (gufo, MTP) | ~38% slower than halogen 0.18.5: 40 vs 65 t/s median battery, 29-32 vs 47-50 t/s from 4k to 131k (flat on both) |
@@ -516,12 +528,12 @@ kernels and holds the NPU path on quality/stability ([gufo#558](https://github.c
 `./setup.sh --doctor` tells you when a non-halogen engine is answering on `:8731`.
 
 > [!WARNING]
-> **On Strix Halo, never run two of these engines at once** — they fight over the same
+> **On Strix Halo, never run two of these engines at once**: they fight over the same
 > unified-memory heap and device-lost follows.
 
 ## Sidecar isolation (ling-tiny-commit and friends)
 
-The ling-tiny extensions call `:8090` directly instead of the main model — on purpose. Diffs,
+The ling-tiny extensions call `:8090` directly instead of the main model, on purpose. Diffs,
 session transcripts and repo inventories never enter halogen's context window or prompt cache.
 A side call can therefore never evict the active session's cached prefix (an eviction costs
 ~150-190 s of re-prefill; the sidecar call costs ~0.5-2.5 s).
@@ -532,9 +544,9 @@ without it.
 
 ## Cloud models are a supported hybrid
 
-Point pi at any cloud provider and keep halogen running (the NPU tools need Strix Halo), and the NPU tools plus the whole
+Point pi at any cloud provider and keep halogen running (on Strix Halo), and the NPU tools plus the whole
 ling-tiny sidecar suite stay on-device: screening, search and compaction never follow your code
-to the cloud. `compaction.reserveTokens` carries over as-is — it is a space reserve, not a
+to the cloud. `compaction.reserveTokens` carries over as-is: it is a space reserve, not a
 trigger point, so a 1M-context cloud model simply compacts later. The one cost is switching
 itself: the first cloud turn re-uploads the session, and halogen's prompt cache holds your
 prefix warm (within its LRU) for when you switch back.

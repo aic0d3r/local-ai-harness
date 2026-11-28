@@ -6,7 +6,7 @@ This page covers the halogen path (Strix Halo). On other hardware or with cloud 
 ## Context size and memory fragmentation
 
 The default launch is halogen's native max: **262,144 ctx x 4 slots**. Memory is not the
-constraint (~67 GB model + ~115 MiB/slot in-place cache) — allocator fragmentation is.
+constraint (~67 GB model + ~115 MiB/slot in-place cache): allocator fragmentation is.
 
 The launcher's pre-flight gate handles it: if order-9 pages are low (box up a long time,
 big-model churn) it first attempts recovery (page-cache drop, compaction) and only proceeds on a
@@ -31,7 +31,7 @@ against the real window) and scales `compaction.reserveTokens` (60k at 262k, 16k
 
 On engines without a usable `/metrics` (gufo has none), pi times each reply itself: prefill = prompt
 tokens the server did not have cached / time to first streamed token, decode = output tokens / the rest. One line per
-reply goes to `~/.pi/agent/harness-speed.jsonl`, which `./harness monitor` follows for the active engine, each rated reply in the
+reply goes to `~/.pi/agent/harness-speed.jsonl`, which `./harness monitor` follows for the active engine, showing each rated reply in the
 footer's format (`--once`: the last 10). The time to the
 first token includes queueing and the network, so prefill reads a little low. While subagents run at the same time, a reply's rate
 is its share, not the engine's total. Drafted decode depends on the text (code drafts better than prose), and an engine that
@@ -46,12 +46,12 @@ stream from the SSD, and a few hundred tokens already touch most of them. Measur
 in 4,096-token chunks, ~7 s each). So an agent turn that adds 500 tokens pays most of a full chunk: ~130 t/s at 566 tokens,
 ~300 at 2K, ~440 at 8K, ~500 at 21K.
 
-Halogen's own surfaces, no built-in web UI in the image (`/`, `/gui`, `/dashboard` are 404):
+halogen's own surfaces (the image has no built-in web UI: `/`, `/gui`, `/dashboard` are 404):
 
-- **per request** — every response (and the last streamed chunk) carries a `timings` object:
+- **per request**: every response (and the last streamed chunk) carries a `timings` object:
   `prompt_per_second`, `predicted_per_second`, `cache_n`, `draft_n_accepted`.
-- **per session** — `serve_api:` lines in the container log, one per request.
-- **aggregate** — `GET /metrics` (Prometheus text, llama.cpp-compatible counter names) and
+- **per session**: `serve_api:` lines in the container log, one per request.
+- **aggregate**: `GET /metrics` (Prometheus text, llama.cpp-compatible counter names) and
   `GET /cache` (prompt-cache hit rate, evictions, KV-pool usage). The two `*tokens_seconds`
   gauges mean "since the last scrape", so hand-curling them is misleading.
 
@@ -67,9 +67,9 @@ Two tools ship for it:
 ```
 
 Point `halogen-top.sh` at a remote box with `HALOGEN_URL=http://host:8731`. It appends each scrape to `$XDG_STATE_HOME/halogen-top/history.csv`; that file is
-what `--perf` uses to diff `/metrics` over a window — the counters are cumulative and carry no session
+what `--perf` uses to diff `/metrics` over a window: the counters are cumulative and carry no session
 id, so a window that was never recorded can only be rebuilt from the logs. Leave it running (e.g. in
-a `screen` session) for the diff to work. Grafana/Prometheus works too (scrape `127.0.0.1:8731/metrics`) —
+a `screen` session) for the diff to work. Grafana/Prometheus works too (scrape `127.0.0.1:8731/metrics`);
 the dashboards are yours to build; these two scripts exist because they cost no extra containers.
 
 ## Troubleshooting
@@ -78,14 +78,14 @@ the dashboards are yours to build; these two scripts exist because they cost no 
 |---|---|
 | any `--doctor` line red | the line prints the exact fix |
 | halogen won't launch, order-9 < 200 | reboot (memory fragmentation); the launcher's 65k/2-slot fallback works without one |
-| halogen tries to download something | your launch has `HALOGEN_DOWNLOAD` set — remove it; everything loads from local files |
-| sessions 2.5x slower | prompt cache is OFF — never set `HALOGEN_PROMPT_CACHE=0` |
-| `triage` / `dedup_scan` return an error | halogen down, or the model missing from `HALOGEN_NPU_MODELS` — check the `npu` field of `curl -s localhost:8731/health` |
+| halogen tries to download something | your launch has `HALOGEN_DOWNLOAD` set: remove it; everything loads from local files |
+| sessions 2.5x slower | prompt cache is OFF: never set `HALOGEN_PROMPT_CACHE=0` |
+| `triage` / `dedup_scan` return an error | halogen down, or the model missing from `HALOGEN_NPU_MODELS`: check the `npu` field of `curl -s localhost:8731/health` |
 | hangs or garbage when GPU and NPU work at once | GPU fabric clock not held. halogen holds it while it runs; only your own host-side NPU programs need `config/systemd/halogen-fabric-clock.service` + its sleep hook (see [STRIX-HALO.md](STRIX-HALO.md)) |
 | fans keep running in suspend, `Last suspend didn't reach deepest state` | a held fabric clock blocks deep sleep: the old `halogen-fabric-clock` unit. Not needed for the harness: `sudo systemctl disable halogen-fabric-clock.service && sudo halogen-fabric-clock release` |
-| semantic search unavailable | `uvx` missing (install uv) or `mcp.json` lacks the semble entry — rerun `./setup.sh` and check `pi mcp list` |
-| web search unavailable | `uvx` missing or `mcp.json` lacks the ddg entry — rerun `./setup.sh`; DDG rate-limits searches to 30/min by default |
-| stale task on resume | checkpoint from a previous task — run `/progress-reset` in pi (checkpoints live in `~/.pi/agent/progress/`, one file per project folder) |
+| semantic search unavailable | `uvx` missing (install uv) or `mcp.json` lacks the semble entry: rerun `./setup.sh` and check `pi mcp list` |
+| web search unavailable | `uvx` missing or `mcp.json` lacks the ddg entry: rerun `./setup.sh`; DDG rate-limits searches to 30/min by default |
+| stale task on resume | checkpoint from a previous task: run `/progress-reset` in pi (checkpoints live in `~/.pi/agent/progress/`, one file per project folder) |
 | want zero-touch sidecar after reboot | `systemctl --user enable ling-tiny` (off by default on purpose) |
 
 ## Stopping the servers

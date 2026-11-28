@@ -4,36 +4,48 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="google-site-verification" content="tAE8_aHhYqiSSeaeSD2Bg0ATEuQSCdjYFxvjz2CE1-c" />
-<title>Local AI Harness: install, update and switch LLM engines</title>
-<meta name="description" content="Install, update and switch local LLM engines and models from one menu. Engine upgrades roll back if they fail, and your coding agent is re-tuned on every switch. Tuned for AMD Strix Halo.">
+<title>Local AI Harness: run a coding agent on a local LLM</title>
+<meta name="description" content="Run a coding agent on a local LLM. One menu installs, updates and switches engines like Ollama, vLLM, llama.cpp and Strata. Tuned for AMD Strix Halo.">
 <link rel="canonical" href="https://aic0d3r.github.io/local-ai-harness/">
-<meta property="og:title" content="Local AI Harness: install, update and switch LLM engines">
-<meta property="og:description" content="Install, update and switch local LLM engines and models from one menu. Engine upgrades roll back if they fail, and your coding agent is re-tuned on every switch. Tuned for AMD Strix Halo.">
+<meta property="og:title" content="Local AI Harness: run a coding agent on a local LLM">
+<meta property="og:description" content="Run a coding agent on a local LLM. One menu installs, updates and switches engines like Ollama, vLLM, llama.cpp and Strata. Tuned for AMD Strix Halo.">
 <meta property="og:image" content="https://aic0d3r.github.io/local-ai-harness/brand/social-preview.png">
 <meta property="og:url" content="https://aic0d3r.github.io/local-ai-harness/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Local AI Harness">
+<meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"SoftwareSourceCode","name":"Local AI harness","description":"Install, update and switch local LLM engines and models from one menu. Engine upgrades roll back if they fail, and your coding agent is re-tuned on every switch. Tuned for AMD Strix Halo.","codeRepository":"https://github.com/aic0d3r/local-ai-harness","url":"https://aic0d3r.github.io/local-ai-harness/","programmingLanguage":["Python","TypeScript","Shell"],"license":"https://opensource.org/license/mit","author":{"@type":"Person","name":"aic0d3r","url":"https://github.com/aic0d3r"}}
+{"@context":"https://schema.org","@type":"SoftwareSourceCode","name":"Local AI Harness","description":"Run a coding agent on a local LLM. One menu installs, updates and switches engines like Ollama, vLLM, llama.cpp and Strata. Tuned for AMD Strix Halo.","codeRepository":"https://github.com/aic0d3r/local-ai-harness","url":"https://aic0d3r.github.io/local-ai-harness/","keywords":"local LLM, coding agent, Strix Halo, Ryzen AI Max+ 395, Ollama, LM Studio, vLLM, llama.cpp, Qwen3.8, DeepSeek","programmingLanguage":["Python","TypeScript","Shell"],"license":"https://opensource.org/license/mit","author":{"@type":"Person","name":"aic0d3r","url":"https://github.com/aic0d3r"}}
 </script>
 <style>
 body{font:16px/1.6 system-ui,sans-serif;max-width:46rem;margin:0 auto;padding:2rem 1rem;color:#222}
 h1{font-size:2rem;line-height:1.2}h2{font-size:1.4rem}img{max-width:100%;height:auto}a{color:#1d6fa5}
-@media(prefers-color-scheme:dark){body{background:#1b1e20;color:#e6e6e6}a{color:#6cb8e6}}
+pre{overflow-x:auto;padding:.75rem 1rem;background:#f1f1f1;border-radius:6px}
+@media(prefers-color-scheme:dark){body{background:#1b1e20;color:#e6e6e6}a{color:#6cb8e6}pre{background:#262a2d}}
 </style>
 </head>
 <body>
 <h1>Local AI Harness for Coding Agents</h1>
 <p><strong>Install, update and switch local LLM engines and models.</strong></p>
-<p>Run a coding agent on whatever you have. It installs and switches halogen, Strata, gufo, osmos and strix-llama.cpp itself, and connects to llama.cpp, vLLM, Ollama, LM Studio or a cloud model. On a Ryzen AI Max+ 395 it runs a 125B Qwen3.8 Flash-Next on the iGPU with 262k context, while NPU models screen and route prompts and a sidecar writes commits and summaries. Built on <a href="https://github.com/earendil-works/pi">pi</a>.</p>
+<p>Run a coding agent on a local LLM, on whatever hardware you have. No API key, and your code stays on your machine. It installs and switches halogen, Strata, gufo, osmos, CIRU and strix-llama.cpp itself, and connects to llama.cpp, vLLM, Ollama, LM Studio or a cloud model. On AMD Strix Halo (Ryzen AI Max+ 395) it runs a 125B Qwen3.8 Flash-Next on the iGPU with 262k context, while NPU models screen and route prompts and a sidecar writes commits and summaries. Built on <a href="https://github.com/earendil-works/pi">pi</a>.</p>
 <p><a href="https://github.com/aic0d3r/local-ai-harness">Source on GitHub</a> · <a href="https://github.com/aic0d3r/local-ai-harness/releases/latest">Releases</a> · <a href="windows.html">Windows setup (beta)</a> · <a href="https://github.com/aic0d3r/local-ai-harness/blob/master/docs/local-vs-cloud-model-comparison.md">Local vs cloud comparison</a></p>
-<img src="brand/hero.png" alt="Local AI harness: one command, ./harness use, switches the coding agent between Strata, halogen, gufo, llama.cpp, vLLM, Ollama and LM Studio. Linux, Windows (beta)">
+<img src="brand/hero.png" width="1600" height="640" alt="Local AI harness: one command, ./harness use, switches the coding agent between Strata, halogen, gufo, llama.cpp, vLLM, Ollama and LM Studio. Linux, Windows (beta)">
 <h2>What you get</h2>
 <ul>
 <li><strong>Install:</strong> detects your hardware, recommends an engine and model, then installs, starts and tunes it.</li>
 <li><strong>Update:</strong> checks for new engine releases; halogen, Strata, gufo and osmos upgrade from the menu and roll back if the new version fails its checks.</li>
-<li><strong>Switch:</strong> nine engines or a cloud model, stock or abliterated weights, one menu, limits re-sized on every switch.</li>
+<li><strong>Switch:</strong> ten engines or a cloud model, stock or abliterated weights, one menu, limits re-sized on every switch.</li>
 <li><strong>Plus:</strong> crash recovery, NPU side jobs (prompt triage in about 120 ms, near-duplicate file scans), token-saving extensions and symbol-precise code tools.</li>
 <li>Logged benchmarks for engines and models.</li>
 </ul>
+<h2>Why not just Ollama or LM Studio?</h2>
+<p>Ollama and LM Studio each run models in their own engine. This harness installs and upgrades the engines tuned for your hardware (halogen, Strata, gufo, osmos, CIRU, strix-llama.cpp), switches between them and any Ollama, LM Studio, vLLM or llama.cpp you already run, and re-sizes the coding agent's limits for each engine and model. Keep Ollama: it is one of the engines you can switch to.</p>
+<h2>Install on Linux</h2>
+<p>Needs <a href="https://pi.dev">pi</a> and <a href="https://docs.astral.sh/uv">uv</a>. Setup asks every question first and installs nothing until you confirm.</p>
+<pre>git clone https://github.com/aic0d3r/local-ai-harness &amp;&amp; cd local-ai-harness
+./harness setup             # detects your hardware, asks for a model, installs and starts its engine
+./start.sh ~/my-project     # opens the coding agent on your project</pre>
+<p>On Windows, see the <a href="windows.html">Windows setup (beta)</a>.</p>
 <p>Install steps, the full stack and the evidence are in the <a href="https://github.com/aic0d3r/local-ai-harness#readme">README</a>.</p>
 </body>
 </html>

@@ -18,9 +18,9 @@ One box, two model servers (three with voice), three pieces of silicon:
 Flow: every prompt is screened by the NPU guard before the main model sees it. The main model generates on the iGPU with
 its prompt cache warm. Side jobs that need a judgement in milliseconds (is this an injection, which of these three is
 it, which files are near-duplicates) go to the NPU instead of the 125B model. Sidecars read diffs and transcripts
-directly so they never evict the cached prefix. Search runs on CPU against an index built at first query. `./harness setup`
+directly so they never evict the cached prefix. Search runs on the CPU against an index built at first query. `./harness setup`
 installs and starts halogen, gufo, Strata, osmos, CIRU and strix-llama.cpp, and `start.sh` restarts them when they are down;
-every other engine is detected and wired but you run it yourself ([what breaks on another engine](ENGINES.md) is measured, too).
+every other engine is detected and wired but you run it yourself ([what breaks on another engine](ENGINES.md#what-breaks-on-another-engine) is measured, too).
 
 ## Model files
 
@@ -62,19 +62,19 @@ Do not clone the whole model repo: it carries ~190 GB of optional variants and t
 
 - **Space first.** It checks the disk before it asks: with less than ~135 GB free where the files would go (a resume only needs what is missing) it says so and does not offer the download.
 - **Another disk.** `HALOGEN_MODELS=/big/disk/models ./setup.sh` puts the files in `/big/disk/models/halogen-qwen3.8-flash-next`. The folder is remembered (`~/.pi/agent/harness-models-dir`), so the launcher finds the checkpoint later without the variable.
-- **Checked afterwards.** Every file is compared with the repo's own size and sha256 (`scripts/verify-hf.py`), so a cut-short or corrupt file is named instead of failing later as a model that will not load. The sha256 pass takes a few minutes for ~124 GB; a file it already checked and that has not changed is skipped on re-runs (`.hf-verified.json` in the folder), and `HF_VERIFY_HASH=0` checks sizes only. Offline it says it skipped the check. The Qwen weights scripts (`download-stock.sh`, `download-qwen38-27b.sh`, `download-abliterated.sh`) do the same.
+- **Checked afterwards.** Every file is compared with the repo's own size and sha256 (`scripts/verify-hf.py`), so a cut-short or corrupt file is named instead of failing later as a model that will not load. The sha256 pass takes a few minutes for ~124 GB; a file it already checked and that has not changed is skipped on re-runs (`.hf-verified.json` in the folder), and `HF_VERIFY_HASH=0` checks sizes only. Offline, it says it skipped the check. The Qwen weights scripts (`download-stock.sh`, `download-qwen38-27b.sh`, `download-abliterated.sh`) do the same.
 
 ## The NPU
 
 The NPU is not where the big model runs. By default it runs three small models whose whole job is to answer, in 0.1-1 s,
-questions the 125B model would take 5-90 s on, without touching the main model's prompt cache. Halogen exposes them on
+questions the 125B model would take 5-90 s on, without touching the main model's prompt cache. halogen exposes them on
 the same `:8731` server.
 
 | model | how it is called | used by | what it does | measured |
 |---|---|---|---|---|
-| `decider-0.8b` | `/v1/chat/completions` with a `json_schema` enum + logprobs | `triage` | picks one of 2-5 options, returns per-option probabilities | **55 ms warm, ~1.6 s cold** (first call after idle, measured 10-14), 78 % on 18 binary prompts |
+| `decider-0.8b` | `/v1/chat/completions` with a `json_schema` enum + logprobs | `triage` | picks one of 2-5 options, returns per-option probabilities | **55 ms warm, ~1.6 s cold** (first call after idle, measured 10-14), 78% on 18 binary prompts |
 | `qwen3-embedding-0.6b` | `/v1/embeddings` | `dedup_scan` | embeds files for near-duplicate detection | 70 ms/query, 38 files in 8.4 s; low traffic (2 runs logged) and loads on first use, so it costs nothing resident |
-| `qwen3guard-gen-0.6b` | `/v1/moderations` | `auto-guard`, every prompt | flags prompt injection | 207 ms p50 / 285 p95, **42 % recall, 0 % fp, re-verified 10-14** by `bench/guard-canary.py` |
+| `qwen3guard-gen-0.6b` | `/v1/moderations` | `auto-guard`, every prompt | flags prompt injection | 207 ms p50 / 285 p95, **42% recall, 0% fp, re-verified 10-14** by `bench/guard-canary.py` |
 | ~~`qwen3-reranker-0.6b`~~ | `/v1/rerank` | **nothing since v1.1** | ranked the retired NPU search | out of the default launch as of 10-14: 0 calls in the event log |
 
 > [!NOTE]

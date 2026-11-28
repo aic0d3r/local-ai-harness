@@ -29,6 +29,7 @@ halogen is the only engine with NPU tools (guard, triage, dedup).
 
 | engine | decode | prefill | context | notes |
 |---|---|---|---|---|
+| CIRU v1.7.0 (vLLM ROCm, DFlash 2 drafter) | 95.6 t/s short code (tune: 95.4), 64.8 at 32k | ~1,900-2,200 t/s (tune: 2,204) | 1M | bench-v1, 2026-11-28; release NVFP4 + CIRU-fitted final layers (99.35% top-1 vs release, CIRU-reported); the Inkling default |
 | osmos (release NVFP4/MXFP8 pack, 19.6 GB) | 47-48 t/s | ~1,040-1,210 t/s | 1M | bench-v1, 2026-11-23/27 |
 | Strata 0.2.22 image, SQ-20 | 32-39 t/s | ~860-1,400 t/s | 128k | no thinking in Strata's build; tool calls work |
 | strix-llama.cpp (Vulkan, IQ4_NL) | 20 t/s | 324 t/s | | graph split 194 ways; ROCm image kept ~16 CPU cores busy |

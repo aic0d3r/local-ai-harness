@@ -2,8 +2,9 @@
 
 **Install, update and switch local LLM engines and models.**
 
-Run a coding agent on a local model on your own hardware. Built on [pi](https://github.com/earendil-works/pi), for Linux and
-Windows (beta), tuned and measured on AMD Strix Halo.
+Run a coding agent on a local LLM on your own hardware: no API key, your code stays on your machine. Built on
+[pi](https://github.com/earendil-works/pi), for Linux and Windows (beta), tuned and measured on AMD Strix Halo
+(Ryzen AI Max+ 395).
 
 - **Install:** detects your hardware, recommends an engine and model, then installs, starts and tunes it.
 - **Update:** checks for new engine releases; halogen, Strata, gufo and osmos upgrade from the menu and roll back if
@@ -93,7 +94,7 @@ Setup recommends an engine for your hardware. Only Strix Halo is measured here. 
 
 | your hardware | engine | why |
 |---|---|---|
-| **Strix Halo** (Ryzen AI Max, 128 GB unified) | **halogen** | Flash-Next 125B, fastest measured, plus the NPU tools (guard, triage, dedup) |
+| **Strix Halo** (Ryzen AI Max+ 395, 128 GB unified) | **halogen** | Flash-Next 125B, fastest measured, plus the NPU tools (guard, triage, dedup) |
 | Strix Halo, open source | gufo or Strata | Strata decodes faster, gufo prefills faster |
 | Strix Halo, another model | picked per model | Qwen3.6-35B-A3B on **strix-llama.cpp** (85 t/s decode), Qwen3.8-27B on **gufo**, DeepSeek-V4.1-Flash (~768B) on **osmos** at 1M context from one box, Inkling 2 Mini on **CIRU** (96 t/s decode, 2,168 t/s prefill; osmos 47 / 1,107) |
 | **NVIDIA RTX 20-50 / AMD RX 7000-9000, 12 GB+ VRAM** | **[Strata](docs/ENGINES.md#strata-the-pick-for-nvidia-and-amd-desktop-gpus)** | built for it; not measured here. Flash-Next ISTA pack, or [Qwen3.6-35B-A3B](docs/ENGINES.md#other-models-on-strata-and-gufo) from 32 GB |

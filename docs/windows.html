@@ -10,6 +10,9 @@
 <meta property="og:description" content="One PowerShell script wires the pi coding agent to a local Strata engine.">
 <meta property="og:image" content="https://aic0d3r.github.io/local-ai-harness/brand/social-preview.png">
 <meta property="og:url" content="https://aic0d3r.github.io/local-ai-harness/windows.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Local AI Harness">
+<meta name="twitter:card" content="summary_large_image">
 <style>
 body{font:16px/1.6 system-ui,sans-serif;max-width:46rem;margin:0 auto;padding:2rem 1rem;color:#222}
 h1{font-size:2rem;line-height:1.2}h2{font-size:1.4rem}a{color:#1d6fa5}
@@ -18,7 +21,7 @@ pre{overflow-x:auto;padding:.75rem 1rem;background:#f1f1f1;border-radius:6px}
 </style>
 </head>
 <body>
-<p><a href="./">Local AI harness</a></p>
+<p><a href="./">Local AI Harness</a></p>
 <h1>Run a local AI coding agent on Windows with Strata (beta)</h1>
 <p>This harness sets up the <a href="https://github.com/earendil-works/pi">pi</a> coding agent against a local engine. On Windows the engine is <a href="https://github.com/Niko1221/Strata">Strata</a> (or gufo): you install and run it with its own tools, and <code>setup.ps1</code> wires pi to it.</p>
 <h2>Steps</h2>
@@ -29,7 +32,7 @@ pre{overflow-x:auto;padding:.75rem 1rem;background:#f1f1f1;border-radius:6px}
 <pre>git clone https://github.com/aic0d3r/local-ai-harness
 cd local-ai-harness
 powershell -ExecutionPolicy Bypass -File .\setup.ps1</pre>
-No Git yet? Download the repo as a ZIP from GitHub, extract it, and run the second command in that folder.</li>
+No Git yet? Download the repo as a ZIP from GitHub, extract it, and run the last command in that folder.</li>
 <li>Start pi in your project and pick the Strata model.</li>
 </ol>
 <h2>What is tested</h2>
