@@ -324,6 +324,14 @@ assert h.engine_model("gufo") == h.engine_model("halogen") == "flash-next"  # an
 sp = h.entries.model_profile("inkling-2-mini-sq-20", h.PROFILES)  # Strata's build does not think: no effort is sent, the release's temperature stays
 assert sp["reasoning"] is False and "compat" not in sp and "thinkingLevelMap" not in sp and sp["samplingParams"] == {"temperature": 1.0} and sp["maxTokens"] == 4096, sp
 assert h.entries.model_profile("osmos-inkling-2-mini", h.PROFILES)["reasoning"] is True
+# ...and on CIRU, which loads nothing else: Inkling whatever the saved answer, no weights answer, osmos's thinking profile
+assert h.engine_model("ciru") == "inkling2-mini" and h.engine_title("ciru", "ciru-inkling-2-mini") == "CIRU · Inkling 2 Mini"
+assert "Inkling 2 Mini" in h.choices_line("ciru") and "weights" not in h.choices_line("ciru")
+assert h.entries.model_profile("ciru-inkling-2-mini", h.PROFILES) == h.entries.model_profile("osmos-inkling-2-mini", h.PROFILES)
+open(h.MODEL_FILE, "w").write("deepseek\n")
+assert h.engine_model("ciru") == "inkling2-mini" and h.engine_title("ciru", None) == "CIRU · Inkling 2 Mini"
+assert subprocess.run(["bash", os.path.join(h.REPO, "server", "start-ciru.sh"), "--check"], capture_output=True,
+                      env=dict(os.environ, CIRU_MODELS=tempfile.mkdtemp(), CIRU_TAG="v0.0.0")).returncode == 1  # nothing there: the wizard offers --install
 open(h.MODEL_FILE, "w").write(real_model)
 assert h.catalog_id("qwen3.8-flash-next-ud-q4_k_xl") == "flash-next" and h.catalog_id("qwen3.8-flash-next-iq3_xxs") == "flash-next-iq3_xxs"
 assert "weights" in h.choices_line("gufo") and "weights" in h.choices_line("halogen")  # Q4 has an abliterated build too
@@ -591,7 +599,7 @@ npu, plain = {"npu": True, "ram_gb": 121}, {"npu": False, "ram_gb": 121}
 assert h.best_engine(R["flash-next"], npu)["engine"] == "halogen" and h.best_engine(R["flash-next"], plain)["engine"] == "gufo"
 assert h.best_engine(R["flash-next"], {"npu": True, "ram_gb": 64})["engine"] == "gufo"  # halogen needs halogen_min_ram_gb
 assert h.best_engine(R["qwen38-27b"], npu)["engine"] == "gufo" and h.best_engine(R["deepseek"], plain)["engine"] == "osmos"
-assert [e["engine"] for e in R["inkling2"]["engines"]] == ["osmos", "strata"] and h.best_engine(R["inkling2"], plain)["engine"] == "osmos"  # measured here: osmos 47.3 t/s, Strata 36.4
+assert [e["engine"] for e in R["inkling2"]["engines"]] == ["ciru", "osmos", "strata"] and h.best_engine(R["inkling2"], plain)["engine"] == "ciru"  # measured here: CIRU 95.6 t/s, osmos 45-47, Strata 36.4
 assert all(e["engine"] in h.PROFILES["engines"] for r in R.values() if isinstance(r, dict) for e in r.get("engines", []))
 # ask_route saves the model answer, keeps a saved quant of the same family, and offers "pick an engine" as the way out
 saved = {n: getattr(h, n) for n in ("capacity", "hardware", "choose")}
@@ -615,7 +623,7 @@ h.choose = lambda q, o, y, esc=None, notes=(): next(x for x in o if "DeepSeek" i
 # osmos serves two packs now: the DeepSeek route saves its model, so a saved Inkling answer does not start Inkling for it
 assert h.ask_route() == ("osmos", "deepseek") and h.model_pref() == "deepseek" and not h.osmos_inkling()
 h.choose = lambda q, o, y, esc=None, notes=(): next(x for x in o if "Inkling" in x)
-assert h.ask_route() == ("osmos", "inkling2-mini") and h.osmos_inkling()
+assert h.ask_route() == ("ciru", "inkling2-mini") and h.osmos_inkling()  # CIRU first; osmos would serve the same answer
 h.choose = lambda q, o, y, esc=None, notes=(): o[-1]
 assert h.ask_route() is h.ENGINE_MENU
 # Esc in the quant menu returns to the model menu, not out of it
@@ -630,7 +638,7 @@ assert all(len(o) + 2 <= 80 for o in bare), [o for o in bare if len(o) + 2 > 80]
 # model menus: one row per model in aligned columns, this engine's tag only, 80 columns whichever row is current
 # (in an 80-column window the current tag moves to a note, as the route menu's recommended one does)
 real_fits, h.fits = h.fits, lambda o: all(len(x) + 2 <= 80 for x in o)
-for e in ("strata", "gufo", "osmos", "llamacpp"):
+for e in ("strata", "gufo", "osmos", "llamacpp", "ciru"):
     ids = [m for m in h.catalog() if e in h.catalog()[m]["engines"]]
     for c in ids:
         rows, notes = h.model_rows(ids, e, c)
@@ -643,12 +651,12 @@ assert h.quant_of("qwen38-27b-q8") == "UD-Q8_K_XL" and h.quant_of("nope") == ""
 h.fits = lambda o: all(len(x) + 2 <= 80 for x in o)  # an 80-column window
 h.choose = lambda q, o, y, esc=None, notes=(): routes_seen.append((q, o, notes)) or h.BACK
 assert h.ask_route(h.BACK) is h.BACK and "first = recommended" in routes_seen[-1][2][0] and "recommended" not in routes_seen[-1][1][0]
-# the model you run stays on your engine (Inkling on Strata, though osmos is first for it), tagged current, the faster one named
+# the model you run stays on your engine (Inkling on Strata, though CIRU is first for it), tagged current, the faster one named
 saved_active, h.active, h.MODEL_FILE_SAVED = h.active, (lambda: {"engine": "strata"}), open(h.MODEL_FILE).read()
 open(h.MODEL_FILE, "w").write("inkling2-mini\n")
 h.ask_route(h.BACK)
 ink = next(o for o in routes_seen[-1][1] if o.startswith("Inkling"))
-assert "strata" in ink and ink.endswith("current") and any("stays on strata" in n and "osmos" in n for n in routes_seen[-1][2]), routes_seen[-1]
+assert "strata" in ink and ink.endswith("current") and any("stays on strata" in n and "CIRU" in n for n in routes_seen[-1][2]), routes_seen[-1]
 # the text rule: the question is one line, at most 2 notes under it
 assert all(len(q) <= 78 and len(n) <= 2 for q, _, n in routes_seen[-2:]), routes_seen[-2:]
 h.choose = lambda q, o, y, esc=None, notes=(): next(x for x in o if x.startswith("Inkling"))

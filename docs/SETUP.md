@@ -17,7 +17,7 @@ The full walkthrough of `./setup.sh`, the `./harness` commands and `./start.sh`.
    first) shows the installed version, the measured decode speed of the model each would run, which one is current, running
    (and its model) or recommended, what you lose off halogen (the NPU tools) and which running engine a start would stop.
    llama.cpp, LM Studio, Ollama and vLLM get their own row only while they answer; otherwise one "Another server on this
-   box" row lists them. Picking an engine that is down offers to start it (halogen, gufo, Strata, osmos, strix-llama.cpp), asks before
+   box" row lists them. Picking an engine that is down offers to start it (halogen, gufo, Strata, osmos, CIRU, strix-llama.cpp), asks before
    stopping the one holding the memory, and waits until it answers. On a fresh box with no engine running the menu still
    shows, halogen first on an NPU box, and picking halogen without a checkpoint offers the ~124 GB download
    ([`scripts/download-halogen.sh`](../scripts/download-halogen.sh)). Other engines print how to start them. A start you decline (or one this
@@ -41,7 +41,7 @@ The full walkthrough of `./setup.sh`, the `./harness` commands and `./start.sh`.
    - whether to run the **ling-tiny sidecar**, asked on the first wizard run, then shown in the summary and changed in `./harness config` (`--reconfigure` asks again) (default yes where the GPU has 24 GB or more, no on smaller cards; it holds ~8 GiB of GPU memory, and "no" means the main
      model writes commits and summaries, with compaction blocking on it; non-interactive: `./setup.sh --no-sidecar` /
      `--sidecar`);
-   - the engine update check (any engine with a known release source: halogen, gufo, Strata, osmos, plain llama.cpp, vLLM,
+   - the engine update check (any engine with a known release source: halogen, gufo, Strata, osmos, CIRU, plain llama.cpp, vLLM,
      Ollama; strix-llama.cpp runs an image pinned by digest, so it has none).
      On halogen, gufo, Strata and osmos it offers the safe upgrade right away (`scripts/upgrade-<engine>.sh`: update, restart,
      check, roll back on failure); on the others it prints the upgrade command. If an upgrade passes its checks but runs worse, the
@@ -82,7 +82,7 @@ also works after setup: startup defaults point at the engine you chose, and exis
 | `./harness setup` | the wizard above |
 | `./harness detect` | list hardware and running engines, change nothing |
 | `./harness recommend` | pick an engine and model for the detected hardware |
-| `./harness use <engine>[/<model>]` | switch pi to another engine or model; in a terminal, if that engine is down (halogen, gufo, Strata, osmos, strix-llama.cpp) it asks to stop the engine holding the GPU memory, download what is missing, and starts it. Without a terminal it only switches to what is already up |
+| `./harness use <engine>[/<model>]` | switch pi to another engine or model; in a terminal, if that engine is down (halogen, gufo, Strata, osmos, CIRU, strix-llama.cpp) it asks to stop the engine holding the GPU memory, download what is missing, and starts it. Without a terminal it only switches to what is already up |
 | `./harness status` | engine up/down, model, NPU, saved tuning, sidecar state |
 | `./harness config` | menu of saved answers (engine, model, weights, agent, sidecar, voice, update check, sudo hints) plus a `running` row that stops engines; change one, applied right away |
 | `./harness tune` | re-run the speed probe and re-size the limits |
@@ -102,7 +102,7 @@ also works after setup: startup defaults point at the engine you chose, and exis
 
 `start.sh` (= `./harness up`, then pi) does five things:
 
-1. Starts the engine you picked if it is down (halogen, gufo, Strata, osmos, strix-llama.cpp). It asks first if another
+1. Starts the engine you picked if it is down (halogen, gufo, Strata, osmos, CIRU, strix-llama.cpp). It asks first if another
    engine holds the GPU memory, and never launches one engine beside another that holds it.
 2. Re-checks the install quietly. Only problems print; the full log is `~/.pi/agent/setup.log`.
 3. Shows the update notice with the upgrade offer.

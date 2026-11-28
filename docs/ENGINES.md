@@ -1,7 +1,7 @@
-# Inference engines: halogen, gufo, Strata, osmos, strix-llama.cpp and the rest
+# Inference engines: halogen, gufo, Strata, osmos, CIRU, strix-llama.cpp and the rest
 
 Any OpenAI-compatible server (or cloud provider) works with pi. Only Strix Halo was measured here. On Strix Halo,
-**halogen and gufo are the best options**. The harness can install and start halogen, gufo, Strata, osmos and
+**halogen and gufo are the best options**. The harness can install and start halogen, gufo, Strata, osmos, CIRU and
 strix-llama.cpp (`./setup.sh`, `./harness use`); for a plain llama.cpp `llama-server`, vLLM, Ollama and LM Studio it
 detects what is running and wires pi to it, and you start them yourself. strix-llama.cpp (engine id `llamacpp`) is
 [halo-box's Strix Halo fork](https://github.com/halo-box/strix-llama.cpp) in Docker and only recommended on Strix Halo;
@@ -19,11 +19,12 @@ llama.cpp).
 | **gufo** | open engine, Flash-Next and Qwen3.8-27B (DFlash2 draft), vision | open-source Flash-Next, the **27B** |
 | **Strata** | Docker image or source, ISTA packs; NVIDIA and AMD desktop GPUs too | open source, smaller boxes, Inkling 2 Mini at 128K |
 | **osmos** (libosmos) | streams experts from the SSD | DeepSeek-V4.1-Flash (~768B) or Inkling 2 Mini at **1M ctx** on one box |
+| **CIRU** | vLLM 0.34 ROCm + CIRU's native gfx1151 HIP kernels + Inco AI's DFlash 2 drafter; Strix Halo only, Inkling 2 Mini only | the fastest **Inkling 2 Mini**, 1M ctx, vision ([below](#ciru-inkling-2-mini)) |
 
 **Which engine for which model (Strix Halo).** Setup asks the model first and takes the first usable engine of its route
 (`routes` in `config/profiles.json`, each with the numbers behind the order and whether they were measured here or only reported):
 Flash-Next: halogen (NPU + 110 GB RAM) > gufo > Strata; Qwen3.6-35B-A3B: strix-llama.cpp > Strata; Qwen3.8-27B: gufo (DFlash2 draft); DeepSeek-V4.1-Flash: osmos;
-Inkling 2 Mini: osmos > Strata (both measured here).
+Inkling 2 Mini: CIRU > osmos > Strata (all measured here).
 The 27B order is measured here (2026-11-18, `bench-v1`, UD-Q4_K_XL + DFlash2, 262k ctx, back to back): gufo 0.32.0 decodes
 40.2 t/s code / 30.2 prose / 28.0 at 8K / 21.6 at 32K and prefills 453-464 (401 at 32K); halo-box llama.cpp with
 `start-qwen38.sh`'s flags (4 drafts, ub 4096, f16 KV) 34.0 / 27.9 / 27.0 / 23.0 and 408-413 (360). halo-box's own 27B recipe
@@ -248,6 +249,32 @@ rebuilds it and waits until it serves before it exits. The pack on disk is not t
 installer's layout changes are opt-in). Uncommitted edits to tracked files in the checkout are kept; if the release changes
 the same lines the checkout is refused before osmos is stopped. A checkout whose branch holds commits the release does not
 contain is not touched either. Tested against a fake libosmos in `tests/upgrade-osmos.test.sh`.
+
+## CIRU: Inkling 2 Mini
+
+[CIRU](https://github.com/ciru-ai/Inkling-2-Mini-CIRU-Halo-Agent-gfx1151) runs Inkling 2 Mini on vLLM 0.34 (ROCm 10
+wheels) with its own prebuilt gfx1151 HIP kernels, fitted final-layer weights and Inco AI's
+[DFlash 2](https://huggingface.co/incoai/Inkling-2-Mini-DFlash2) drafter. It runs on Strix Halo only and serves only Inkling 2 Mini, so picking
+it means Inkling whatever the saved model is. `server/start-ciru.sh --install` (the wizard runs it after asking) clones the
+runtime at its pinned tag (`CIRU_TAG`, default v1.7.0), creates `~/.venvs/inkling-halo` (~20 GB, `uv`), downloads
+the weights and drafter (~23 GB, resumable) and runs CIRU's installer, which checks every checksum. No sudo. It serves
+`ciru-inkling-2-mini` on :18753 at 1M context with a 48 GiB KV pool (`CIRU_CTX`, `CIRU_KV_MIB`), tools and vision on.
+It uses ~86 GiB of memory, so only one engine can be loaded at a time. Thinking levels map onto Inkling's
+`reasoning_effort`, as on osmos (`off` sends `none`, which shortens the thinking but does not turn it off).
+
+Measured here 2026-11-28, `bench-v1`, same day and power profile, greedy (osmos v0.19.0 after `scripts/upgrade-osmos.sh`):
+
+| cell | CIRU v1.7.0 (DFlash 2) | osmos v0.19.0 (inkling-2-mini pack) | osmos v0.18.2 |
+|---|---|---|---|
+| decode, short code | **95.6** t/s | 46.8 | 45.0 |
+| decode, prose | **58.0** | 39.3 | 35.1 |
+| prefill 2K / 8K / 32K | **2,197 / 2,168 / 1,904** | 1,105 / 1,107 / 996 | 1,024 / 1,067 / 978 |
+| decode at 2K / 8K / 32K | **81.2 / 75.5 / 64.8** | 48.8 / 49.1 / 44.9 | 45.8 / 44.6 / 44.1 |
+
+The gap narrows with depth (osmos keeps its decode flat), but CIRU is still ahead at 32K. Its decode varies more from run
+to run (13 t/s spread on short code) because DFlash 2's acceptance depends on the text. Cold start takes ~100 s.
+Updates: the update check compares the checkout's tag with CIRU's latest GitHub release. There is no upgrader script: run
+`CIRU_TAG=vX.Y.Z server/start-ciru.sh --install` and restart it.
 
 ## Any OpenAI-compatible server: a custom endpoint
 

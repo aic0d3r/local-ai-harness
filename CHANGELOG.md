@@ -6,6 +6,7 @@
 ## Unreleased
 
 ### Added
+- CIRU is a new engine for Inkling 2 Mini on Strix Halo (vLLM ROCm with CIRU's gfx1151 kernels and the DFlash 2 drafter), and the Inkling route now picks it first. Measured here with `bench-v1` in one session, it is about twice as fast as osmos v0.19.0: 95.6 vs 46.8 t/s decode on short code, 2,168 vs 1,107 t/s prefill at 8K, and 64.8 vs 44.9 t/s decode at 32K. 1M context, vision and tools are on. `server/start-ciru.sh --install` sets it up without sudo (a ~20 GB venv plus ~23 GB of weights; the wizard asks first). `scripts/stop-all.sh` stops it, and the update check follows its GitHub releases. There is no upgrader script: `CIRU_TAG=vX.Y.Z server/start-ciru.sh --install`. See docs/ENGINES.md#ciru-inkling-2-mini.
 - `prompt-lint` extension and `/trim`: flags instruction fluff that piles up in AGENTS.md, APPEND_SYSTEM.md and skill descriptions. It finds references to MCP servers or tools that are missing or disabled, backticked paths that no longer exist, rules repeated near word-for-word across loaded files, and instruction files over 10% of the cold prompt. `/trim` shows a deletion-only diff and applies it only after a yes, keeping `.bak` copies. Lines with MUST, NEVER or "hard rule" are never proposed. A footer line appears at the first prompt only when there are findings `/trim` hasn't shown yet; the prompt itself is never touched. No model call. Off: `PROMPT_LINT_DISABLED=1`.
 
 ### Changed
@@ -13,6 +14,7 @@
 - `./setup.sh --doctor` prints the Lemonade version and says when GitHub has a newer release, with the update command for pacman or snap. Lemonade stays the native package; the OS still owns its updates.
 
 ### Fixed
+- `./harness tune` and `bench` read 0 t/s decode on vLLM 0.34+, which streams thinking as `delta.reasoning`, not `reasoning_content`. Both fields count now.
 - `scripts/uninstall.sh` now stops and disables `lemond.service`, the unit the package ships. Before, it only handled the old `lemonade-server.service`.
 - The `halogen-fabric-clock` unit kept the chip out of its deepest sleep state ("Last suspend didn't reach deepest state", fans running in suspend): it re-held the clock at boot and after every resume. It now holds at boot only, and a new sleep hook (`config/systemd/halogen-fabric-clock.sleep`) gives the clock back before suspend and holds it again on resume, only if it was held going in. That also covers suspending while halogen runs. Setup and `--doctor` no longer suggest the unit at all: the halogen container holds the clock itself while it runs, and nothing else in the harness uses the NPU (voice never did: Lemonade's whisper NPU backend is Windows-only). Installed it from an earlier hint? Remove it: `sudo systemctl disable halogen-fabric-clock.service && sudo halogen-fabric-clock release`.
 

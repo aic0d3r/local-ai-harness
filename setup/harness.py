@@ -158,10 +158,11 @@ def osmos_inkling():
 
 
 def engine_model(engine):
-    """The model the saved answer means for this engine: the answer when this engine can load it, else Flash-Next
-    (halogen always serves its own Flash-Next checkpoint)."""
+    """The model the saved answer means for this engine: the answer when this engine can load it, else the one model it
+    loads (CIRU: Inkling 2 Mini), else Flash-Next (halogen always serves its own Flash-Next checkpoint)."""
     m = model_pref()
-    return m if engine in catalog().get(m, {}).get("engines", ()) else DEFAULT_MODEL
+    only = [k for k, v in catalog().items() if engine in v.get("engines", ())]
+    return m if engine in catalog().get(m, {}).get("engines", ()) else only[0] if len(only) == 1 else DEFAULT_MODEL
 
 
 def ctx_for_spare(spare):
@@ -842,7 +843,7 @@ def build_entry(engine, model_id, ctx, tuned):
     if not ctx:
         print(f"  ! {ename(engine)} did not report its context window; assuming 32768. If it runs a different size, set contextWindow for {model_id} in models.json")
         ctx = 32768
-    p = entries.build_provider(f"http://127.0.0.1:{e['port']}/v1", engine, model_id, ctx, server_input(e["port"]), PROFILES,
+    p = entries.build_provider(f"http://127.0.0.1:{e['port']}/v1", engine, model_id, ctx, e.get("input") or server_input(e["port"]), PROFILES,  # input: vLLM does not report it
                                max_tokens=tuned.get("maxTokens"))
     if engine_key(engine):
         p["apiKey"] = engine_key(engine)  # Strata's Docker image rejects anything else; pi sends it as the bearer token
@@ -1500,6 +1501,12 @@ def plan_start(engine, running, ask_start=True, ask=True):
                       "fetched and checked by libosmos's installer"):
             return None
         plan["osmos_pack"] = True
+    if engine == "ciru" and subprocess.run(["bash", os.path.join(REPO, c["script"]), "--check"], capture_output=True).returncode:
+        free = shutil.disk_usage(os.path.expanduser("~")).free // 2**30
+        if not yes(f"Install CIRU? its vLLM ROCm runtime (a Python venv, ~20 GB) and Inkling 2 Mini with the DFlash 2 drafter (~23 GB), "
+                   f"{free} GB free, no sudo; CIRU's installer checks every checksum"):
+            return None
+        plan["ciru_install"] = True
     gb = weights_download_gb(engine) if engine in WEIGHTS_ENGINES and not own and weights_pref() != "stock" else 0
     if gb:
         free = shutil.disk_usage(os.path.expanduser("~")).free // 2**30
@@ -1529,6 +1536,8 @@ def prepare_start(plan, running):
     if g27 and subprocess.run(["bash", os.path.join(REPO, "scripts", "download-qwen38-27b.sh"), "--yes"], env=dict(os.environ, GUFO_FAMILY=g27)).returncode:
         return False
     if plan.pop("osmos_pack", False) and subprocess.run(["bash", os.path.join(REPO, PROFILES["engines"]["osmos"]["script"]), "--install"]).returncode:
+        return False
+    if plan.pop("ciru_install", False) and subprocess.run(["bash", os.path.join(REPO, PROFILES["engines"]["ciru"]["script"]), "--install"]).returncode:
         return False
     sq = plan.pop("stock", False)
     if sq and subprocess.run(["bash", os.path.join(REPO, "scripts", "download-stock.sh"), "--yes"], env=dict(os.environ, GUFO_QUANT=sq)).returncode:
@@ -2476,8 +2485,8 @@ def engine_title(eng, mod):
     """`engine · model` for people: an engine that serves one model names it (osmos: DeepSeek-V4.1-Flash (osmos-evo)), the rest name
     the model they run. The raw id stays what the server and pi use."""
     cfg = PROFILES["engines"].get(eng, {})
-    entry = catalog().get(mod or "") or (catalog()[catalog_id(mod)] if eng in ("gufo", "strata", "osmos") and mod else {})  # gufo serves qwen3.8-27b-q8 for qwen38-27b-q8
-    pack = eng == "osmos" and eng in entry.get("engines", ())  # osmos-inkling-2-mini: a pack named in the catalog; else its DeepSeek model_label
+    entry = catalog().get(mod or "") or (catalog()[catalog_id(mod)] if eng in ("gufo", "strata", "osmos", "ciru") and mod else {})  # gufo serves qwen3.8-27b-q8 for qwen38-27b-q8
+    pack = eng in ("osmos", "ciru") and eng in entry.get("engines", ())  # osmos-inkling-2-mini: a pack named in the catalog; else its DeepSeek model_label
     name = (pack and entry["label"].split(" (")[0]) or cfg.get("model_label") or (entry.get("label") or mod or "").split(" (")[0]  # catalog labels carry a parenthesis of notes
     return f"{ename(eng)} · {name or 'no model'}"
 
@@ -2491,7 +2500,7 @@ def versioned_title(eng, mod):
 def choices_items(eng=None):
     """Every saved answer as its own item. An engine that serves one model only (osmos: DeepSeek-V4.1-Flash) names it, so the
     saved preference for the Qwen engines is not shown as what osmos runs."""
-    ink = eng == "osmos" and osmos_inkling()
+    ink = eng == "ciru" or eng == "osmos" and osmos_inkling()
     model = model_name("inkling2-mini") if ink else PROFILES["engines"].get(eng or "", {}).get("model_label") or model_pref()
     # the weights answer means nothing to a model without an abliterated build (the 27B, Qwen3.6, Inkling)
     weights = [] if ink or eng in ("gufo", "strata", "llamacpp") and engine_model(eng) not in ABLITERATED else [f"weights {weights_pref()}"]
@@ -2824,6 +2833,7 @@ def cmd_setup(a):
              f"install Strata for the {weights_pref()} weights (" + ("orca-uncensored in place" if weights_pref() == "abliterated" else "shared stock UD-Q4_K_XL in place") + ")"] if plan and plan.get("install") == "strata" else []) + (
             [f"download {catalog()[plan['g27']]['label'].split(' (')[0]} (~{plan.get('g27_gb', catalog()[plan['g27']]['download_gb'])} GB, {free}, resumable)"] if plan and plan.get("g27") else []) + (
             [f"download osmos's Inkling 2 Mini pack (~{catalog()['inkling2-mini']['download_gb']} GB, {free})"] if plan and plan.get("osmos_pack") else []) + (
+            [f"install CIRU and Inkling 2 Mini (~43 GB with its venv, {free}, resumable)"] if plan and plan.get("ciru_install") else []) + (
             [f"download the stock {plan['stock']} (~{quant_gb(plan['stock'])} GB, {free}, resumable)"] if plan and plan.get("stock") else []) + (
             [f"download the abliterated {ename(eng)} weights (~{plan.get('weights_gb')} GB, {free}, resumable"
              + ("; gated: accept its terms on Hugging Face and run `hf auth login` first)" if eng == "strata" else ")")] if plan and plan.get("weights") else []) + (
@@ -3034,7 +3044,7 @@ def cmd_config(a):
             notes.append("! osmos runs the other weights until its next start")
         elif own:
             notes.append(f"{ename(eng)} runs {engine_title(eng, p.get('model')).split(' · ', 1)[1]} only; other engines offer other models")
-        no_abl = eng in ("gufo", "strata", "llamacpp") and engine_model(eng) not in ABLITERATED or eng == "osmos" and osmos_inkling()
+        no_abl = eng in ("gufo", "strata", "llamacpp") and engine_model(eng) not in ABLITERATED or eng == "osmos" and osmos_inkling() or eng == "ciru"
         live = {e["engine"]: e["port"] for e in running_engines()}
         ours = [e for e in live if PROFILES["engines"][e].get("script")]  # vllm, ollama, lmstudio, your own llama-server: not ours to stop
         tiny = sidecar_up()
