@@ -3,7 +3,9 @@
 <!-- One block per section per release, in the order Added, Changed, Fixed. Add new entries to the
      existing block instead of opening a second one, so a release never has two "### Fixed" lists. -->
 
-## 2.3.1 - unreleased
+## 2.4.0 - 2026-11-28
+
+UX polish: setup and `./harness config` menus redesigned with aligned columns, status words and per-row speeds; shorter engine upgrade offers with before/after speed; one-step rollback and cleanup of old engine versions.
 
 ### Added
 - `./harness config` has a `rollback` row after a halogen, gufo or strix-llama.cpp upgrade that passed its checks but runs worse: it restores the version from before the upgrade (halogen also gets its old NPU files back) and restarts the engine if it is running. Happy with the new version instead? The same row offers "Keep, delete the previous one": it removes the previous image (and halogen's ~15 GB NPU backup) and the row. One step back only; upgrades now store that previous version (`PREV_<pin>` in `harness-pins`), so the row first appears after your next upgrade. Strata (Docker) and osmos too: Strata still floats on its `latest-<flavor>` tag, and a rollback pins the previous image digest until the next upgrade (a source install keeps the manual `git checkout`); an osmos rollback runs `scripts/upgrade-osmos.sh <previous tag>` (rebuild + checks), and its "Keep" only hides the row (osmos builds in place: nothing to delete).
